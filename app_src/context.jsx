@@ -665,7 +665,7 @@ const reducer = (state, action) => {
 
   const needsStyleProcessing = !state.initiated || stylesChanged || foldersChanged;
   const needsLineProcessing = needsStyleProcessing || textChanged ||
-    ignoreLinePrefixesChanged || ignoreTagsChanged || currentFolderTagPriorityChanged || imagesChanged;
+    ignoreLinePrefixesChanged || ignoreTagsChanged || currentFolderTagPriorityChanged || imagesChanged || styleIdChanged;
 
   // Phase 1: Style/folder validation and sorting (only when styles or folders changed)
   if (needsStyleProcessing) {
