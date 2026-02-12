@@ -10,6 +10,61 @@ import { useContext } from "../../context";
 
 const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+// Extracted memoized line component to avoid re-rendering every line on each render
+const LineItem = React.memo(function LineItem({ line, direction, isCurrent, images, dispatch, renderHighlightedText, lineNum }) {
+  const className = "text-line" +
+    (line.ignore ? " m-empty" : "") +
+    (isCurrent ? " m-current" : "") +
+    (line.rawText.match(/Page [0-9]+/i) ? " m-page" : "");
+
+  const handleSelect = React.useCallback(() => {
+    dispatch({ type: "setCurrentLineIndex", index: line.rawIndex });
+  }, [dispatch, line.rawIndex]);
+
+  const handleInsert = React.useCallback(() => {
+    setActiveLayerText(line.text, null, direction);
+    dispatch({ type: "nextLine", add: true });
+  }, [dispatch, line.text, direction]);
+
+  return (
+    <div className={className}>
+      <div className="text-line-num">{lineNum}</div>
+      <div className="text-line-select" title={line.ignore ? "" : locale.selectLine}>
+        {line.ignore ? " " : <FiTarget size={14} onClick={handleSelect} />}
+      </div>
+      <div className="text-line-text" dir={direction}>
+        {line.ignorePrefix ? (
+          <React.Fragment>
+            <span className="text-line-ignore-prefix">{line.ignorePrefix}</span>
+            {renderHighlightedText(line.rawText.slice(line.ignorePrefix.length))}
+          </React.Fragment>
+        ) : line.stylePrefix ? (
+          <React.Fragment>
+            <span className="text-line-style-prefix" style={{ background: line.style?.prefixColor || config.defaultPrefixColor }}>
+              {line.stylePrefix}
+            </span>
+            {renderHighlightedText(line.rawText.slice(line.stylePrefix.length))}
+          </React.Fragment>
+        ) : (
+          renderHighlightedText(line.rawText)
+        )}
+      </div>
+      <div className="text-line-insert" title={line.ignore ? "" : locale.insertText}>
+        {line.ignore ? " " : <FiArrowRightCircle size={14} onClick={handleInsert} />}
+      </div>
+    </div>
+  );
+});
+LineItem.propTypes = {
+  line: PropTypes.object.isRequired,
+  direction: PropTypes.string.isRequired,
+  isCurrent: PropTypes.bool.isRequired,
+  images: PropTypes.array.isRequired,
+  dispatch: PropTypes.func.isRequired,
+  renderHighlightedText: PropTypes.func.isRequired,
+  lineNum: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+};
+
 const TextBlock = React.memo(function TextBlock() {
   const context = useContext();
   const direction = context.state.direction || "ltr";
@@ -17,7 +72,10 @@ const TextBlock = React.memo(function TextBlock() {
   const [focused, setFocused] = React.useState(false);
   const lastOpenedPath = React.useRef(null);
   const textAreaRef = React.useRef(null);
-  React.useEffect(resizeTextArea);
+
+  // Fix: only resize when text changes, not on every render
+  React.useEffect(resizeTextArea, [context.state.text]);
+
   React.useEffect(() => {
     scrollToLine(context.state.currentLineIndex, 1000);
   }, [context.state.currentLineIndex]);
@@ -31,6 +89,13 @@ const TextBlock = React.memo(function TextBlock() {
     const pattern = ignoreTags.map((tag) => escapeRegExp(tag)).join("|");
     return pattern || null;
   }, [ignoreTags]);
+
+  // Memoize the RegExp so it's not recreated on every renderHighlightedText call
+  const ignoreTagsRegex = React.useMemo(() => {
+    if (!ignoreTagsPattern) return null;
+    return new RegExp(`(${ignoreTagsPattern})`, "g");
+  }, [ignoreTagsPattern]);
+
   const renderMarkdownText = React.useCallback(
     (text, keyPrefix = "md") => {
       if (!markdownEnabled) return text;
@@ -72,16 +137,16 @@ const TextBlock = React.memo(function TextBlock() {
     },
     [markdownEnabled]
   );
+
   const renderHighlightedText = React.useCallback(
     (text) => {
       if (text === undefined || text === null || text === "") {
         return <span>{" "}</span>;
       }
-      if (!ignoreTagsPattern) {
+      if (!ignoreTagsRegex) {
         return <span>{renderMarkdownText(text)}</span>;
       }
-      const regex = new RegExp(`(${ignoreTagsPattern})`, "g");
-      const parts = text.split(regex);
+      const parts = text.split(ignoreTagsRegex);
       const nodes = parts.map((part, index) => {
         if (!part) return null;
         if (index % 2 === 1) {
@@ -103,7 +168,7 @@ const TextBlock = React.memo(function TextBlock() {
       }
       return nodes;
     },
-    [ignoreTagsPattern, renderMarkdownText]
+    [ignoreTagsRegex, renderMarkdownText]
   );
 
   React.useEffect(() => {
@@ -130,34 +195,26 @@ const TextBlock = React.memo(function TextBlock() {
     }
   }, [context.state.currentLineIndex, context.state.autoClosePSD, context.state.images, context.state.lines]);
 
-  let currentPage = 0;
-
-  const classNameLine = (line) => {
-    let style = "text-line";
-    if (line.ignore) {
-      style += " m-empty";
-    }
-    if (context.state.currentLineIndex === line.rawIndex) {
-      style += " m-current";
-    }
-    if (line.rawText.match(/Page [0-9]+/i)) {
-      style += " m-page";
-    }
-    return style;
-  };
-
-  const getTextLineNum = (line) => {
-    if (line.ignore) {
-      const page = line.rawText.match(/Page ([0-9]+)/i);
-      if (page && context.state.images[page[1] - 1]) {
-        const currentImage = context.state.images[page[1] - 1];
-        currentPage = context.state.images.indexOf(currentImage);
-        return currentImage.name;
+  // Precompute line numbers (handles the cumulative page counter)
+  const linesWithNums = React.useMemo(() => {
+    let currentPage = 0;
+    return context.state.lines.map((line) => {
+      let lineNum;
+      if (line.ignore) {
+        const page = line.rawText.match(/Page ([0-9]+)/i);
+        if (page && context.state.images[page[1] - 1]) {
+          const currentImage = context.state.images[page[1] - 1];
+          currentPage = context.state.images.indexOf(currentImage);
+          lineNum = currentImage.name;
+        } else {
+          lineNum = " ";
+        }
+      } else {
+        lineNum = line.index;
       }
-      return " ";
-    }
-    return line.index;
-  };
+      return { line, lineNum };
+    });
+  }, [context.state.lines, context.state.images]);
 
   const handlePaste = React.useCallback(
     (event) => {
@@ -188,44 +245,27 @@ const TextBlock = React.memo(function TextBlock() {
     [context.state.text, context.dispatch, markdownEnabled]
   );
 
+  const handleTextChange = React.useCallback(
+    (e) => context.dispatch({ type: "setText", text: e.target.value }),
+    [context.dispatch]
+  );
+  const handleFocus = React.useCallback(() => setFocused(true), []);
+  const handleBlur = React.useCallback(() => setFocused(false), []);
+
   return (
     <React.Fragment>
       <div className="text-lines">
-        {context.state.lines.map((line) => (
-          <div key={line.rawIndex} className={classNameLine(line, context)}>
-            <div className="text-line-num">{getTextLineNum(line)}</div>
-            <div className="text-line-select" title={line.ignore ? "" : locale.selectLine}>
-              {line.ignore ? " " : <FiTarget size={14} onClick={() => context.dispatch({ type: "setCurrentLineIndex", index: line.rawIndex })} />}
-            </div>
-            <div className="text-line-text" dir={direction}>
-              {line.ignorePrefix ? (
-                <React.Fragment>
-                  <span className="text-line-ignore-prefix">{line.ignorePrefix}</span>
-                  {renderHighlightedText(line.rawText.slice(line.ignorePrefix.length))}
-                </React.Fragment>
-              ) : line.stylePrefix ? (
-                <React.Fragment>
-                  <span className="text-line-style-prefix" style={{ background: line.style?.prefixColor || config.defaultPrefixColor }}>
-                    {line.stylePrefix}
-                  </span>
-                  {renderHighlightedText(line.rawText.slice(line.stylePrefix.length))}
-                </React.Fragment>
-              ) : (
-                renderHighlightedText(line.rawText)
-              )}
-            </div>
-            <div className="text-line-insert" title={line.ignore ? "" : locale.insertText}>
-              {line.ignore ? " " : (
-                <FiArrowRightCircle
-                  size={14}
-                  onClick={() => {
-                    setActiveLayerText(line.text, null, direction);
-                    context.dispatch({ type: "nextLine", add: true });
-                  }}
-                />
-              )}
-            </div>
-          </div>
+        {linesWithNums.map(({ line, lineNum }) => (
+          <LineItem
+            key={line.rawIndex}
+            line={line}
+            direction={direction}
+            isCurrent={context.state.currentLineIndex === line.rawIndex}
+            images={context.state.images}
+            dispatch={context.dispatch}
+            renderHighlightedText={renderHighlightedText}
+            lineNum={lineNum}
+          />
         ))}
       </div>
       <div className="text-area-overlay" dir={direction}>
@@ -236,10 +276,10 @@ const TextBlock = React.memo(function TextBlock() {
         className="text-area"
         dir={direction}
         value={context.state.text}
-        onChange={(e) => context.dispatch({ type: "setText", text: e.target.value })}
+        onChange={handleTextChange}
         onPaste={handlePaste}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
       />
       {!context.state.lines.length && !focused && (
         <div className="text-message" dir={direction}>

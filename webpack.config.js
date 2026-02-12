@@ -1,6 +1,5 @@
 const MergeIntoSingleFilePlugin = require('webpack-merge-and-include-globally');
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
-const LodashWebpackPlugin = require('lodash-webpack-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const postcssPresetEnv = require('postcss-preset-env');
 const autoprefixer = require('autoprefixer');
@@ -43,10 +42,7 @@ const devConfig = {
                 test: /\.jsx?$/,
                 exclude: /node_modules/,
                 use: {
-                    loader: 'babel-loader',
-                    options: {
-                        plugins: ['lodash']
-                    }
+                    loader: 'babel-loader'
                 }
             }, {
                 test: /\.css$/,
@@ -91,7 +87,6 @@ const devConfig = {
         ]
     },
     plugins: [
-        new LodashWebpackPlugin(),
         new HtmlWebpackPlugin({
             template: './app_src/index.html',
             filename: 'index.html'
@@ -113,10 +108,7 @@ const prodConfig = {
                 test: /\.jsx?$/,
                 exclude: /node_modules/,
                 use: {
-                    loader: 'babel-loader',
-                    options: {
-                        plugins: ['lodash']
-                    }
+                    loader: 'babel-loader'
                 }
             }, {
                 test: /\.css$/,
@@ -155,7 +147,6 @@ const prodConfig = {
         ]
     },
     plugins: [
-        new LodashWebpackPlugin(),
         new HtmlWebpackPlugin({
             template: './app_src/index.html',
             filename: 'index.html',

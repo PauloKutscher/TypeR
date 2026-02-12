@@ -1,7 +1,7 @@
 import "./editStyle.scss";
 
-import _ from "lodash";
 import React from "react";
+import deepClone from "../../deepClone";
 import PropTypes from "prop-types";
 import { FiCopy, FiX, FiMinus } from "react-icons/fi";
 import { TiSortAlphabetically } from "react-icons/ti";
@@ -17,41 +17,7 @@ import { SketchPicker } from "react-color";
 import config from "../../config";
 import { locale, nativeAlert, nativeConfirm, getUserFonts, getActiveLayerText, rgbToHex, getDefaultStyle, getDefaultStroke } from "../../utils";
 import { useContext } from "../../context";
-
-const buildFolderTree = (folders) => {
-  const map = new Map();
-  (folders || []).forEach((folder) => {
-    map.set(folder.id, { ...folder, children: [] });
-  });
-  const roots = [];
-  map.forEach((folder) => {
-    if (folder.parentId && map.has(folder.parentId)) {
-      map.get(folder.parentId).children.push(folder);
-    } else {
-      roots.push(folder);
-    }
-  });
-  const sortRecursive = (nodes) => {
-    nodes.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-    nodes.forEach((node) => sortRecursive(node.children));
-  };
-  sortRecursive(roots);
-  return roots;
-};
-
-const flattenFolderTree = (nodes, parents = [], depth = 0) => {
-  const list = [];
-  nodes.forEach((node) => {
-    const breadcrumb = parents.concat(node.name);
-    list.push({
-      id: node.id,
-      depth,
-      label: breadcrumb.join(' / '),
-    });
-    list.push(...flattenFolderTree(node.children || [], breadcrumb, depth + 1));
-  });
-  return list;
-};
+import { buildFolderTree, flattenFolderTree } from "../../folderUtils";
 
 const EditStyleModal = React.memo(function EditStyleModal() {
   const context = useContext();
@@ -311,7 +277,7 @@ const StyleDetails = React.memo(function StyleDetails(props) {
   };
 
   const changeFontStyle = (style) => {
-    const newProps = _.cloneDeep(props.textProps);
+    const newProps = deepClone(props.textProps);
     const newStyle = newProps.layerText.textStyleRange[0].textStyle;
     newStyle.fontStyleName = style;
     const font = fonts.find((f) => f.family === family && f.style === style);
@@ -323,7 +289,7 @@ const StyleDetails = React.memo(function StyleDetails(props) {
   };
 
   const changeFont = (font) => {
-    const newProps = _.cloneDeep(props.textProps);
+    const newProps = deepClone(props.textProps);
     const newStyle = newProps.layerText.textStyleRange[0].textStyle;
     newStyle.fontPostScriptName = font.postScriptName;
     newStyle.fontStyleName = font.style;
@@ -333,7 +299,7 @@ const StyleDetails = React.memo(function StyleDetails(props) {
 
   const changeProp = (key, val, e) => {
     if (e) e.preventDefault();
-    const newProps = _.cloneDeep(props.textProps);
+    const newProps = deepClone(props.textProps);
     const newStyle = newProps.layerText.textStyleRange[0].textStyle;
     newStyle[key] = val;
     props.setTextProps(newProps);
@@ -341,14 +307,14 @@ const StyleDetails = React.memo(function StyleDetails(props) {
 
   const changeParagraph = (key, val, e) => {
     if (e) e.preventDefault();
-    const newProps = _.cloneDeep(props.textProps);
+    const newProps = deepClone(props.textProps);
     const newStyle = newProps.layerText.paragraphStyleRange[0].paragraphStyle;
     newStyle[key] = val;
     props.setTextProps(newProps);
   };
 
   const changeLeading = (val) => {
-    const newProps = _.cloneDeep(props.textProps);
+    const newProps = deepClone(props.textProps);
     const newStyle = newProps.layerText.textStyleRange[0].textStyle;
     newStyle.autoLeading = !val;
     if (val) newStyle.leading = val;
@@ -357,7 +323,7 @@ const StyleDetails = React.memo(function StyleDetails(props) {
   };
 
   const changeAutoleading = (val) => {
-    const newProps = _.cloneDeep(props.textProps);
+    const newProps = deepClone(props.textProps);
     const newStyle = newProps.layerText.paragraphStyleRange[0].paragraphStyle;
     if (val) newStyle.autoLeadingPercentage = val / 100;
     else newStyle.autoLeadingPercentage = 1.2;
@@ -365,14 +331,14 @@ const StyleDetails = React.memo(function StyleDetails(props) {
   };
 
   const changeColor = (rgb) => {
-    const newProps = _.cloneDeep(props.textProps);
+    const newProps = deepClone(props.textProps);
     const newStyle = newProps.layerText.textStyleRange[0].textStyle;
     newStyle.color = { red: rgb.r, green: rgb.g, blue: rgb.b };
     props.setTextProps(newProps);
   };
 
   const changeAntiAlias = (antiAlias) => {
-    const newProps = _.cloneDeep(props.textProps);
+    const newProps = deepClone(props.textProps);
     newProps.layerText.antiAlias = antiAlias;
     props.setTextProps(newProps);
   };

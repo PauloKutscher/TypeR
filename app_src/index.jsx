@@ -1,5 +1,3 @@
-import 'babel-polyfill';
-
 import './index.scss';
 import './lib/CSInterface';
 import './lib/themeManager';

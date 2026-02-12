@@ -1,7 +1,7 @@
 import "./previewBlock.scss";
 
-import _ from "lodash";
 import React from "react";
+import deepClone from "../../deepClone";
 import PropTypes from "prop-types";
 import { FiArrowRightCircle, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiX } from "react-icons/fi";
 import { AiOutlineBorderInner } from "react-icons/ai";
@@ -248,7 +248,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
 
         let lineStyle = resolveStyleForLine(targetLine, selection);
         if (lineStyle && context.state.textScale) {
-          lineStyle = _.cloneDeep(lineStyle);
+          lineStyle = deepClone(lineStyle);
           const txtStyle = lineStyle.textProps?.layerText.textStyleRange?.[0]?.textStyle || {};
           if (typeof txtStyle.size === "number") {
             txtStyle.size *= context.state.textScale / 100;
@@ -273,7 +273,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       // Mode sélection unique (comportement original)
       let lineStyle = context.state.currentStyle;
       if (lineStyle && context.state.textScale) {
-        lineStyle = _.cloneDeep(lineStyle);
+        lineStyle = deepClone(lineStyle);
         const txtStyle = lineStyle.textProps?.layerText.textStyleRange?.[0]?.textStyle || {};
         if (typeof txtStyle.size === "number") {
           txtStyle.size *= context.state.textScale / 100;
@@ -301,7 +301,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       // Mode normal
       let lineStyle = context.state.currentStyle;
       if (lineStyle && context.state.textScale) {
-        lineStyle = _.cloneDeep(lineStyle);
+        lineStyle = deepClone(lineStyle);
         const txtStyle = lineStyle.textProps?.layerText.textStyleRange?.[0]?.textStyle || {};
         if (typeof txtStyle.size === "number") {
           txtStyle.size *= context.state.textScale / 100;
@@ -316,32 +316,53 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     }
   };
 
-  const currentLineClick = () => {
+  const currentLineClick = React.useCallback(() => {
     if (line.rawIndex === void 0) return;
     scrollToLine(line.rawIndex);
-  };
+  }, [line.rawIndex]);
 
-  const setTextScale = (scale) => {
-    context.dispatch({ type: "setTextScale", scale });
-  };
-  const focusScale = () => {
-    if (!context.state.textScale) setTextScale(100);
-  };
-  const blurScale = () => {
-    if (context.state.textScale === 100) setTextScale(null);
-  };
+  const handleAlignLayer = React.useCallback(() => {
+    const padding = context.state.internalPadding || 0;
+    alignTextLayerToSelection(context.state.resizeTextBoxOnCenter, padding);
+  }, [context.state.internalPadding, context.state.resizeTextBoxOnCenter]);
 
-  const setTextSizeIncrement = (increment) => {
-    context.dispatch({ type: "setTextSizeIncrement", increment });
-  };
-  const handleIncrementChange = (e) => {
-    setTextSizeIncrement(e.target.value);
-  };
-  const handleIncrementBlur = () => {
+  const handleDecrease = React.useCallback(() => {
+    changeActiveLayerTextSize(-(context.state.textSizeIncrement || 1));
+  }, [context.state.textSizeIncrement]);
+
+  const handleIncrease = React.useCallback(() => {
+    changeActiveLayerTextSize(context.state.textSizeIncrement || 1);
+  }, [context.state.textSizeIncrement]);
+
+  const handlePrevLine = React.useCallback(() => {
+    context.dispatch({ type: "prevLine" });
+  }, [context.dispatch]);
+
+  const handleNextLine = React.useCallback(() => {
+    context.dispatch({ type: "nextLine" });
+  }, [context.dispatch]);
+
+  const handleScaleChange = React.useCallback((e) => {
+    context.dispatch({ type: "setTextScale", scale: e.target.value });
+  }, [context.dispatch]);
+
+  const focusScale = React.useCallback(() => {
+    if (!context.state.textScale) context.dispatch({ type: "setTextScale", scale: 100 });
+  }, [context.state.textScale, context.dispatch]);
+
+  const blurScale = React.useCallback(() => {
+    if (context.state.textScale === 100) context.dispatch({ type: "setTextScale", scale: null });
+  }, [context.state.textScale, context.dispatch]);
+
+  const handleIncrementChange = React.useCallback((e) => {
+    context.dispatch({ type: "setTextSizeIncrement", increment: e.target.value });
+  }, [context.dispatch]);
+
+  const handleIncrementBlur = React.useCallback(() => {
     if (!context.state.textSizeIncrement || context.state.textSizeIncrement < 1) {
-      setTextSizeIncrement(1);
+      context.dispatch({ type: "setTextSizeIncrement", increment: 1 });
     }
-  };
+  }, [context.state.textSizeIncrement, context.dispatch]);
 
   return (
     <React.Fragment>
@@ -389,21 +410,18 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           } onClick={createLayer}>
             <AiOutlineBorderInner size={18} /> {locale.createLayer}
           </button>
-          <button className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large" title={locale.alignLayerDescr} onClick={() => {
-            const padding = context.state.internalPadding || 0;
-            alignTextLayerToSelection(context.state.resizeTextBoxOnCenter, padding);
-          }}>
+          <button className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large" title={locale.alignLayerDescr} onClick={handleAlignLayer}>
             <MdCenterFocusWeak size={18} /> {locale.alignLayer}
           </button>
           <div className="preview-top_change-size-cont">
-            <button className="topcoat-icon-button--large" title={locale.layerTextSizeMinus} onClick={() => changeActiveLayerTextSize(-(context.state.textSizeIncrement || 1))}>
+            <button className="topcoat-icon-button--large" title={locale.layerTextSizeMinus} onClick={handleDecrease}>
               <FiMinusCircle size={18} />
             </button>
             <div className="preview-top_size-input">
               <input min={1} max={99} type="number" value={context.state.textSizeIncrement || ""} onChange={handleIncrementChange} onBlur={handleIncrementBlur} className="topcoat-text-input" />
               <span>px</span>
             </div>
-            <button className="topcoat-icon-button--large" title={locale.layerTextSizePlus} onClick={() => changeActiveLayerTextSize(context.state.textSizeIncrement || 1)}>
+            <button className="topcoat-icon-button--large" title={locale.layerTextSizePlus} onClick={handleIncrease}>
               <FiPlusCircle size={18} />
             </button>
           </div>
@@ -411,10 +429,10 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       </div>
       <div className="preview-bottom">
         <div className="preview-nav">
-          <button className="topcoat-icon-button--large" title={locale.prevLine} onClick={() => context.dispatch({ type: "prevLine" })}>
+          <button className="topcoat-icon-button--large" title={locale.prevLine} onClick={handlePrevLine}>
             <FiArrowUp size={18} />
           </button>
-          <button className="topcoat-icon-button--large" title={locale.nextLine} onClick={() => context.dispatch({ type: "nextLine" })}>
+          <button className="topcoat-icon-button--large" title={locale.nextLine} onClick={handleNextLine}>
             <FiArrowDown size={18} />
           </button>
         </div>
@@ -423,7 +441,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
             <div className="preview-line-info-text">
               {locale.previewLine}: <b>{line.index || "—"}</b>, {locale.previewStyle}: <b className="preview-line-style-name">{style.name || "—"}</b>, {locale.previewTextScale}:
               <div className="preview-line-scale">
-                <input min={1} max={999} type="number" placeholder="100" value={context.state.textScale || ""} onChange={(e) => setTextScale(e.target.value)} onFocus={focusScale} onBlur={blurScale} className="topcoat-text-input" />
+                <input min={1} max={999} type="number" placeholder="100" value={context.state.textScale || ""} onChange={handleScaleChange} onFocus={focusScale} onBlur={blurScale} className="topcoat-text-input" />
                 <span>%</span>
               </div>
             </div>

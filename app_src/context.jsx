@@ -652,133 +652,167 @@ const reducer = (state, action) => {
     }
   }
 
-  for (const style of newState.styles) {
-    const folderId = style.folder || null;
-    const hasFolder = newState.folders.find((f) => f.id === folderId);
-    if (!hasFolder) style.folder = null;
-  }
+  // Detect which fields changed to skip unnecessary recomputation
+  const stylesChanged = newState.styles !== state.styles;
+  const foldersChanged = newState.folders !== state.folders;
+  const textChanged = newState.text !== state.text;
+  const ignoreLinePrefixesChanged = newState.ignoreLinePrefixes !== state.ignoreLinePrefixes;
+  const ignoreTagsChanged = newState.ignoreTags !== state.ignoreTags;
+  const currentFolderTagPriorityChanged = newState.currentFolderTagPriority !== state.currentFolderTagPriority;
+  const imagesChanged = newState.images !== state.images;
+  const lineIndexChanged = newState.currentLineIndex !== state.currentLineIndex;
+  const styleIdChanged = newState.currentStyleId !== state.currentStyleId;
 
-  if (newState.folders !== state.folders) {
-    newState.folders = normalizeFolders(newState.folders);
-  }
+  const needsStyleProcessing = !state.initiated || stylesChanged || foldersChanged;
+  const needsLineProcessing = needsStyleProcessing || textChanged ||
+    ignoreLinePrefixesChanged || ignoreTagsChanged || currentFolderTagPriorityChanged || imagesChanged;
 
-  if (newState.openFolders) {
-    const validFolderIds = new Set(newState.folders.map((folder) => folder.id));
-    if (newState.openFolders.some((id) => id !== "unsorted" && !validFolderIds.has(id))) {
-      newState.openFolders = newState.openFolders.filter((id) => id === "unsorted" || validFolderIds.has(id));
-    }
-  }
-
-  if (newState.defaultStyleId) {
-    const hasDefault = newState.styles.find((s) => s.id === newState.defaultStyleId);
-    if (!hasDefault) newState.defaultStyleId = null;
-  }
-
-  const stylesSource = newState.styles.concat([]);
-  let sortedStyles = stylesSource.filter((style) => !style.folder);
-  const appendFolderStyles = (parentId = null) => {
-    const children = getFolderChildren(newState.folders, parentId);
-    for (const folder of children) {
-      const folderStyles = stylesSource.filter((style) => style.folder === folder.id);
-      sortedStyles = sortedStyles.concat(folderStyles);
-      appendFolderStyles(folder.id);
-    }
-  };
-  appendFolderStyles(null);
-  newState.styles = sortedStyles;
-
-  const stylePrefixes = [];
-  const folderPrefixes = [];
-  const folderOnlyPrefixes = [];
-  const unsortedPrefixes = [];
-  const currentFolder = state.currentStyle ? state.currentStyle.folder || null : null;
-  for (const style of newState.styles) {
-    if (style.prefixesDisabled) continue;
-    const folder = style.folder || null;
-    for (const prefix of style.prefixes) {
-      const data = { prefix, style, folder };
-      stylePrefixes.push(data);
-      if (folder) folderOnlyPrefixes.push(data);
-      else unsortedPrefixes.push(data);
-      if (folder === currentFolder) folderPrefixes.push(data);
-    }
-  }
-
-  let linesCounter = 0;
-  const rawLines = newState.text ? newState.text.split("\n") : [];
-  const last = [];
-  let previousStyle = null;
-  newState.lines = rawLines.map((rawText, rawIndex) => {
-    const ignorePrefix = newState.ignoreLinePrefixes.find((pr) => rawText.startsWith(pr)) || "";
-    const hasStylePrefix = (
-      newState.currentFolderTagPriority !== false
-        ? folderPrefixes.find((sp) => rawText.startsWith(sp.prefix))
-        : (unsortedPrefixes.find((sp) => rawText.startsWith(sp.prefix)) ||
-           folderOnlyPrefixes.find((sp) => rawText.startsWith(sp.prefix)))
-    ) || stylePrefixes.find((sp) => rawText.startsWith(sp.prefix));
-
-    let stylePrefix = "";
-    let style = null;
-
-    if (rawText.startsWith("//")) {
-      stylePrefix = rawText.startsWith("//:") ? "//:" : "//";
-      style = previousStyle;
-    } else if (hasStylePrefix) {
-      stylePrefix = hasStylePrefix.prefix;
-      style = hasStylePrefix.style;
+  // Phase 1: Style/folder validation and sorting (only when styles or folders changed)
+  if (needsStyleProcessing) {
+    for (const style of newState.styles) {
+      const folderId = style.folder || null;
+      const hasFolder = newState.folders.find((f) => f.id === folderId);
+      if (!hasFolder) style.folder = null;
     }
 
-    let text = rawText.replace(ignorePrefix, "").replace(stylePrefix, "");
-    if (newState.ignoreTags?.length) {
-      text = newState.ignoreTags.reduce((acc, tag) => {
-        if (!tag) return acc;
-        return acc.split(tag).join("");
-      }, text);
+    if (foldersChanged || !state.initiated) {
+      newState.folders = normalizeFolders(newState.folders);
     }
-    text = text.trim();
-    const isPage = rawText.match(/Page [0-9]+/i);
-    const ignore = !!ignorePrefix || !text || isPage;
-    if (isPage && newState.images.length) {
-      last.push(linesCounter);
-    }
-    const index = ignore ? 0 : ++linesCounter;
-    const line = { rawText, rawIndex, ignorePrefix, stylePrefix, style, ignore, index, text };
-    if (!line.ignore && line.style) {
-      previousStyle = line.style;
-    }
-    return line;
-  });
-  last.forEach((index) => {
-    newState.lines.find((line) => line.index == index).last = true;
-  });
 
-  newState.currentLine = newState.lines[newState.currentLineIndex] || null;
-  if (!newState.currentLine || newState.currentLine.ignore) {
-    let newIndex = 0;
-    for (let line of newState.lines) {
-      if (!line.ignore) {
-        newIndex = line.rawIndex;
-        break;
+    if (newState.openFolders) {
+      const validFolderIds = new Set(newState.folders.map((folder) => folder.id));
+      if (newState.openFolders.some((id) => id !== "unsorted" && !validFolderIds.has(id))) {
+        newState.openFolders = newState.openFolders.filter((id) => id === "unsorted" || validFolderIds.has(id));
       }
     }
-    newState.currentLine = newState.lines[newIndex] || null;
-    newState.currentLineIndex = newIndex;
+
+    if (newState.defaultStyleId) {
+      const hasDefault = newState.styles.find((s) => s.id === newState.defaultStyleId);
+      if (!hasDefault) newState.defaultStyleId = null;
+    }
+
+    const stylesSource = newState.styles.concat([]);
+    let sortedStyles = stylesSource.filter((style) => !style.folder);
+    const appendFolderStyles = (parentId = null) => {
+      const children = getFolderChildren(newState.folders, parentId);
+      for (const folder of children) {
+        const folderStyles = stylesSource.filter((style) => style.folder === folder.id);
+        sortedStyles = sortedStyles.concat(folderStyles);
+        appendFolderStyles(folder.id);
+      }
+    };
+    appendFolderStyles(null);
+    newState.styles = sortedStyles;
   }
-  if (thenSelectStyle) {
-    if (newState.currentLine.style) {
-      newState.currentStyleId = newState.currentLine.style.id;
-    } else if (newState.defaultStyleId) {
-      newState.currentStyleId = newState.defaultStyleId;
+
+  // Phase 2: Prefix building + line parsing (only when relevant fields changed)
+  if (needsLineProcessing) {
+    const stylePrefixes = [];
+    const folderPrefixes = [];
+    const folderOnlyPrefixes = [];
+    const unsortedPrefixes = [];
+    const currentFolder = state.currentStyle ? state.currentStyle.folder || null : null;
+    for (const style of newState.styles) {
+      if (style.prefixesDisabled) continue;
+      const folder = style.folder || null;
+      for (const prefix of style.prefixes) {
+        const data = { prefix, style, folder };
+        stylePrefixes.push(data);
+        if (folder) folderOnlyPrefixes.push(data);
+        else unsortedPrefixes.push(data);
+        if (folder === currentFolder) folderPrefixes.push(data);
+      }
+    }
+
+    // Pre-compile a single regex for all ignoreTags instead of split/join per tag per line
+    const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const ignoreTagsRegex = newState.ignoreTags?.length
+      ? new RegExp(newState.ignoreTags.filter(Boolean).map(escapeRe).join("|"), "g")
+      : null;
+
+    let linesCounter = 0;
+    const rawLines = newState.text ? newState.text.split("\n") : [];
+    const last = [];
+    let previousStyle = null;
+    newState.lines = rawLines.map((rawText, rawIndex) => {
+      const ignorePrefix = newState.ignoreLinePrefixes.find((pr) => rawText.startsWith(pr)) || "";
+      const hasStylePrefix = (
+        newState.currentFolderTagPriority !== false
+          ? folderPrefixes.find((sp) => rawText.startsWith(sp.prefix))
+          : (unsortedPrefixes.find((sp) => rawText.startsWith(sp.prefix)) ||
+             folderOnlyPrefixes.find((sp) => rawText.startsWith(sp.prefix)))
+      ) || stylePrefixes.find((sp) => rawText.startsWith(sp.prefix));
+
+      let stylePrefix = "";
+      let style = null;
+
+      if (rawText.startsWith("//")) {
+        stylePrefix = rawText.startsWith("//:") ? "//:" : "//";
+        style = previousStyle;
+      } else if (hasStylePrefix) {
+        stylePrefix = hasStylePrefix.prefix;
+        style = hasStylePrefix.style;
+      }
+
+      let text = rawText.replace(ignorePrefix, "").replace(stylePrefix, "");
+      if (ignoreTagsRegex) {
+        ignoreTagsRegex.lastIndex = 0;
+        text = text.replace(ignoreTagsRegex, "");
+      }
+      text = text.trim();
+      const isPage = rawText.match(/Page [0-9]+/i);
+      const ignore = !!ignorePrefix || !text || isPage;
+      if (isPage && newState.images.length) {
+        last.push(linesCounter);
+      }
+      const index = ignore ? 0 : ++linesCounter;
+      const line = { rawText, rawIndex, ignorePrefix, stylePrefix, style, ignore, index, text };
+      if (!line.ignore && line.style) {
+        previousStyle = line.style;
+      }
+      return line;
+    });
+    last.forEach((index) => {
+      newState.lines.find((line) => line.index == index).last = true;
+    });
+  }
+
+  // Phase 3: Update currentLine (when lines or line index changed)
+  let needsStyleLookup = needsLineProcessing || lineIndexChanged || styleIdChanged;
+  if (needsLineProcessing || lineIndexChanged) {
+    newState.currentLine = newState.lines[newState.currentLineIndex] || null;
+    if (!newState.currentLine || newState.currentLine.ignore) {
+      let newIndex = 0;
+      for (let line of newState.lines) {
+        if (!line.ignore) {
+          newIndex = line.rawIndex;
+          break;
+        }
+      }
+      newState.currentLine = newState.lines[newIndex] || null;
+      newState.currentLineIndex = newIndex;
+    }
+    if (thenSelectStyle) {
+      if (newState.currentLine?.style) {
+        newState.currentStyleId = newState.currentLine.style.id;
+      } else if (newState.defaultStyleId) {
+        newState.currentStyleId = newState.defaultStyleId;
+      }
+      needsStyleLookup = true;
     }
   }
 
-  newState.currentStyle = newState.styles.find((s) => s.id === newState.currentStyleId);
-  if (!newState.currentStyle) {
-    const newId = newState.styles.length ? newState.styles[0].id : null;
-    newState.currentStyle = newId ? newState.styles[0] : null;
-    newState.currentStyleId = newId;
+  // Phase 4: Update currentStyle (when style ID or lines changed)
+  if (needsStyleLookup) {
+    newState.currentStyle = newState.styles.find((s) => s.id === newState.currentStyleId);
+    if (!newState.currentStyle) {
+      const newId = newState.styles.length ? newState.styles[0].id : null;
+      newState.currentStyle = newId ? newState.styles[0] : null;
+      newState.currentStyleId = newId;
+    }
   }
 
+  // Phase 5: Open folder management
   if (!newState.initiated) {
     if (newState.currentStyle?.folder) {
       newState.openFolders = [newState.currentStyle.folder];
@@ -795,15 +829,25 @@ const reducer = (state, action) => {
     scrollToLine(newState.currentLineIndex);
   }
 
-  const dataToStore = {};
-  for (let field in newState) {
-    if (!newState.hasOwnProperty(field)) continue;
-    if (storeFields.includes(field)) {
-      dataToStore[field] = newState[field];
+  // Phase 6: Storage - only write if a stored field actually changed
+  newState.initiated = true;
+  let hasStorageChange = false;
+  for (let i = 0; i < storeFields.length; i++) {
+    if (newState[storeFields[i]] !== state[storeFields[i]]) {
+      hasStorageChange = true;
+      break;
     }
   }
-  newState.initiated = true;
-  writeToStorage(dataToStore);
+  if (hasStorageChange) {
+    const dataToStore = {};
+    for (let i = 0; i < storeFields.length; i++) {
+      const field = storeFields[i];
+      if (newState.hasOwnProperty(field)) {
+        dataToStore[field] = newState[field];
+      }
+    }
+    writeToStorage(dataToStore);
+  }
 
   return newState;
 };
@@ -841,7 +885,8 @@ const ContextProvider = React.memo(function ContextProvider(props) {
       link.setAttribute('href', defaultStyleRef.current || './index.css');
     }
   }, [state.theme]);
-  return <Context.Provider value={{ state, dispatch }}>{props.children}</Context.Provider>;
+  const contextValue = React.useMemo(() => ({ state, dispatch }), [state, dispatch]);
+  return <Context.Provider value={contextValue}>{props.children}</Context.Provider>;
 });
 ContextProvider.propTypes = {
   children: PropTypes.any.isRequired,

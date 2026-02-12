@@ -5,42 +5,7 @@ import { MdSave } from "react-icons/md";
 import config from "../../config";
 import { locale } from "../../utils";
 import { useContext } from "../../context";
-
-const buildFolderTree = (folders) => {
-  const map = new Map();
-  (folders || []).forEach((folder) => {
-    map.set(folder.id, { ...folder, children: [] });
-  });
-  const roots = [];
-  map.forEach((folder) => {
-    if (folder.parentId && map.has(folder.parentId)) {
-      map.get(folder.parentId).children.push(folder);
-    } else {
-      roots.push(folder);
-    }
-  });
-  const sortRecursive = (nodes) => {
-    nodes.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-    nodes.forEach((node) => sortRecursive(node.children));
-  };
-  sortRecursive(roots);
-  return roots;
-};
-
-const collectDescendantIds = (folders, folderId) => {
-  const ids = [];
-  if (!folderId) return ids;
-  const queue = [folderId];
-  while (queue.length) {
-    const current = queue.shift();
-    const children = folders.filter((folder) => (folder.parentId || null) === current);
-    children.forEach((child) => {
-      ids.push(child.id);
-      queue.push(child.id);
-    });
-  }
-  return ids;
-};
+import { buildFolderTree, collectDescendantIds } from "../../folderUtils";
 
 const ExportModal = React.memo(function ExportModal() {
   const context = useContext();

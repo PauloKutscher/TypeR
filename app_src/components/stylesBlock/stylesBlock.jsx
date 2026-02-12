@@ -1,7 +1,7 @@
 import "./stylesBlock.scss";
 
 import React from "react";
-import _ from "lodash";
+import deepClone from "../../deepClone";
 import PropTypes from "prop-types";
 import { ReactSortable } from "react-sortablejs";
 import { FiArrowRightCircle, FiPlus, FiFolderPlus, FiChevronDown, FiChevronUp, FiCopy, FiEye, FiEyeOff, FiMinus } from "react-icons/fi";
@@ -11,27 +11,7 @@ import { CiExport } from "react-icons/ci";
 import config from "../../config";
 import { locale, getActiveLayerText, setActiveLayerText, rgbToHex, getStyleObject } from "../../utils";
 import { useContext } from "../../context";
-
-const buildFolderTree = (folders) => {
-  const map = new Map();
-  (folders || []).forEach((folder) => {
-    map.set(folder.id, { ...folder, children: [] });
-  });
-  const roots = [];
-  map.forEach((folder) => {
-    if (folder.parentId && map.has(folder.parentId)) {
-      map.get(folder.parentId).children.push(folder);
-    } else {
-      roots.push(folder);
-    }
-  });
-  const sortRecursive = (nodes) => {
-    nodes.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-    nodes.forEach((node) => sortRecursive(node.children));
-  };
-  sortRecursive(roots);
-  return roots;
-};
+import { buildFolderTree } from "../../folderUtils";
 
 const StylesBlock = React.memo(function StylesBlock() {
   const context = useContext();
@@ -71,7 +51,7 @@ const FolderTree = React.memo(function FolderTree({ folders, parentId, depth }) 
     (items) => {
       context.dispatch({ type: "reorderFolders", parentId, order: items.map((item) => item.id) });
     },
-    [context, parentId]
+    [context.dispatch, parentId]
   );
   return (
     <ReactSortable className={"folders-sortable" + (depth > 0 ? " m-nested" : "")} list={folders} setList={handleOrder} animation={150}>
@@ -89,55 +69,58 @@ FolderTree.propTypes = {
 
 const FolderItem = React.memo(function FolderItem(props) {
   const context = useContext();
-  const openFolder = (e) => {
+  const openFolder = React.useCallback((e) => {
     e.stopPropagation();
     context.dispatch({ type: "setModal", modal: "editFolder", data: props.data });
-  };
-  const sortFolderStyles = (folderStyles) => {
+  }, [context.dispatch, props.data]);
+
+  const sortFolderStyles = React.useCallback((folderStyles) => {
     let styles = props.data.id ? context.state.styles.filter((s) => s.folder !== props.data.id) : context.state.styles.filter((s) => !!s.folder);
     styles = styles.concat(folderStyles);
     context.dispatch({ type: "setStyles", data: styles });
-  };
+  }, [context.dispatch, context.state.styles, props.data.id]);
+
   const styles = props.data.id ? context.state.styles.filter((s) => s.folder === props.data.id) : context.state.styles.filter((s) => !s.folder);
   const childFolders = props.data.children || [];
 
-  const exportFolder = (e) => {
+  const exportFolder = React.useCallback((e) => {
     e.stopPropagation();
     const pathSelect = window.cep.fs.showSaveDialogEx(false, false, ["json"], props.data.name + ".json");
     if (!pathSelect?.data) return false;
     const exportedFolder = {};
     exportedFolder.name = props.data.name;
-    const exportedStyles = [];
-    exportedStyles.push(
-      ...styles.map((style) => {
-        return {
-          name: style.name,
-          textProps: style.textProps,
-          prefixes: style.prefixes,
-          prefixColor: style.prefixColor,
-          stroke: style.stroke,
-        };
-      })
-    );
+    const currentStyles = props.data.id ? context.state.styles.filter((s) => s.folder === props.data.id) : context.state.styles.filter((s) => !s.folder);
+    const exportedStyles = currentStyles.map((style) => ({
+      name: style.name,
+      textProps: style.textProps,
+      prefixes: style.prefixes,
+      prefixColor: style.prefixColor,
+      stroke: style.stroke,
+    }));
     exportedFolder.exportedStyles = exportedStyles;
-
     window.cep.fs.writeFile(pathSelect.data, JSON.stringify(exportedFolder));
-  };
-  const duplicateFolder = (e) => {
+  }, [props.data.id, props.data.name, context.state.styles]);
+
+  const duplicateFolder = React.useCallback((e) => {
     e.stopPropagation();
     context.dispatch({ type: "duplicateFolder", id: props.data.id });
-  };
-  const addSubfolder = (e) => {
+  }, [context.dispatch, props.data.id]);
+
+  const addSubfolder = React.useCallback((e) => {
     e.stopPropagation();
     context.dispatch({ type: "setModal", modal: "editFolder", data: { create: true, parentId: props.data.id } });
-  };
+  }, [context.dispatch, props.data.id]);
+
+  const toggleFolder = React.useCallback(() => {
+    context.dispatch({ type: "toggleFolder", id: props.data.id });
+  }, [context.dispatch, props.data.id]);
 
   const isUnsorted = !props.data.id;
   const isOpen = props.data.id ? context.state.openFolders.includes(props.data.id) : context.state.openFolders.includes("unsorted");
   const hasActive = context.state.currentStyleId ? !!styles.find((s) => s.id === context.state.currentStyleId) : false;
   return (
     <div className={"folder-item hostBrdContrast" + (isOpen ? " m-open" : "") + (props.depth ? " m-nested" : "")}>
-      <div className="folder-header" style={{ paddingLeft: props.depth ? props.depth * 12 + 4 : 4 }} onClick={() => context.dispatch({ type: "toggleFolder", id: props.data.id })}>
+      <div className="folder-header" style={{ paddingLeft: props.depth ? props.depth * 12 + 4 : 4 }} onClick={toggleFolder}>
         <div className="folder-marker">{isOpen ? <FiChevronUp size={18} /> : <FiChevronDown size={18} />}</div>
         <div className="folder-title">
           {hasActive ? <strong>{props.data.name}</strong> : <span>{props.data.name}</span>}
@@ -178,8 +161,6 @@ const FolderItem = React.memo(function FolderItem(props) {
                   <StyleItem
                     key={style.id}
                     active={context.state.currentStyleId === style.id}
-                    selectStyle={() => context.dispatch({ type: "setCurrentStyleId", id: style.id })}
-                    openStyle={() => context.dispatch({ type: "setModal", modal: "editStyle", data: style })}
                     style={style}
                   />
                 ))}
@@ -204,7 +185,11 @@ const StyleItem = React.memo(function StyleItem(props) {
   const textStyle = props.style.textProps.layerText.textStyleRange[0]?.textStyle || {};
   const styleObject = getStyleObject(textStyle);
   const context = useContext();
-  const [quickSize, setQuickSize] = React.useState(textStyle.size || "");
+
+  // Fix derived state: use override only during active editing instead of syncing via useEffect
+  const [quickSizeOverride, setQuickSizeOverride] = React.useState(null);
+  const displaySize = quickSizeOverride !== null ? quickSizeOverride : (textStyle.size || "");
+
   const [quickOpen, setQuickOpen] = React.useState(false);
   const quickCloseTimeout = React.useRef(null);
   const quickWrapRef = React.useRef(null);
@@ -220,20 +205,22 @@ const StyleItem = React.memo(function StyleItem(props) {
   };
 
   React.useEffect(() => {
-    setQuickSize(sizeValue);
-  }, [sizeValue]);
-
-  React.useEffect(() => {
     return () => {
       if (quickCloseTimeout.current) clearTimeout(quickCloseTimeout.current);
     };
   }, []);
 
-  const openStyle = (e) => {
+  // StyleItem now handles its own select/open dispatch instead of receiving closures as props
+  const selectStyle = React.useCallback(() => {
+    context.dispatch({ type: "setCurrentStyleId", id: props.style.id });
+  }, [context.dispatch, props.style.id]);
+
+  const openStyle = React.useCallback((e) => {
     e.stopPropagation();
-    props.openStyle();
-  };
-  const insertStyle = (e) => {
+    context.dispatch({ type: "setModal", modal: "editStyle", data: props.style });
+  }, [context.dispatch, props.style]);
+
+  const insertStyle = React.useCallback((e) => {
     e.stopPropagation();
     const direction = context.state.direction;
     if (e.ctrlKey) {
@@ -244,15 +231,18 @@ const StyleItem = React.memo(function StyleItem(props) {
     } else {
       setActiveLayerText("", props.style, direction);
     }
-  };
-  const duplicateStyle = (e) => {
+  }, [context.state.direction, props.style, textStyle]);
+
+  const duplicateStyle = React.useCallback((e) => {
     e.stopPropagation();
     context.dispatch({ type: "duplicateStyle", data: props.style });
-  };
-  const togglePrefixes = (e) => {
+  }, [context.dispatch, props.style]);
+
+  const togglePrefixes = React.useCallback((e) => {
     e.stopPropagation();
     context.dispatch({ type: "toggleStylePrefixes", id: props.style.id });
-  };
+  }, [context.dispatch, props.style.id]);
+
   const openQuickSize = () => {
     if (quickCloseTimeout.current) clearTimeout(quickCloseTimeout.current);
     setQuickOpen(true);
@@ -269,7 +259,7 @@ const StyleItem = React.memo(function StyleItem(props) {
       if (!props.style.textProps?.layerText?.textStyleRange?.length) return;
       const parsed = parseFloat(nextSize);
       if (!Number.isFinite(parsed) || parsed <= 0) return;
-      const newTextProps = _.cloneDeep(props.style.textProps);
+      const newTextProps = deepClone(props.style.textProps);
       const newStyle = newTextProps.layerText.textStyleRange[0].textStyle;
       newStyle.size = parsed;
       if (newStyle.impliedFontSize != null) newStyle.impliedFontSize = parsed;
@@ -278,7 +268,7 @@ const StyleItem = React.memo(function StyleItem(props) {
         data: { ...props.style, textProps: newTextProps, edited: Date.now() },
       });
     },
-    [context, props.style]
+    [context.dispatch, props.style]
   );
   const stopQuickEvent = (e) => {
     e.stopPropagation();
@@ -286,22 +276,22 @@ const StyleItem = React.memo(function StyleItem(props) {
   const changeQuickSize = (e) => {
     stopQuickEvent(e);
     const value = e.target.value;
-    setQuickSize(value);
+    setQuickSizeOverride(value);
     if (value === "") return;
     applyQuickSize(value);
   };
   const nudgeQuickSize = (delta) => (e) => {
     stopQuickEvent(e);
-    const baseValue = parseFloat(quickSize || textStyle.size || 1);
+    const baseValue = parseFloat(quickSizeOverride ?? textStyle.size ?? 1);
     const nextValue = Math.max(1, normalizeSizeStep(baseValue + delta * sizeStep));
-    setQuickSize(nextValue);
+    setQuickSizeOverride(nextValue);
     applyQuickSize(nextValue);
   };
   const resetQuickSize = () => {
-    if (quickSize === "") setQuickSize(sizeValue || "");
+    setQuickSizeOverride(null);
   };
   return (
-    <div id={props.style.id} className={"style-item hostBgdLight" + (props.active ? " m-current" : "") + (props.style.prefixesDisabled ? " m-disabled" : "")} onClick={props.selectStyle}>
+    <div id={props.style.id} className={"style-item hostBgdLight" + (props.active ? " m-current" : "") + (props.style.prefixesDisabled ? " m-disabled" : "")} onClick={selectStyle}>
       <div className="style-marker">
         <div className="style-color" style={{ background: rgbToHex(textStyle.color) }} title={locale.styleTextColor + ": " + rgbToHex(textStyle.color)}></div>
         {!!props.style.prefixes.length && (
@@ -340,7 +330,7 @@ const StyleItem = React.memo(function StyleItem(props) {
                 type="number"
                 min={1}
                 step={sizeStep}
-                value={quickSize}
+                value={displaySize}
                 onChange={changeQuickSize}
                 onBlur={resetQuickSize}
                 className="style-quick-size-input"
@@ -366,8 +356,6 @@ const StyleItem = React.memo(function StyleItem(props) {
   );
 });
 StyleItem.propTypes = {
-  selectStyle: PropTypes.func.isRequired,
-  openStyle: PropTypes.func.isRequired,
   style: PropTypes.object.isRequired,
   active: PropTypes.bool,
 };
