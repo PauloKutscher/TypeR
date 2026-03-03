@@ -32,7 +32,7 @@ And many, many more...
 
 ## Installation Guide
 
-# If you download from the release
+### If you download from the release
 
 1. Download the [latest release](https://github.com/Nightmare-Developer0/TypeR/releases/latest)
 2. Extract the archive and execute the installation script for your operating system.
@@ -50,13 +50,13 @@ And many, many more...
    install_win.cmd
    ```
 
-# If you download from the source code
+### If you download from the source code
 
-### Prerequisites
+#### Prerequisites
 
 - Ensure you have Node.js installed on your system. You can download it from [Node.js official website](https://nodejs.org/).
 
-### Steps
+#### Steps
 
 1. Clone the repository and navigate to the root directory in your terminal.
 
