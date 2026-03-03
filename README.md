@@ -7,6 +7,7 @@ TypeR is an updated version of TyperTools, a Photoshop extension designed for ty
 - **Multi-Bubble Support**: Hold `Shift` with the magic wand to seamlessly select and translate multiple isolated bubbles instantly.
 - **Arabic UI Localization**: Full support for Arabic UI from the settings menu.
 - **Engine Optimization**: Bypassed the geometric smoothing algorithms that used to cause severe lag and `EvalScript` crashes.
+- **Improved Installation**: The installation scripts now safely backup and restore your `storage` folder, preserving your exported styles and settings across updates!
 - **Bug Fixes**: Multiple bugs from the original TyperTools and previous forks have been fixed.
 - Added **stroke (outline)** support to styles.
 - **Stable Auto-Centering**: Text shape no longer changes when using auto-centering.
