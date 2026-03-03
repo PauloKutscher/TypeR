@@ -4,7 +4,10 @@ TypeR is an updated version of TyperTools, a Photoshop extension designed for ty
 
 ## Key Features
 
-- **Bug Fixes**: Multiple bugs from the original TyperTools have been fixed.
+- **Multi-Bubble Support**: Hold `Shift` with the magic wand to seamlessly select and translate multiple isolated bubbles instantly.
+- **Arabic UI Localization**: Full support for Arabic UI from the settings menu.
+- **Engine Optimization**: Bypassed the geometric smoothing algorithms that used to cause severe lag and `EvalScript` crashes.
+- **Bug Fixes**: Multiple bugs from the original TyperTools and previous forks have been fixed.
 - Added **stroke (outline)** support to styles.
 - **Stable Auto-Centering**: Text shape no longer changes when using auto-centering.
 - **Auto-centering** now works without manual selection by automatically detecting the bubble shape (like in Typesetterer).
@@ -28,22 +31,27 @@ And many, many more...
   (There may be problems with some portable or lightweight builds)
 
 ## Installation Guide
-# If you download from the release :
-1. Download the [latest release](https://github.com/ScanR/TypeR/releases/latest/download/TypeR.zip)
+
+# If you download from the release
+
+1. Download the [latest release](https://github.com/Nightmare-Developer0/TypeR/releases/latest)
 2. Extract the archive and execute the installation script for your operating system.
 
    For macOS:
+
    ```sh
    chmod +x install_mac.sh
    ./install_mac.sh
    ```
 
    For Windows:
+
    ```sh
    install_win.cmd
    ```
 
-# If you download from the source code :
+# If you download from the source code
+
 ### Prerequisites
 
 - Ensure you have Node.js installed on your system. You can download it from [Node.js official website](https://nodejs.org/).
@@ -53,7 +61,7 @@ And many, many more...
 1. Clone the repository and navigate to the root directory in your terminal.
 
    ```sh
-   git clone https://github.com/ScanR/TypeR.git
+   git clone https://github.com/Nightmare-Developer0/TypeR.git
    cd TypeR
    ```
 
@@ -63,8 +71,7 @@ And many, many more...
    npm install
    ```
 
-3. Build the project using npm. 
-
+3. Build the project using npm.
 
    ```sh
    npm run build
@@ -73,18 +80,21 @@ And many, many more...
 4. Execute the installation script for your operating system.
 
    For macOS:
+
    ```sh
    chmod +x install_mac.sh
    ./install_mac.sh
    ```
 
    For Windows:
+
    ```sh
    install_win.cmd
    ```
+
 ## Usage
 
-After installation, you can access TypeR within Adobe Photoshop Extensions tab. 
+After installation, you can access TypeR within Adobe Photoshop Extensions tab.
 
 ## Contributing
 
