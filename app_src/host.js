@@ -64,6 +64,16 @@ var _MIN_TEXTBOX_WIDTH = 10;
 var _TEMP_SELECTION_CHANNEL = "__TyperSelectionTemp__";
 var _DEFAULT_ADJUST_SEQUENCE = [-5, -5, -5, -5, -5, -5, 5, 5, 5, 5, 5, 5];
 
+function _debugLog(message) {
+  try {
+    var logFile = new File(Folder.userData.fsName + "/TypeR_Debug.txt");
+    logFile.open("a");
+    var timestamp = new Date().toTimeString().split(" ")[0] + "." + new Date().getMilliseconds();
+    logFile.writeln("[" + timestamp + "] " + message);
+    logFile.close();
+  } catch (e) { }
+}
+
 var _hostState = {
   fallbackTextSize: 20,
   setActiveLayerText: {
@@ -204,7 +214,7 @@ function _changeToPointText() {
       app.activeDocument.activeLayer.textItem.kind = TextType.POINTTEXT;
       return;
     }
-  } catch (e) {}
+  } catch (e) { }
   var reference = new ActionReference();
   reference.putProperty(charID.Property, charID.TextShapeType);
   reference.putEnumerated(charID.TextLayer, charID.Ordinal, charID.Target);
@@ -238,14 +248,14 @@ function _textLayerIsPointText() {
 function _getTextLayerSize() {
   try {
     var textParams = jamText.getLayerText();
-    if (textParams && textParams.layerText && 
-        textParams.layerText.textStyleRange && 
-        textParams.layerText.textStyleRange[0] &&
-        textParams.layerText.textStyleRange[0].textStyle &&
-        textParams.layerText.textStyleRange[0].textStyle.size) {
+    if (textParams && textParams.layerText &&
+      textParams.layerText.textStyleRange &&
+      textParams.layerText.textStyleRange[0] &&
+      textParams.layerText.textStyleRange[0].textStyle &&
+      textParams.layerText.textStyleRange[0].textStyle.size) {
       return textParams.layerText.textStyleRange[0].textStyle.size;
     }
-  } catch (e) {}
+  } catch (e) { }
   return _hostState.fallbackTextSize || 20;
 }
 
@@ -292,10 +302,56 @@ function _getBoundsFromDescriptor(bounds) {
 
 function _getCurrentSelectionBounds() {
   var doc = _getCurrent(charID.Document, charID.FrameSelect);
-  if (doc.hasKey(charID.FrameSelect)) {
-    var bounds = doc.getObjectValue(charID.FrameSelect);
-    return _getBoundsFromDescriptor(bounds);
-  }
+  if (!doc.hasKey(charID.FrameSelect)) return undefined;
+
+  // Try to extract disjoint paths automatically
+  try {
+    var boundsArr = [];
+    var pmDesc = new ActionDescriptor();
+    var ref = new ActionReference();
+    ref.putClass(stringIDToTypeID("path"));
+    pmDesc.putReference(charID.Null, ref);
+    var ref2 = new ActionReference();
+    ref2.putProperty(stringIDToTypeID("selectionClass"), stringIDToTypeID("selection"));
+    pmDesc.putReference(stringIDToTypeID("from"), ref2);
+    pmDesc.putUnitDouble(stringIDToTypeID("tolerance"), stringIDToTypeID("pixelsUnit"), 2.0);
+    executeAction(stringIDToTypeID("make"), pmDesc, DialogModes.NO);
+
+    var workPath = app.activeDocument.pathItems.getByName("Work Path");
+    for (var i = 0; i < workPath.subPathItems.length; i++) {
+      var subPath = workPath.subPathItems[i];
+      var left = 99999, top = 99999, right = -99999, bottom = -99999;
+      for (var j = 0; j < subPath.pathPoints.length; j++) {
+        var pt = subPath.pathPoints[j].anchor;
+        if (pt[0] < left) left = pt[0];
+        if (pt[0] > right) right = pt[0];
+        if (pt[1] < top) top = pt[1];
+        if (pt[1] > bottom) bottom = pt[1];
+      }
+      var w = right - left;
+      var h = bottom - top;
+      if (w > 5 && h > 5) {
+        boundsArr.push({
+          top: top, left: left, right: right, bottom: bottom,
+          width: w, height: h,
+          xMid: (left + right) / 2, yMid: (top + bottom) / 2
+        });
+      }
+    }
+    workPath.remove();
+
+    // If it successfully split into multiple, return the array
+    if (boundsArr.length > 1) {
+      return boundsArr;
+    }
+    // If it's just 1 big shape, fallback to standard bounding box
+    if (boundsArr.length === 1) {
+      return boundsArr[0];
+    }
+  } catch (e) { }
+
+  var bounds = doc.getObjectValue(charID.FrameSelect);
+  return _getBoundsFromDescriptor(bounds);
 }
 
 function _getCurrentTextLayerBounds() {
@@ -340,10 +396,10 @@ function _getAdjustedSelectionBounds(bounds, amount) {
   } finally {
     try {
       doc.selection.load(tempChannel);
-    } catch (restoreError) {}
+    } catch (restoreError) { }
     try {
       tempChannel.remove();
-    } catch (removeError) {}
+    } catch (removeError) { }
   }
 
   if (!adjusted) {
@@ -357,7 +413,7 @@ function _createTempSelectionChannel(doc) {
   try {
     channel = doc.channels.getByName(_TEMP_SELECTION_CHANNEL);
     channel.remove();
-  } catch (e) {}
+  } catch (e) { }
 
   try {
     channel = doc.channels.add();
@@ -368,7 +424,7 @@ function _createTempSelectionChannel(doc) {
     if (channel) {
       try {
         channel.remove();
-      } catch (removeError) {}
+      } catch (removeError) { }
     }
     return null;
   }
@@ -454,7 +510,7 @@ function _getAdjustedSelectionBoundsSequence(bounds, adjustments, preExpandAmoun
         }
       }
     }
-    
+
     for (var i = 0; i < adjustments.length; i++) {
       var amount = _clampAdjustAmount(adjusted, adjustments[i]);
       if (amount === 0) continue;
@@ -467,10 +523,10 @@ function _getAdjustedSelectionBoundsSequence(bounds, adjustments, preExpandAmoun
   } finally {
     try {
       doc.selection.load(tempChannel);
-    } catch (restoreError) {}
+    } catch (restoreError) { }
     try {
       tempChannel.remove();
-    } catch (removeError) {}
+    } catch (removeError) { }
   }
 
   if (!adjusted) {
@@ -536,10 +592,11 @@ function _createMagicWandSelection(tolerance) {
     desc.putObject(charID.To, stringIDToTypeID("paint"), pos);
 
     desc.putInteger(stringIDToTypeID("tolerance"), tolerance || 20);
+    desc.putBoolean(stringIDToTypeID("contiguous"), true);
     desc.putBoolean(stringIDToTypeID("merged"), true);
     desc.putBoolean(stringIDToTypeID("antiAlias"), true);
     executeAction(charID.Set, desc, DialogModes.NO);
-  } catch (e) {}
+  } catch (e) { }
 }
 
 function _moveLayer(offsetX, offsetY) {
@@ -743,7 +800,7 @@ function _applyRichTextRanges(textParams, textRuns, textLength) {
   return true;
 }
 
-function _createAndSetLayerText(data, width, height) {
+function _createAndSetLayerText(data, width, height, originX, originY) {
   var style = _ensureStyle(data.style);
   style.textProps.layerText.textKey = data.text.replace(/\n+/g, "");
   style.textProps.layerText.textStyleRange[0].to = data.text.length;
@@ -754,18 +811,25 @@ function _createAndSetLayerText(data, width, height) {
     try {
       var textParams = jamText.getLayerText();
       _hostState.fallbackTextSize = textParams.layerText.textStyleRange[0].textStyle.size;
-    } catch (error) {}
+    } catch (error) { }
     style.textProps.layerText.textStyleRange[0].textStyle.size = _hostState.fallbackTextSize;
   }
+
+  // If originX/originY are provided, position the text box at those pixel coordinates.
+  var leftPt = typeof originX === "number" ? Math.round(_convertPixelToPoint(originX)) : 0;
+  var topPt = typeof originY === "number" ? Math.round(_convertPixelToPoint(originY)) : 0;
+  var widthPt = Math.round(_convertPixelToPoint(width));
+  var heightPt = Math.round(_convertPixelToPoint(height));
+
   style.textProps.layerText.textShape = [
     {
       textType: "box",
       orientation: "horizontal",
       bounds: {
-        top: 0,
-        left: 0,
-        right: _convertPixelToPoint(width),
-        bottom: _convertPixelToPoint(height),
+        top: topPt,
+        left: leftPt,
+        right: leftPt + widthPt,
+        bottom: topPt + heightPt,
       },
     },
   ];
@@ -900,9 +964,9 @@ function _setActiveLayerText() {
     if (dataText && dataStyle) {
       newTextParams = dataStyle.textProps;
       if (newTextParams.layerText.textStyleRange[0].textStyle.size == null &&
-          oldTextParams.layerText.textStyleRange &&
-          oldTextParams.layerText.textStyleRange[0] &&
-          oldTextParams.layerText.textStyleRange[0].textStyle.size != null) {
+        oldTextParams.layerText.textStyleRange &&
+        oldTextParams.layerText.textStyleRange[0] &&
+        oldTextParams.layerText.textStyleRange[0].textStyle.size != null) {
         newTextParams.layerText.textStyleRange[0].textStyle.size = oldTextParams.layerText.textStyleRange[0].textStyle.size;
       }
       newTextParams.layerText.textKey = dataText.replace(/\n+/g, "");
@@ -1027,19 +1091,19 @@ function _createTextLayerInSelection() {
     state.result = "doc";
     return;
   }
-  
+
   // Get the text size from the style to pre-expand/dilate selection
   var textSize = _hostState.fallbackTextSize || 20;
   var style = _ensureStyle(state.data.style);
-  if (style && style.textProps && style.textProps.layerText && 
-      style.textProps.layerText.textStyleRange && 
-      style.textProps.layerText.textStyleRange[0] &&
-      style.textProps.layerText.textStyleRange[0].textStyle &&
-      style.textProps.layerText.textStyleRange[0].textStyle.size) {
+  if (style && style.textProps && style.textProps.layerText &&
+    style.textProps.layerText.textStyleRange &&
+    style.textProps.layerText.textStyleRange[0] &&
+    style.textProps.layerText.textStyleRange[0].textStyle &&
+    style.textProps.layerText.textStyleRange[0].textStyle.size) {
     textSize = style.textProps.layerText.textStyleRange[0].textStyle.size;
   }
-  
-  var selection = _checkSelection({ 
+
+  var selection = _checkSelection({
     adjustSequence: _DEFAULT_ADJUST_SEQUENCE,
     preExpandAmount: textSize
   });
@@ -1069,18 +1133,18 @@ function _alignTextLayerToSelection() {
     state.result = "layer";
     return;
   }
-  
+
   // Get the text size to pre-expand/dilate selection
   var textSize = _getTextLayerSize();
-  
-  var selection = _checkSelection({ 
+
+  var selection = _checkSelection({
     adjustSequence: _DEFAULT_ADJUST_SEQUENCE,
     preExpandAmount: textSize
   });
   if (selection.error) {
     if (selection.error === "noSelection") {
       _createMagicWandSelection(20);
-      selection = _checkSelection({ 
+      selection = _checkSelection({
         adjustSequence: _DEFAULT_ADJUST_SEQUENCE,
         preExpandAmount: textSize
       });
@@ -1100,7 +1164,7 @@ function _alignTextLayerToSelection() {
     _resizeTextBoxToContent(dimensions.width, textBounds);
     bounds = _getCurrentTextLayerBounds();
   }
-  
+
   _deselect();
   _positionLayerWithinSelection(selection, bounds);
   if (wasPoint) {
@@ -1129,25 +1193,25 @@ function _changeActiveLayerTextSize() {
       var ref = new ActionReference();
       ref.putProperty(charID.Property, charID.TextStyle);
       ref.putEnumerated(charID.TextLayer, charID.Ordinal, charID.Target);
-      
+
       var currentTextStyle = executeActionGet(ref);
       if (currentTextStyle.hasKey(charID.TextStyle)) {
         var textStyle = currentTextStyle.getObjectValue(charID.TextStyle);
         var currentSize = textStyle.getDouble(charID.Size);
         var sizeUnit = textStyle.getUnitDoubleType(charID.Size);
         var newSize = currentSize + state.value;
-        
+
         // Appliquer le nouveau size directement
         var descriptor = new ActionDescriptor();
         var reference = new ActionReference();
         reference.putProperty(charID.Property, charID.TextStyle);
         reference.putEnumerated(charID.TextLayer, charID.Ordinal, charID.Target);
         descriptor.putReference(charID.Null, reference);
-        
+
         var newTextStyle = new ActionDescriptor();
         newTextStyle.putUnitDouble(charID.Size, sizeUnit, newSize);
         descriptor.putObject(charID.To, charID.TextStyle, newTextStyle);
-        
+
         executeAction(charID.Set, descriptor, DialogModes.NO);
       }
     } catch (e) {
@@ -1343,6 +1407,73 @@ function createTextLayerInSelection(data, point) {
   return state.result;
 }
 
+function _createTextLayersInStoredSelections() {
+  var state = _hostState.createTextLayersInStoredSelections;
+  if (!documents.length) {
+    state.result = "doc";
+    return;
+  }
+  
+  if (!state.selections || state.selections.length === 0) {
+    state.result = "noSelection";
+    return;
+  }
+  
+  var texts = state.data.texts || [];
+  var styles = state.data.styles || [];
+  var richTextRunsList = state.data.richTextRuns || [];
+  
+  if (texts.length === 0) {
+    state.result = "noSelection";
+    return;
+  }
+  
+  var maxCount = Math.min(texts.length, state.selections.length);
+  
+  for (var i = 0; i < maxCount; i++) {
+    var text = texts[i] || texts[texts.length - 1] || "";
+    var style = styles[i] || styles[styles.length - 1] || { textProps: _getHostDefaultStyle(), stroke: _getLayerStroke() };
+    var richTextRuns = richTextRunsList[i] || null;
+    var selection = state.selections[i];
+    
+    if (!text) continue;
+    
+    var dimensions = _calculateSelectionDimensions(selection, state.padding);
+    
+    var data = { text: text, style: style, richTextRuns: richTextRuns, direction: state.data.direction };
+    _createAndSetLayerText(data, dimensions.width, dimensions.height);
+    
+    var bounds = _getCurrentTextLayerBounds();
+    if (state.point) {
+      _changeToPointText();
+    } else {
+      _resizeTextBoxToContent(dimensions.width, bounds);
+    }
+    bounds = _getCurrentTextLayerBounds();
+    _positionLayerWithinSelection(selection, bounds);
+  }
+  
+  state.selections = [];
+  state.result = "";
+}
+
+function createTextLayersInStoredSelections(data, point) {
+  var state = _hostState.createTextLayersInStoredSelections;
+  state.data = data;
+  state.point = point;
+  state.padding = data.padding || 0;
+  state.result = "";
+  
+  if (data && data.selections) {
+    state.selections = data.selections;
+  } else {
+    state.selections = [];
+  }
+  
+  app.activeDocument.suspendHistory("TyperTools Multiple Paste", "_createTextLayersInStoredSelections()");
+  return state.result;
+}
+
 function alignTextLayerToSelection(data) {
   var state = _hostState.alignTextLayerToSelection;
   state.resize = !!data.resizeTextBox;
@@ -1373,26 +1504,11 @@ function getCurrentSelection() {
 
 function startSelectionMonitoring() {
   var monitor = _hostState.selectionMonitor;
-  // Démarrer la surveillance des changements de sélection
+  // Make sure to remove any leftover notifier from previous sessions
   if (monitor.callback) {
     app.removeNotifier("Slct", monitor.callback);
+    monitor.callback = null;
   }
-  
-  monitor.callback = function() {
-    var currentSelection = _checkSelection({ adjustAmount: 0 });
-    if (!currentSelection.error) {
-      var currentBounds = _selectionBoundsKey(currentSelection);
-      if (currentBounds !== monitor.lastBoundsKey) {
-        monitor.lastBoundsKey = currentBounds;
-        // Notifier l'extension CEP du changement (Mac only workaround)
-        if ($.os.toLowerCase().indexOf("mac") !== -1) {
-          app.system("osascript -e 'tell application \"System Events\" to keystroke \"x\" using {command down, option down, shift down}'");
-        }
-      }
-    }
-  };
-  
-  app.addNotifier("Slct", monitor.callback);
 }
 
 function stopSelectionMonitoring() {
@@ -1401,181 +1517,124 @@ function stopSelectionMonitoring() {
     app.removeNotifier("Slct", monitor.callback);
     monitor.callback = null;
   }
-  monitor.lastBoundsKey = null;
+  monitor.lastBounds = null;
 }
 
 function getSelectionChanged() {
-  var monitor = _hostState.selectionMonitor;
-  var currentSelection = _checkSelection({ adjustAmount: 0 });
-  var keyboardState = ScriptUI.environment && ScriptUI.environment.keyboardState;
-  var shiftPressed = !!(keyboardState && keyboardState.shiftKey);
+  try {
+    var monitor = _hostState.selectionMonitor;
+    var keyboardState = ScriptUI.environment && ScriptUI.environment.keyboardState;
+    var shiftPressed = !!(keyboardState && keyboardState.shiftKey);
 
-  if (!currentSelection.error) {
-    var currentBounds = _selectionBoundsKey(currentSelection);
-    if (currentBounds !== monitor.lastBoundsKey) {
-      monitor.lastBoundsKey = currentBounds;
-      return jamJSON.stringify({
+    // Fast check: just get raw bounding box extremeties to see if anything changed.
+    var rawSelection = _getCurrentSelectionBounds();
+    if (!rawSelection) {
+      return jamJSON.stringify({ noChange: true, shiftKey: shiftPressed });
+    }
+
+    // Force array format to unify logic
+    var selectionArray = Object.prototype.toString.call(rawSelection) === '[object Array]' ? rawSelection : [rawSelection];
+
+    var groups = [];
+    for (var i = 0; i < selectionArray.length; i++) {
+      if (selectionArray[i].width < 2 && selectionArray[i].height < 2) continue;
+      groups.push([selectionArray[i]]);
+    }
+
+    var changed = true;
+    var margin = 30; // 30 pixels tolerance to merge nearby pixel specks into the main bubble
+    while (changed) {
+      changed = false;
+      for (var i = 0; i < groups.length; i++) {
+        for (var j = i + 1; j < groups.length; j++) {
+          var overlap = false;
+          for (var m = 0; m < groups[i].length; m++) {
+            for (var n = 0; n < groups[j].length; n++) {
+              var b1 = groups[i][m];
+              var b2 = groups[j][n];
+              if (!(b1.right + margin < b2.left - margin ||
+                b1.left - margin > b2.right + margin ||
+                b1.bottom + margin < b2.top - margin ||
+                b1.top - margin > b2.bottom + margin)) {
+                overlap = true;
+                break;
+              }
+            }
+            if (overlap) break;
+          }
+
+          if (overlap) {
+            groups[i] = groups[i].concat(groups[j]);
+            groups.splice(j, 1);
+            changed = true;
+            break;
+          }
+        }
+        if (changed) break;
+      }
+    }
+
+    var merged = [];
+    for (var k = 0; k < groups.length; k++) {
+      var g = groups[k];
+      var minLeft = 99999, minTop = 99999, maxRight = -99999, maxBottom = -99999;
+      for (var m = 0; m < g.length; m++) {
+        if (g[m].left < minLeft) minLeft = g[m].left;
+        if (g[m].top < minTop) minTop = g[m].top;
+        if (g[m].right > maxRight) maxRight = g[m].right;
+        if (g[m].bottom > maxBottom) maxBottom = g[m].bottom;
+      }
+      var w = maxRight - minLeft;
+      var h = maxBottom - minTop;
+      if (w > 2 && h > 2) { // Allow any bubble larger than 2x2 pixels
+        merged.push({
+          top: minTop, left: minLeft, right: maxRight, bottom: maxBottom,
+          width: w, height: h,
+          xMid: (minLeft + maxRight) / 2, yMid: (minTop + maxBottom) / 2
+        });
+      }
+    }
+
+    if (merged.length === 0) {
+      return jamJSON.stringify({ noChange: true, shiftKey: shiftPressed });
+    }
+
+    var isSame = false;
+    if (monitor.lastBounds && merged.length === 1) {
+      var diffTop = Math.abs(merged[0].top - monitor.lastBounds.top);
+      var diffLeft = Math.abs(merged[0].left - monitor.lastBounds.left);
+      var diffRight = Math.abs(merged[0].right - monitor.lastBounds.right);
+      var diffBottom = Math.abs(merged[0].bottom - monitor.lastBounds.bottom);
+      if (diffTop <= 5 && diffLeft <= 5 && diffRight <= 5 && diffBottom <= 5) {
+        isSame = true;
+      }
+    }
+
+    if (isSame && !shiftPressed) {
+      return jamJSON.stringify({ noChange: true, shiftKey: shiftPressed });
+    }
+
+    monitor.lastBounds = merged[0]; // just store first to prevent re-trigger
+
+    var multiResults = [];
+    for (var k = 0; k < merged.length; k++) {
+      var mbnd = merged[k];
+      multiResults.push({
         shiftKey: shiftPressed,
-        top: currentSelection.top,
-        left: currentSelection.left,
-        right: currentSelection.right,
-        bottom: currentSelection.bottom,
-        width: currentSelection.width,
-        height: currentSelection.height,
-        xMid: currentSelection.xMid,
-        yMid: currentSelection.yMid,
+        top: mbnd.top, left: mbnd.left, right: mbnd.right, bottom: mbnd.bottom,
+        width: mbnd.width, height: mbnd.height,
+        xMid: mbnd.xMid, yMid: mbnd.yMid
       });
     }
-  }
-  return jamJSON.stringify({ noChange: true, shiftKey: shiftPressed });
-}
 
-function _createTextLayersInStoredSelections() {
-  var state = _hostState.createTextLayersInStoredSelections;
-  if (!documents.length) {
-    state.result = "doc";
-    return;
-  }
-  
-  var texts = state.data.texts || [];
-  var styles = state.data.styles || [];
-  
-  if (texts.length === 0 || state.selections.length === 0) {
-    state.result = "noSelection";
-    return;
-  }
-  
-  var maxCount = Math.min(texts.length, state.selections.length);
-  
-  for (var i = 0; i < maxCount; i++) {
-    try {
-      var text = texts[i] || texts[texts.length - 1] || "";
-      var textRuns = state.data.richTextRuns
-        ? (state.data.richTextRuns[i] || state.data.richTextRuns[state.data.richTextRuns.length - 1])
-        : null;
-      var baseStyle = styles[i] || styles[styles.length - 1] || null;
-      var style = _ensureStyle(baseStyle);
-      var selection = state.selections[i];
-
-      if (!selection || typeof selection.width !== "number" || typeof selection.height !== "number") {
-        state.result = "invalidSelection";
-        return;
-      }
-
-      if (!text) continue;
-
-      var dimensions = _calculateSelectionDimensions(selection, state.padding);
-      if (!dimensions || isNaN(dimensions.width) || isNaN(dimensions.height) || dimensions.width <= 0 || dimensions.height <= 0) {
-        state.result = "invalidSelection";
-        return;
-      }
-
-      // Créer le layer de texte
-      var data = { text: text, style: style, direction: state.data.direction, richTextRuns: textRuns };
-      _createAndSetLayerText(data, dimensions.width, dimensions.height);
-
-      var bounds = _getCurrentTextLayerBounds();
-      if (state.point) {
-        _changeToPointText();
-      } else {
-        _resizeTextBoxToContent(dimensions.width, bounds);
-      }
-      bounds = _getCurrentTextLayerBounds();
-
-      // Positionner le layer à l'emplacement de la sélection stockée
-      _positionLayerWithinSelection(selection, bounds);
-    } catch (e) {
-      state.result = "scriptError: " + (e && e.message ? e.message : e);
-      return;
-    }
-  }
-  
-  // Vider les sélections stockées après utilisation
-  state.selections = [];
-  state.result = "";
-}
-
-function createTextLayersInStoredSelections(data, point) {
-  var state = _hostState.createTextLayersInStoredSelections;
-  state.data = data;
-  state.point = point;
-  state.padding = data.padding || 0;
-  state.result = "";
-  
-  // Les sélections sont passées directement depuis React
-  if (data && data.selections) {
-    state.selections = data.selections;
-  } else {
-    state.selections = [];
-  }
-  
-  app.activeDocument.suspendHistory("TyperTools Multiple Paste", "_createTextLayersInStoredSelections()");
-  return state.result;
-}
-
-function openFile(path, autoClose) {
-  if (autoClose && _hostState.lastOpenedDocId !== null) {
-    for (var i = 0; i < app.documents.length; i++) {
-      var doc = app.documents[i];
-      if (doc.id === _hostState.lastOpenedDocId) {
-        try {
-          doc.close(SaveOptions.SAVECHANGES);
-        } catch (e) {}
-        break;
-      }
-    }
-  }
-  var newDoc = app.open(File(path));
-  if (autoClose) {
-    _hostState.lastOpenedDocId = newDoc.id;
-  }
-}
-
-function deleteFolder(folderPath) {
-  try {
-    var folder = new Folder(folderPath);
-    if (folder.exists) {
-      // Recursively delete contents
-      var files = folder.getFiles();
-      for (var i = 0; i < files.length; i++) {
-        if (files[i] instanceof Folder) {
-          deleteFolder(files[i].fsName);
-        } else {
-          files[i].remove();
-        }
-      }
-      folder.remove();
-    }
-    return 'OK';
+    var payload = {
+      multiSelection: multiResults,
+      shiftKey: shiftPressed,
+      top: merged[0].top, left: merged[0].left, right: merged[0].right, bottom: merged[0].bottom,
+      width: merged[0].width, height: merged[0].height, xMid: merged[0].xMid, yMid: merged[0].yMid
+    };
+    return jamJSON.stringify(payload);
   } catch (e) {
-    return 'ERROR: ' + e.message;
-  }
-}
-
-function openFolder(folderPath) {
-  try {
-    var os = $.os.toLowerCase();
-    if (os.indexOf('win') !== -1) {
-      // Windows: open Explorer
-      app.system('explorer "' + folderPath.replace(/\//g, '\\') + '"');
-    } else {
-      // macOS: open Finder
-      app.system('open "' + folderPath + '"');
-    }
-    return 'OK';
-  } catch (e) {
-    return 'ERROR: ' + e.message;
-  }
-}
-
-function makeExecutable(filePath) {
-  try {
-    var os = $.os.toLowerCase();
-    if (os.indexOf('mac') !== -1) {
-      app.system('chmod +x "' + filePath + '"');
-    }
-    return 'OK';
-  } catch (e) {
-    return 'ERROR: ' + e.message;
+    return jamJSON.stringify({ error: true, message: "getSelectionChanged inner error: " + e.message + " on line " + e.line, shiftKey: false });
   }
 }

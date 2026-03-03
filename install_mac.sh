@@ -31,6 +31,7 @@ MSG_OPEN_PHOTOSHOP_EN="Open Photoshop and in the menu click the following: [Wind
 MSG_PRESS_ENTER_EN="Press Enter to continue"
 MSG_CREDITS_EN="Thanks a lot to Swirt for TyperTools and SeanR & Sakushi for this fork."
 MSG_DISCORD_EN="ScanR's Discord if you need help: https://discord.com/invite/Pdmfmqk"
+MSG_DISCORD2_EN="Grave's Discord if you need help: https://discord.gg/kk6weaMDFa"
 
 # —————————————————————————————————————————————————————————————
 # Messages en français
@@ -43,6 +44,7 @@ MSG_OPEN_PHOTOSHOP_FR="Ouvrez Photoshop et dans le menu cliquez sur : [Fenêtre]
 MSG_PRESS_ENTER_FR="Appuyez sur Entrée pour continuer"
 MSG_CREDITS_FR="Merci beaucoup à Swirt pour TyperTools et SeanR & Sakushi pour ce fork."
 MSG_DISCORD_FR="Discord de ScanR si besoin d'aide : https://discord.com/invite/Pdmfmqk"
+MSG_DISCORD2_FR="Discord de Grave si besoin d'aide : https://discord.gg/kk6weaMDFa"
 
 # —————————————————————————————————————————————————————————————
 # Messages en espagnol
@@ -55,6 +57,7 @@ MSG_OPEN_PHOTOSHOP_ES="Abre Photoshop y en el menú haz clic en: [Ventana] > [Ex
 MSG_PRESS_ENTER_ES="Presiona Enter para continuar"
 MSG_CREDITS_ES="Muchas gracias a Swirt por TyperTools y a SeanR & Sakushi por este fork."
 MSG_DISCORD_ES="Discord de ScanR si necesitas ayuda: https://discord.com/invite/Pdmfmqk"
+MSG_DISCORD2_ES="Discord de Grave si necesitas ayuda: https://discord.gg/kk6weaMDFa"
 
 # —————————————————————————————————————————————————————————————
 # Messages en portugais
@@ -80,6 +83,7 @@ if [ "$LANGUAGE" = "fr" ]; then
   MSG_PRESS_ENTER=$MSG_PRESS_ENTER_FR
   MSG_CREDITS=$MSG_CREDITS_FR
   MSG_DISCORD=$MSG_DISCORD_FR
+  MSG_DISCORD2=$MSG_DISCORD2_FR
 elif [ "$LANGUAGE" = "es" ]; then
   MSG_INSTALL=$MSG_INSTALL_ES
   MSG_CLOSE_PHOTOSHOP=$MSG_CLOSE_PHOTOSHOP_ES
@@ -89,6 +93,7 @@ elif [ "$LANGUAGE" = "es" ]; then
   MSG_PRESS_ENTER=$MSG_PRESS_ENTER_ES
   MSG_CREDITS=$MSG_CREDITS_ES
   MSG_DISCORD=$MSG_DISCORD_ES
+  MSG_DISCORD2=$MSG_DISCORD2_ES
 elif [ "$LANGUAGE" = "pt" ]; then
   MSG_INSTALL=$MSG_INSTALL_PT
   MSG_CLOSE_PHOTOSHOP=$MSG_CLOSE_PHOTOSHOP_PT
@@ -98,6 +103,7 @@ elif [ "$LANGUAGE" = "pt" ]; then
   MSG_PRESS_ENTER=$MSG_PRESS_ENTER_PT
   MSG_CREDITS=$MSG_CREDITS_PT
   MSG_DISCORD=$MSG_DISCORD_PT
+  MSG_DISCORD2=$MSG_DISCORD2_PT
 else
   MSG_INSTALL=$MSG_INSTALL_EN
   MSG_CLOSE_PHOTOSHOP=$MSG_CLOSE_PHOTOSHOP_EN
@@ -107,6 +113,7 @@ else
   MSG_PRESS_ENTER=$MSG_PRESS_ENTER_EN
   MSG_CREDITS=$MSG_CREDITS_EN
   MSG_DISCORD=$MSG_DISCORD_EN
+  MSG_DISCORD2=$MSG_DISCORD2_EN
 fi
 
 # —————————————————————————————————————————————————————————————
@@ -128,7 +135,7 @@ is_preferences_domain_exists() {
   defaults read "$1" > /dev/null 2> /dev/null
 }
 
-for version in {6..12}; do
+for version in {6..18}; do
   if is_preferences_domain_exists com.adobe.CSXS.${version} ; then
     defaults write com.adobe.CSXS.${version} PlayerDebugMode 1
   fi
@@ -172,6 +179,7 @@ $MSG_OPEN_PHOTOSHOP
 
 $MSG_CREDITS
 $MSG_DISCORD
+$MSG_DISCORD2
 
 EOF
 read -n 1 -p "$MSG_PRESS_ENTER"

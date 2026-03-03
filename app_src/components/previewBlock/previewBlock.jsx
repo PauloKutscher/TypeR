@@ -94,7 +94,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const clearStoredSelections = () => {
     const storedSelections = context.state.storedSelections || [];
     if (storedSelections.length === 0) return;
-    
+
     context.dispatch({ type: "removeSelection", index: storedSelections.length - 1 });
   };
 
@@ -124,17 +124,39 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   // Fonction pour vérifier les changements de sélection
   const checkForSelectionChange = React.useCallback(() => {
     if (!context.state.multiBubbleMode) return;
-    
+
     getSelectionChanged((selection) => {
       if (selection) {
-        if (selection.shiftKey) {
-          showShiftTip();
+        if (selection.multiSelection && selection.multiSelection.length > 0) {
+          // Photoshop automatically split the bounds for multiple disjoint path items
+          const storedHashes = context.state.storedSelections?.map(s => getSelectionBoundsHash(s)) || [];
+
+          let addedAny = false;
+          selection.multiSelection.forEach(sel => {
+            const { shiftKey, ...cleanSelection } = sel;
+            const newHash = getSelectionBoundsHash(cleanSelection);
+            if (!storedHashes.includes(newHash)) {
+              if (!addedAny) setLastSelectionHash(newHash);
+
+              context.dispatch({
+                type: "addSelection",
+                selection: cleanSelection,
+                lineIndex: context.state.currentLineIndex,
+              });
+              addedAny = true;
+            }
+          });
+
+          if (addedAny && context.state.multiBubbleMode) {
+            context.dispatch({ type: "nextLine", add: true });
+          }
           return;
         }
+
         const { shiftKey, ...cleanSelection } = selection;
         const newHash = getSelectionBoundsHash(cleanSelection);
         const storedHashes = context.state.storedSelections?.map(s => getSelectionBoundsHash(s)) || [];
-        
+
         // Si la sélection n'est pas déjà stockée, l'ajouter
         if (!storedHashes.includes(newHash)) {
           setLastSelectionHash(newHash);
@@ -142,7 +164,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         }
       }
     });
-  }, [context.state.multiBubbleMode, context.state.storedSelections, context.state.currentLineIndex, showShiftTip]);
+  }, [context.state.multiBubbleMode, context.state.storedSelections, context.state.currentLineIndex]);
 
   // Effect pour démarrer/arrêter la surveillance automatique
   React.useEffect(() => {
@@ -199,7 +221,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
 
   const createLayer = () => {
     const storedSelections = context.state.storedSelections || [];
-    
+
     if (context.state.multiBubbleMode && storedSelections.length > 0) {
       // Mode sélections multiples
       const texts = [];
@@ -259,7 +281,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         }
         styles.push(lineStyle);
       }
-      
+
       const pointText = context.state.pastePointText;
       const padding = context.state.internalPadding || 0;
       const direction = context.state.direction;
@@ -293,7 +315,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
 
   const insertStyledText = () => {
     const storedSelections = context.state.storedSelections || [];
-    
+
     if (context.state.multiBubbleMode && storedSelections.length > 0) {
       // En mode multi-bubble, utiliser la même logique que createLayer
       createLayer();
@@ -350,9 +372,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           <div className="preview-top_selection-controls">
             <div className="preview-top_selection-info">
               <span className="preview-top_selection-count">{context.state.storedSelections.length} {context.state.storedSelections.length > 1 ? (locale.selectionsCount || 'selections') : (locale.selectionCount || 'selection')}</span>
-              <button 
-                className="topcoat-icon-button--large" 
-                title={locale.clearSelections || "Clear selections"} 
+              <button
+                className="topcoat-icon-button--large"
+                title={locale.clearSelections || "Clear selections"}
                 onMouseDown={handleClearMouseDown}
                 onMouseUp={handleClearMouseUp}
                 onMouseLeave={handleClearMouseLeave}
@@ -372,8 +394,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           <div className="preview-top_selection-tip">
             <FiMinusCircle size={14} />
             <span>{locale.multiBubbleClearAllTip || "Tip: Hold the - button for 1 second to clear all selections at once"}</span>
-            <button 
-              className="preview-top_selection-tip-close" 
+            <button
+              className="preview-top_selection-tip-close"
               onClick={closeClearAllTip}
               title={locale.close || "Close"}
             >
@@ -383,8 +405,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         )}
         <div className="preview-top_main-controls">
           <button className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large--cta" title={
-            context.state.multiBubbleMode && context.state.storedSelections && context.state.storedSelections.length > 0 
-              ? `Insérer ${context.state.storedSelections.length} texte${context.state.storedSelections.length > 1 ? 's' : ''}` 
+            context.state.multiBubbleMode && context.state.storedSelections && context.state.storedSelections.length > 0
+              ? `Insérer ${context.state.storedSelections.length} texte${context.state.storedSelections.length > 1 ? 's' : ''}`
               : locale.createLayerDescr
           } onClick={createLayer}>
             <AiOutlineBorderInner size={18} /> {locale.createLayer}
