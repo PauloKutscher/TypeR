@@ -22,8 +22,11 @@ const LineItem = React.memo(function LineItem({ line, direction, isCurrent, imag
   }, [dispatch, line.rawIndex]);
 
   const handleInsert = React.useCallback(() => {
-    setActiveLayerText(line.text, null, direction);
-    dispatch({ type: "nextLine", add: true });
+    setActiveLayerText(line.text, null, direction, (ok) => {
+      if (ok) {
+        dispatch({ type: "nextLine", add: true });
+      }
+    });
   }, [dispatch, line.text, direction]);
 
   return (

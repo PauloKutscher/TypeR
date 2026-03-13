@@ -12,7 +12,7 @@ const WIN = "WIN";
 const intervalTime = 50;
 
 const checkShortcut = (state, ref) => {
-  return ref.every((key) => state.includes(key));
+  return Array.isArray(ref) && ref.length > 0 && ref.every((key) => state.includes(key));
 };
 
 const HotkeysListner = React.memo(function HotkeysListner() {
@@ -103,7 +103,8 @@ const HotkeysListner = React.memo(function HotkeysListner() {
 
           const pointText = ctx.state.pastePointText;
           const padding = ctx.state.internalPadding || 0;
-          createTextLayersInStoredSelections(texts, styles, storedSelections, pointText, padding, (ok) => {
+          const direction = ctx.state.direction;
+          createTextLayersInStoredSelections(texts, styles, storedSelections, pointText, padding, direction, (ok) => {
             if (ok) {
               ctx.dispatch({ type: "clearSelections" });
             }
@@ -123,7 +124,7 @@ const HotkeysListner = React.memo(function HotkeysListner() {
           }
           const pointText = ctx.state.pastePointText;
           const padding = ctx.state.internalPadding || 0;
-          createTextLayerInSelection(line.text, style, pointText, padding, (ok) => {
+          createTextLayerInSelection(line.text, style, pointText, padding, ctx.state.direction, (ok) => {
             if (ok) ctx.dispatch({ type: "nextLine", add: true });
           });
         }

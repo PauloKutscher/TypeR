@@ -217,13 +217,6 @@ foreach ($folder in $FoldersToCopy) {
     }
 }
 
-# Copy themes
-if (Test-Path "$sourcePath\\themes") {
-    $ThemeDest = "$TargetDir\\app\\themes"
-    if (-not (Test-Path $ThemeDest)) { New-Item $ThemeDest -ItemType Directory -Force | Out-Null }
-    Copy-Item "$sourcePath\\themes\\*" -Destination $ThemeDest -Recurse -Force
-}
-
 # Restore storage
 if (Test-Path "$TempBackupContainer\\storage") {
     Copy-Item "$TempBackupContainer\\storage" -Destination "$TargetDir" -Recurse -Force
@@ -324,12 +317,6 @@ for folder in app CSXS icons locale; do
         cp -r "$SOURCE_PATH/$folder" "$DEST_DIR/"
     fi
 done
-
-# Copy themes
-if [ -d "$SOURCE_PATH/themes" ]; then
-    mkdir -p "$DEST_DIR/app/themes"
-    cp -r "$SOURCE_PATH/themes/"* "$DEST_DIR/app/themes/"
-fi
 
 # Restore storage
 if [ -f "$TEMP_STORAGE" ]; then

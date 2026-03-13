@@ -20,7 +20,6 @@ const SettingsModal = React.memo(function SettingsModal() {
   );
   const [defaultStyleId, setDefaultStyleId] = React.useState(context.state.defaultStyleId || "");
   const [language, setLanguage] = React.useState(context.state.language || "auto");
-  const [theme, setTheme] = React.useState(context.state.theme || "default");
   const [direction, setDirection] = React.useState(context.state.direction || "ltr");
   const [middleEast, setMiddleEast] = React.useState(!!context.state.middleEast);
   const [autoClosePSD, setAutoClosePSD] = React.useState(
@@ -91,11 +90,6 @@ const SettingsModal = React.memo(function SettingsModal() {
 
   const changeLanguage = (e) => {
     setLanguage(e.target.value);
-    setEdited(true);
-  };
-
-  const changeTheme = (e) => {
-    setTheme(e.target.value);
     setEdited(true);
   };
 
@@ -212,12 +206,6 @@ const SettingsModal = React.memo(function SettingsModal() {
         lang: language,
       });
       setTimeout(() => window.location.reload(), 100);
-    }
-    if (theme !== context.state.theme) {
-      context.dispatch({
-        type: "setTheme",
-        theme,
-      });
     }
     if (direction !== context.state.direction) {
       context.dispatch({
@@ -598,23 +586,6 @@ const SettingsModal = React.memo(function SettingsModal() {
                   ))}
                 </select>
               </div>
-            </div>
-            <div className="field">
-              <div className="field-label">{locale.settingsThemeLabel}</div>
-              <div className="field-input">
-                <select value={theme} onChange={changeTheme} className="topcoat-textarea" disabled>
-                  {Object.keys(config.themes).map((code) => {
-                    const key = 'settingsTheme' + code
-                      .replace(/(^|-)(\w)/g, (m, p1, p2) => p2.toUpperCase());
-                    return (
-                      <option key={code} value={code}>
-                        {locale[key] || config.themes[code]}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-              <div className="field-descr">{locale.settingsThemeDisabledDescr}</div>
             </div>
             <div className="field">
               <div className="field-label">{locale.settingsDirectionLabel}</div>

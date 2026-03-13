@@ -25,7 +25,6 @@ const storeFields = [
   "images",
   "shortcut",
   "language",
-  "theme",
   "direction",
   "middleEast",
   "lastOpenedImagePath",
@@ -141,7 +140,6 @@ const initialState = {
   modalData: {},
   images: [],
   language: "auto",
-  theme: "default",
   direction: "ltr",
   middleEast: false,
   lastOpenedImagePath: null,
@@ -151,7 +149,6 @@ const initialState = {
   interpretMarkdown: storage.data?.interpretMarkdown === true,
   styleSizeStep: 0.1,
   ...storage.data,
-  theme: "default",
   shortcut: { ...defaultShortcut, ...(storage.data?.shortcut || {}) },
 };
 
@@ -541,11 +538,6 @@ const reducer = (state, action) => {
     break;
   }
 
-  case "setTheme": {
-    newState.theme = "default";
-    break;
-  }
-
   case "setDirection": {
     newState.direction = action.direction || "ltr";
     break;
@@ -711,7 +703,11 @@ const reducer = (state, action) => {
     const folderPrefixes = [];
     const folderOnlyPrefixes = [];
     const unsortedPrefixes = [];
-    const currentFolder = state.currentStyle ? state.currentStyle.folder || null : null;
+    const activeStyleForPrefixes =
+      newState.styles.find((style) => style.id === newState.currentStyleId) ||
+      state.currentStyle ||
+      null;
+    const currentFolder = activeStyleForPrefixes ? activeStyleForPrefixes.folder || null : null;
     for (const style of newState.styles) {
       if (style.prefixesDisabled) continue;
       const folder = style.folder || null;
@@ -857,16 +853,6 @@ const useContext = () => React.useContext(Context);
 const ContextProvider = React.memo(function ContextProvider(props) {
   const [state, dispatch] = React.useReducer(reducer, initialState);
   React.useEffect(() => dispatch({}), []);
-
-  const defaultStyleRef = React.useRef('');
-  React.useEffect(() => {
-    const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]'));
-    const indexLink = links.find((l) => !l.id && l.getAttribute('href'));
-    if (indexLink) {
-      defaultStyleRef.current = indexLink.getAttribute('href');
-      indexLink.remove();
-    }
-  }, []);
   React.useEffect(() => {
     if (state.checkUpdates) {
       checkUpdate(config.appVersion).then((data) => {
@@ -876,15 +862,6 @@ const ContextProvider = React.memo(function ContextProvider(props) {
       });
     }
   }, [state.checkUpdates]);
-  React.useEffect(() => {
-    const link = document.getElementById('themeStyle');
-    if (!link) return;
-    if (state.theme && state.theme !== 'default') {
-      link.setAttribute('href', `./themes/${state.theme}.css`);
-    } else {
-      link.setAttribute('href', defaultStyleRef.current || './index.css');
-    }
-  }, [state.theme]);
   const contextValue = React.useMemo(() => ({ state, dispatch }), [state, dispatch]);
   return <Context.Provider value={contextValue}>{props.children}</Context.Provider>;
 });
