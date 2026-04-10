@@ -1,9 +1,11 @@
 const config = {
   appTitle: "TypeR",
-  appVersion: "2.5.0",
+  appVersion: "2.6.0",
   appUrl: "https://typer.hayasaku.fr/",
   authorName: "Swirt & SeanR & Sakushi",
   authorUrl: "https://discord.gg/dsHn3xQQTC",
+  authorName2: "Grave",
+  authorUrl2: "https://discord.gg/kk6weaMDFa",
   exportFileName: "TypeR_Export",
   defaultPrefixColor: "#FFF3B0",
   checkUpdates: true,
@@ -18,6 +20,7 @@ const config = {
     tr_TR: "Türkçe",
     uk_UA: "Українська",
     vi_VN: "Tiếng Việt",
+    ar_AE: "العربية",
   },
 };
 

@@ -124,9 +124,51 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   // Fonction pour vérifier les changements de sélection
   const checkForSelectionChange = React.useCallback(() => {
     if (!context.state.multiBubbleMode) return;
-    
+
     getSelectionChanged((selection) => {
       if (selection) {
+        const getNextLineIndex = (lineIndex) => {
+          const lines = context.state.lines || [];
+          for (let i = lineIndex + 1; i < lines.length; i++) {
+            if (!lines[i].ignore) {
+              return lines[i].rawIndex;
+            }
+          }
+          return lineIndex;
+        };
+
+        if (selection.multiSelection && selection.multiSelection.length > 0) {
+          const storedHashSet = new Set((context.state.storedSelections || []).map((storedSelection) => getSelectionBoundsHash(storedSelection)));
+          let nextLineIndex = context.state.currentLineIndex;
+          let addedCount = 0;
+
+          selection.multiSelection.forEach((multiSelection) => {
+            const { shiftKey, ...cleanSelection } = multiSelection;
+            const selectionHash = getSelectionBoundsHash(cleanSelection);
+            if (storedHashSet.has(selectionHash)) {
+              return;
+            }
+
+            storedHashSet.add(selectionHash);
+            if (addedCount === 0) {
+              setLastSelectionHash(selectionHash);
+            }
+
+            context.dispatch({
+              type: "addSelection",
+              selection: cleanSelection,
+              lineIndex: nextLineIndex,
+            });
+            addedCount++;
+            nextLineIndex = getNextLineIndex(nextLineIndex);
+          });
+
+          if (addedCount > 0 && nextLineIndex !== context.state.currentLineIndex) {
+            context.dispatch({ type: "setCurrentLineIndex", index: nextLineIndex });
+          }
+          return;
+        }
+
         if (selection.shiftKey) {
           showShiftTip();
           return;
@@ -142,7 +184,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         }
       }
     });
-  }, [context.state.multiBubbleMode, context.state.storedSelections, context.state.currentLineIndex, showShiftTip]);
+  }, [context.state.multiBubbleMode, context.state.storedSelections, context.state.currentLineIndex, context.state.lines, showShiftTip]);
 
   // Effect pour démarrer/arrêter la surveillance automatique
   React.useEffect(() => {

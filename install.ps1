@@ -37,6 +37,7 @@ $msg_open     = "Open Photoshop and in the upper menu click the following: [Wind
 $msg_pause    = "Press Enter to continue..."
 $msg_credits  = "Many thanks to Swirt for TyperTools and SeanR & Sakushi for this fork."
 $msg_discord  = "ScanR's Discord if you need help: https://discord.com/invite/Pdmfmqk"
+$msg_discord2 = "Grave's Discord if you need help: https://discord.gg/kk6weaMDFa"
 
 if ($Lang -eq "fr") {
     $msg_install  = "L'extension Photoshop TypeR v$ExtVersion sera installee."
@@ -46,6 +47,7 @@ if ($Lang -eq "fr") {
     $msg_pause    = "Appuyez sur Entree pour continuer..."
     $msg_credits  = "Merci beaucoup et Swirt pour TyperTools et SeanR & Sakushi pour ce fork."
     $msg_discord  = "Discord de ScanR si besoin d'aide : https://discord.com/invite/Pdmfmqk"
+    $msg_discord2 = "Discord de Grave si besoin d'aide : https://discord.gg/kk6weaMDFa"
 }
 elseif ($Lang -eq "es") {
     $msg_install  = "La extensión de Photoshop TypeR v$ExtVersion se instalará."
@@ -55,6 +57,7 @@ elseif ($Lang -eq "es") {
     $msg_pause    = "Presiona Enter para continuar..."
     $msg_credits  = "Muchas gracias a Swirt por TyperTools y a SeanR & Sakushi por este fork."
     $msg_discord  = "Discord de ScanR si necesitas ayuda: https://discord.com/invite/Pdmfmqk"
+    $msg_discord2 = "Discord de Grave si necesitas ayuda: https://discord.gg/kk6weaMDFa"
 }
 elseif ($Lang -eq "pt") {
     $msg_install  = "Photoshop extension TypeR v$ExtVersion will be installed."
@@ -64,6 +67,7 @@ elseif ($Lang -eq "pt") {
     $msg_pause    = "Pressione Enter para continuar..."
     $msg_credits  = "Muito obrigado a Swirt pelo TyperTools e a SeanR & Sakushi por este fork."
     $msg_discord  = "Discord do ScanR se precisar de ajuda: https://discord.com/invite/Pdmfmqk"
+    $msg_discord2 = "Discord do Grave se precisar de ajuda: https://discord.gg/kk6weaMDFa"
 }
 
 Clear-Host
@@ -77,9 +81,9 @@ Write-Host "? $msg_close" -ForegroundColor Yellow
 Write-Host ""
 Read-Host -Prompt "? $msg_pause"
 
-# --- 5. Mode Debug (CSXS 6 e 12) ---
+# --- 5. Mode Debug (CSXS 6 e 18) ---
 # Ne necessite pas les droits admin car c'est dans HKCU (Utilisateur courant)
-6..12 | ForEach-Object {
+6..18 | ForEach-Object {
     $RegPath = "HKCU:\Software\Adobe\CSXS.$_"
     if (Test-Path $RegPath) {
         Set-ItemProperty -Path $RegPath -Name "PlayerDebugMode" -Value 1 -Type String -ErrorAction SilentlyContinue
@@ -157,5 +161,6 @@ Write-Host "| Credits:                                                         |
 Write-Host "+------------------------------------------------------------------+"
 Write-Host ("  {0}" -f $msg_credits)
 Write-Host ("  {0}" -f $msg_discord)
+Write-Host ("  {0}" -f $msg_discord2)
 Write-Host ""
 Read-Host -Prompt $msg_pause

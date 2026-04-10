@@ -87,6 +87,7 @@ var _hostState = {
   },
   selectionMonitor: {
     lastBoundsKey: null,
+    lastBounds: null,
     callback: null,
   },
   createTextLayersInStoredSelections: {
@@ -533,12 +534,13 @@ function _createMagicWandSelection(tolerance) {
     var pos = new ActionDescriptor();
     pos.putUnitDouble(charID.Horizontal, charID.PixelUnit, x);
     pos.putUnitDouble(charID.Vertical, charID.PixelUnit, y);
-    desc.putObject(charID.To, stringIDToTypeID("paint"), pos);
+  desc.putObject(charID.To, stringIDToTypeID("paint"), pos);
 
-    desc.putInteger(stringIDToTypeID("tolerance"), tolerance || 20);
-    desc.putBoolean(stringIDToTypeID("merged"), true);
-    desc.putBoolean(stringIDToTypeID("antiAlias"), true);
-    executeAction(charID.Set, desc, DialogModes.NO);
+  desc.putInteger(stringIDToTypeID("tolerance"), tolerance || 20);
+  desc.putBoolean(stringIDToTypeID("contiguous"), true);
+  desc.putBoolean(stringIDToTypeID("merged"), true);
+  desc.putBoolean(stringIDToTypeID("antiAlias"), true);
+  executeAction(charID.Set, desc, DialogModes.NO);
   } catch (e) {}
 }
 
@@ -1373,26 +1375,10 @@ function getCurrentSelection() {
 
 function startSelectionMonitoring() {
   var monitor = _hostState.selectionMonitor;
-  // Démarrer la surveillance des changements de sélection
   if (monitor.callback) {
     app.removeNotifier("Slct", monitor.callback);
+    monitor.callback = null;
   }
-  
-  monitor.callback = function() {
-    var currentSelection = _checkSelection({ adjustAmount: 0 });
-    if (!currentSelection.error) {
-      var currentBounds = _selectionBoundsKey(currentSelection);
-      if (currentBounds !== monitor.lastBoundsKey) {
-        monitor.lastBoundsKey = currentBounds;
-        // Notifier l'extension CEP du changement (Mac only workaround)
-        if ($.os.toLowerCase().indexOf("mac") !== -1) {
-          app.system("osascript -e 'tell application \"System Events\" to keystroke \"x\" using {command down, option down, shift down}'");
-        }
-      }
-    }
-  };
-  
-  app.addNotifier("Slct", monitor.callback);
 }
 
 function stopSelectionMonitoring() {
@@ -1402,32 +1388,143 @@ function stopSelectionMonitoring() {
     monitor.callback = null;
   }
   monitor.lastBoundsKey = null;
+  monitor.lastBounds = null;
 }
 
 function getSelectionChanged() {
-  var monitor = _hostState.selectionMonitor;
-  var currentSelection = _checkSelection({ adjustAmount: 0 });
-  var keyboardState = ScriptUI.environment && ScriptUI.environment.keyboardState;
-  var shiftPressed = !!(keyboardState && keyboardState.shiftKey);
+  try {
+    var monitor = _hostState.selectionMonitor;
+    var keyboardState = ScriptUI.environment && ScriptUI.environment.keyboardState;
+    var shiftPressed = !!(keyboardState && keyboardState.shiftKey);
 
-  if (!currentSelection.error) {
-    var currentBounds = _selectionBoundsKey(currentSelection);
-    if (currentBounds !== monitor.lastBoundsKey) {
-      monitor.lastBoundsKey = currentBounds;
-      return jamJSON.stringify({
+    var rawSelection = _getCurrentSelectionBounds();
+    if (!rawSelection) {
+      return jamJSON.stringify({ noChange: true, shiftKey: shiftPressed });
+    }
+
+    var selectionArray = Object.prototype.toString.call(rawSelection) === "[object Array]" ? rawSelection : [rawSelection];
+    var groups = [];
+
+    for (var i = 0; i < selectionArray.length; i++) {
+      if (selectionArray[i].width < 2 && selectionArray[i].height < 2) continue;
+      groups.push([selectionArray[i]]);
+    }
+
+    var changed = true;
+    var margin = 30;
+    while (changed) {
+      changed = false;
+      for (var groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+        for (var compareIndex = groupIndex + 1; compareIndex < groups.length; compareIndex++) {
+          var overlap = false;
+          for (var groupSelectionIndex = 0; groupSelectionIndex < groups[groupIndex].length; groupSelectionIndex++) {
+            for (var compareSelectionIndex = 0; compareSelectionIndex < groups[compareIndex].length; compareSelectionIndex++) {
+              var firstBounds = groups[groupIndex][groupSelectionIndex];
+              var secondBounds = groups[compareIndex][compareSelectionIndex];
+              if (!(firstBounds.right + margin < secondBounds.left - margin ||
+                firstBounds.left - margin > secondBounds.right + margin ||
+                firstBounds.bottom + margin < secondBounds.top - margin ||
+                firstBounds.top - margin > secondBounds.bottom + margin)) {
+                overlap = true;
+                break;
+              }
+            }
+            if (overlap) break;
+          }
+
+          if (overlap) {
+            groups[groupIndex] = groups[groupIndex].concat(groups[compareIndex]);
+            groups.splice(compareIndex, 1);
+            changed = true;
+            break;
+          }
+        }
+        if (changed) break;
+      }
+    }
+
+    var merged = [];
+    for (var mergedIndex = 0; mergedIndex < groups.length; mergedIndex++) {
+      var group = groups[mergedIndex];
+      var minLeft = 99999;
+      var minTop = 99999;
+      var maxRight = -99999;
+      var maxBottom = -99999;
+      for (var boundIndex = 0; boundIndex < group.length; boundIndex++) {
+        if (group[boundIndex].left < minLeft) minLeft = group[boundIndex].left;
+        if (group[boundIndex].top < minTop) minTop = group[boundIndex].top;
+        if (group[boundIndex].right > maxRight) maxRight = group[boundIndex].right;
+        if (group[boundIndex].bottom > maxBottom) maxBottom = group[boundIndex].bottom;
+      }
+
+      var width = maxRight - minLeft;
+      var height = maxBottom - minTop;
+      if (width > 2 && height > 2) {
+        merged.push({
+          top: minTop,
+          left: minLeft,
+          right: maxRight,
+          bottom: maxBottom,
+          width: width,
+          height: height,
+          xMid: (minLeft + maxRight) / 2,
+          yMid: (minTop + maxBottom) / 2,
+        });
+      }
+    }
+
+    if (merged.length === 0) {
+      return jamJSON.stringify({ noChange: true, shiftKey: shiftPressed });
+    }
+
+    var isSame = false;
+    if (monitor.lastBounds && merged.length === 1) {
+      var diffTop = Math.abs(merged[0].top - monitor.lastBounds.top);
+      var diffLeft = Math.abs(merged[0].left - monitor.lastBounds.left);
+      var diffRight = Math.abs(merged[0].right - monitor.lastBounds.right);
+      var diffBottom = Math.abs(merged[0].bottom - monitor.lastBounds.bottom);
+      if (diffTop <= 5 && diffLeft <= 5 && diffRight <= 5 && diffBottom <= 5) {
+        isSame = true;
+      }
+    }
+
+    if (isSame && !shiftPressed) {
+      return jamJSON.stringify({ noChange: true, shiftKey: shiftPressed });
+    }
+
+    monitor.lastBounds = merged[0];
+    monitor.lastBoundsKey = _selectionBoundsKey(merged[0]);
+
+    var multiResults = [];
+    for (var payloadIndex = 0; payloadIndex < merged.length; payloadIndex++) {
+      multiResults.push({
         shiftKey: shiftPressed,
-        top: currentSelection.top,
-        left: currentSelection.left,
-        right: currentSelection.right,
-        bottom: currentSelection.bottom,
-        width: currentSelection.width,
-        height: currentSelection.height,
-        xMid: currentSelection.xMid,
-        yMid: currentSelection.yMid,
+        top: merged[payloadIndex].top,
+        left: merged[payloadIndex].left,
+        right: merged[payloadIndex].right,
+        bottom: merged[payloadIndex].bottom,
+        width: merged[payloadIndex].width,
+        height: merged[payloadIndex].height,
+        xMid: merged[payloadIndex].xMid,
+        yMid: merged[payloadIndex].yMid,
       });
     }
+
+    return jamJSON.stringify({
+      multiSelection: multiResults,
+      shiftKey: shiftPressed,
+      top: merged[0].top,
+      left: merged[0].left,
+      right: merged[0].right,
+      bottom: merged[0].bottom,
+      width: merged[0].width,
+      height: merged[0].height,
+      xMid: merged[0].xMid,
+      yMid: merged[0].yMid,
+    });
+  } catch (e) {
+    return jamJSON.stringify({ error: true, message: "getSelectionChanged inner error: " + e.message + " on line " + e.line, shiftKey: false });
   }
-  return jamJSON.stringify({ noChange: true, shiftKey: shiftPressed });
 }
 
 function _createTextLayersInStoredSelections() {
