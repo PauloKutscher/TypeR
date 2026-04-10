@@ -854,6 +854,13 @@ const ContextProvider = React.memo(function ContextProvider(props) {
   const [state, dispatch] = React.useReducer(reducer, initialState);
   React.useEffect(() => dispatch({}), []);
   React.useEffect(() => {
+    const direction = state.direction === "rtl" ? "rtl" : "ltr";
+    document.documentElement.setAttribute("dir", direction);
+    if (document.body) {
+      document.body.setAttribute("dir", direction);
+    }
+  }, [state.direction]);
+  React.useEffect(() => {
     if (state.checkUpdates) {
       checkUpdate(config.appVersion).then((data) => {
         if (data) {

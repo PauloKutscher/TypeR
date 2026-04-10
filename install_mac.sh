@@ -31,6 +31,7 @@ MSG_OPEN_PHOTOSHOP_EN="Open Photoshop and in the menu click the following: [Wind
 MSG_PRESS_ENTER_EN="Press Enter to continue"
 MSG_CREDITS_EN="Thanks a lot to Swirt for TyperTools and SeanR & Sakushi for this fork."
 MSG_DISCORD_EN="ScanR's Discord if you need help: https://discord.com/invite/Pdmfmqk"
+MSG_DISCORD2_EN="Grave's Discord if you need help: https://discord.gg/kk6weaMDFa"
 
 # —————————————————————————————————————————————————————————————
 # Messages en français
@@ -43,6 +44,7 @@ MSG_OPEN_PHOTOSHOP_FR="Ouvrez Photoshop et dans le menu cliquez sur : [Fenêtre]
 MSG_PRESS_ENTER_FR="Appuyez sur Entrée pour continuer"
 MSG_CREDITS_FR="Merci beaucoup à Swirt pour TyperTools et SeanR & Sakushi pour ce fork."
 MSG_DISCORD_FR="Discord de ScanR si besoin d'aide : https://discord.com/invite/Pdmfmqk"
+MSG_DISCORD2_FR="Discord de Grave si besoin d'aide : https://discord.gg/kk6weaMDFa"
 
 # —————————————————————————————————————————————————————————————
 # Messages en espagnol
@@ -55,6 +57,7 @@ MSG_OPEN_PHOTOSHOP_ES="Abre Photoshop y en el menú haz clic en: [Ventana] > [Ex
 MSG_PRESS_ENTER_ES="Presiona Enter para continuar"
 MSG_CREDITS_ES="Muchas gracias a Swirt por TyperTools y a SeanR & Sakushi por este fork."
 MSG_DISCORD_ES="Discord de ScanR si necesitas ayuda: https://discord.com/invite/Pdmfmqk"
+MSG_DISCORD2_ES="Discord de Grave si necesitas ayuda: https://discord.gg/kk6weaMDFa"
 
 # —————————————————————————————————————————————————————————————
 # Messages en portugais
@@ -67,6 +70,7 @@ MSG_OPEN_PHOTOSHOP_PT="Abra o Photoshop e no menu clique em: [Janela] > [Extens�
 MSG_PRESS_ENTER_PT="Pressione Enter para continuar"
 MSG_CREDITS_PT="Muito obrigado ao Swirt pelo TyperTools e ao SeanR & Sakushi por este fork."
 MSG_DISCORD_PT="Discord do ScanR se precisar de ajuda: https://discord.com/invite/Pdmfmqk"
+MSG_DISCORD2_PT="Discord do Grave se precisar de ajuda: https://discord.gg/kk6weaMDFa"
 
 # —————————————————————————————————————————————————————————————
 # Affectation des messages en fonction de la langue
@@ -80,6 +84,7 @@ if [ "$LANGUAGE" = "fr" ]; then
   MSG_PRESS_ENTER=$MSG_PRESS_ENTER_FR
   MSG_CREDITS=$MSG_CREDITS_FR
   MSG_DISCORD=$MSG_DISCORD_FR
+  MSG_DISCORD2=$MSG_DISCORD2_FR
 elif [ "$LANGUAGE" = "es" ]; then
   MSG_INSTALL=$MSG_INSTALL_ES
   MSG_CLOSE_PHOTOSHOP=$MSG_CLOSE_PHOTOSHOP_ES
@@ -89,6 +94,7 @@ elif [ "$LANGUAGE" = "es" ]; then
   MSG_PRESS_ENTER=$MSG_PRESS_ENTER_ES
   MSG_CREDITS=$MSG_CREDITS_ES
   MSG_DISCORD=$MSG_DISCORD_ES
+  MSG_DISCORD2=$MSG_DISCORD2_ES
 elif [ "$LANGUAGE" = "pt" ]; then
   MSG_INSTALL=$MSG_INSTALL_PT
   MSG_CLOSE_PHOTOSHOP=$MSG_CLOSE_PHOTOSHOP_PT
@@ -98,6 +104,7 @@ elif [ "$LANGUAGE" = "pt" ]; then
   MSG_PRESS_ENTER=$MSG_PRESS_ENTER_PT
   MSG_CREDITS=$MSG_CREDITS_PT
   MSG_DISCORD=$MSG_DISCORD_PT
+  MSG_DISCORD2=$MSG_DISCORD2_PT
 else
   MSG_INSTALL=$MSG_INSTALL_EN
   MSG_CLOSE_PHOTOSHOP=$MSG_CLOSE_PHOTOSHOP_EN
@@ -107,6 +114,7 @@ else
   MSG_PRESS_ENTER=$MSG_PRESS_ENTER_EN
   MSG_CREDITS=$MSG_CREDITS_EN
   MSG_DISCORD=$MSG_DISCORD_EN
+  MSG_DISCORD2=$MSG_DISCORD2_EN
 fi
 
 # —————————————————————————————————————————————————————————————
@@ -122,13 +130,13 @@ read -n 1 -p "$MSG_PRESS_KEY"
 echo
 
 # —————————————————————————————————————————————————————————————
-# Activation du mode debug pour CSXS 6 à 12
+# Activation du mode debug pour CSXS 6 à 18
 # —————————————————————————————————————————————————————————————
 is_preferences_domain_exists() {
   defaults read "$1" > /dev/null 2> /dev/null
 }
 
-for version in {6..12}; do
+for version in {6..18}; do
   if is_preferences_domain_exists com.adobe.CSXS.${version} ; then
     defaults write com.adobe.CSXS.${version} PlayerDebugMode 1
   fi
@@ -139,9 +147,11 @@ killall -u "$(whoami)" csprefsd > /dev/null 2> /dev/null || true
 # Copie des fichiers d'extension
 # —————————————————————————————————————————————————————————————
 DESTDIR="${HOME}/Library/Application Support/Adobe/CEP/extensions/typertools"
+STORAGE_BACKUP="${TMPDIR:-/tmp}/typer_storage_backup"
 
 if [ -e "${DESTDIR}/storage" ]; then
-  cp "${DESTDIR}/storage" "${SRCDIR}/__storage"
+  rm -rf "${STORAGE_BACKUP}"
+  cp -Rf "${DESTDIR}/storage" "${STORAGE_BACKUP}"
 fi
 
 rm -rf "${DESTDIR}"
@@ -157,9 +167,9 @@ if [ -e "${SRCDIR}/themes" ]; then
   cp -rf "${SRCDIR}/themes" "${DESTDIR}/app/"
 fi
 
-if [ -e "${SRCDIR}/__storage" ]; then
-  cp -f "${SRCDIR}/__storage" "${DESTDIR}/storage"
-  rm -f "${SRCDIR}/__storage"
+if [ -e "${STORAGE_BACKUP}" ]; then
+  cp -Rf "${STORAGE_BACKUP}" "${DESTDIR}/storage"
+  rm -rf "${STORAGE_BACKUP}"
 fi
 
 # —————————————————————————————————————————————————————————————
@@ -172,6 +182,7 @@ $MSG_OPEN_PHOTOSHOP
 
 $MSG_CREDITS
 $MSG_DISCORD
+$MSG_DISCORD2
 
 EOF
 read -n 1 -p "$MSG_PRESS_ENTER"
