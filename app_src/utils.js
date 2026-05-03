@@ -287,7 +287,8 @@ echo "[*] Installing update..."
 
 # Backup storage
 if [ -e "$DEST_DIR/storage" ]; then
-    cp "$DEST_DIR/storage" "$TEMP_STORAGE"
+    rm -rf "$TEMP_STORAGE"
+    cp -Rf "$DEST_DIR/storage" "$TEMP_STORAGE"
 fi
 
 # Extract ZIP
@@ -319,8 +320,9 @@ for folder in app CSXS icons locale; do
 done
 
 # Restore storage
-if [ -f "$TEMP_STORAGE" ]; then
-    cp "$TEMP_STORAGE" "$DEST_DIR/storage"
+if [ -e "$TEMP_STORAGE" ]; then
+    cp -Rf "$TEMP_STORAGE" "$DEST_DIR/storage"
+    rm -rf "$TEMP_STORAGE"
 fi
 
 echo ""
