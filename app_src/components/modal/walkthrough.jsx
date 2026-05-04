@@ -11,9 +11,20 @@ import {
 } from "react-icons/fi";
 
 import { useContext } from "../../context";
-import { locale } from "../../utils";
+import { alignTextLayerToSelection, createTextLayerInSelection, getDefaultStroke, getDefaultStyle, locale } from "../../utils";
 
 const SAMPLE_SCRIPT = "Page 1\nREG: This bubble is ready.\nSFX: BOOM!\n## translator note";
+const DEMO_STYLE_ID = "typer_walkthrough_regular";
+const DEMO_STYLE = {
+  id: DEMO_STYLE_ID,
+  name: "Walkthrough Regular",
+  folder: null,
+  textProps: getDefaultStyle(),
+  prefixes: ["REG:"],
+  prefixColor: "#54be78",
+  stroke: getDefaultStroke(),
+  edited: 1,
+};
 
 const hasSampleScript = (value) => /Page\s*1/i.test(value) && /REG:/i.test(value) && /SFX:/i.test(value);
 
@@ -55,34 +66,25 @@ const getSteps = () => [
   },
 ];
 
-const Toggle = ({ checked, onChange, label }) => (
-  <button type="button" className={`walkthrough-toggle${checked ? " m-on" : ""}`} onClick={onChange}>
-    <span className="walkthrough-toggle-knob" />
-    <span>{label}</span>
-  </button>
-);
-
 const WalkthroughModal = React.memo(function WalkthroughModal() {
   const context = useContext();
   const [stepIndex, setStepIndex] = React.useState(0);
-  const [script, setScript] = React.useState("");
-  const [selectedStyle, setSelectedStyle] = React.useState("");
-  const [tagValue, setTagValue] = React.useState("");
-  const [selectionStarted, setSelectionStarted] = React.useState(false);
-  const [selectionDone, setSelectionDone] = React.useState(false);
-  const [flowDone, setFlowDone] = React.useState({ paste: false, next: false, align: false });
-  const [settingDone, setSettingDone] = React.useState({ shortcuts: false, tips: false, reopen: false });
+  const [demoStyleReady, setDemoStyleReady] = React.useState(false);
+  const [photoshopLayerDone, setPhotoshopLayerDone] = React.useState(false);
+  const [alignDone, setAlignDone] = React.useState(false);
+  const [settingDone, setSettingDone] = React.useState({ reopen: false });
   const steps = React.useMemo(getSteps, []);
   const step = steps[stepIndex];
   const isFirst = stepIndex === 0;
   const isLast = stepIndex === steps.length - 1;
+  const sampleLoaded = hasSampleScript(context.state.text || "");
 
   const completed = {
-    script: hasSampleScript(script),
-    styles: selectedStyle === "regular" && tagValue.trim().toUpperCase() === "REG:",
-    selection: selectionDone,
-    flow: flowDone.paste && flowDone.next && flowDone.align,
-    settings: settingDone.shortcuts && settingDone.tips && settingDone.reopen,
+    script: sampleLoaded,
+    styles: demoStyleReady || context.state.styles.some((style) => style.id === DEMO_STYLE_ID),
+    selection: photoshopLayerDone,
+    flow: alignDone,
+    settings: settingDone.reopen,
   };
   const canContinue = completed[step.id];
 
@@ -109,27 +111,55 @@ const WalkthroughModal = React.memo(function WalkthroughModal() {
     </span>
   );
 
+  const loadSampleScript = () => {
+    context.dispatch({ type: "setText", text: SAMPLE_SCRIPT });
+    context.dispatch({ type: "setCurrentLineIndex", index: 1 });
+  };
+
+  const prepareDemoStyle = () => {
+    context.dispatch({ type: "saveStyle", data: DEMO_STYLE });
+    context.dispatch({ type: "setCurrentStyleId", id: DEMO_STYLE_ID });
+    setDemoStyleReady(true);
+  };
+
+  const createPhotoshopTextLayer = () => {
+    createTextLayerInSelection(
+      "This bubble is ready.",
+      DEMO_STYLE,
+      context.state.pastePointText,
+      context.state.internalPadding || 0,
+      context.state.direction,
+      (ok) => {
+        if (ok) {
+          setPhotoshopLayerDone(true);
+          context.dispatch({ type: "setCurrentLineIndex", index: 2 });
+        }
+      }
+    );
+  };
+
+  const alignPhotoshopTextLayer = () => {
+    alignTextLayerToSelection(context.state.resizeTextBoxOnCenter, context.state.internalPadding || 0, (ok) => {
+      if (ok) setAlignDone(true);
+    });
+  };
+
   const renderPractice = () => {
     if (step.id === "script") {
       return (
         <div className="walkthrough-practice">
           <div className="walkthrough-task">
             <FiType size={17} />
-            <span>{locale.walkthroughTaskPaste || "Add the sample script, then notice the page marker, style tags, and ignored note."}</span>
+            <span>{locale.walkthroughTaskPaste || "Load the sample script into the real TypeR text block."}</span>
             {renderDone(completed.script)}
           </div>
-          <textarea
-            className="topcoat-textarea walkthrough-script-input"
-            value={script}
-            onChange={(event) => setScript(event.target.value)}
-            placeholder={locale.walkthroughScriptPlaceholder || "Paste or type a few script lines here..."}
-          />
-          <button type="button" className="topcoat-button--large" onClick={() => setScript(SAMPLE_SCRIPT)}>
-            {locale.walkthroughUseSample || "Use sample script"}
+          <pre className="walkthrough-script-preview">{SAMPLE_SCRIPT}</pre>
+          <button type="button" className={completed.script ? "topcoat-button--large--cta" : "topcoat-button--large"} onClick={loadSampleScript}>
+            {completed.script ? locale.walkthroughSampleLoaded || "Sample loaded" : locale.walkthroughUseSample || "Load sample into TypeR"}
           </button>
           {completed.script && (
             <div className="walkthrough-result">
-              {locale.walkthroughPasteResult || "TypeR would now select the first usable line and skip the page marker and note."}
+              {locale.walkthroughPasteResult || "The panel now has a page marker, style tags, and an ignored note to practice with."}
             </div>
           )}
         </div>
@@ -141,30 +171,18 @@ const WalkthroughModal = React.memo(function WalkthroughModal() {
         <div className="walkthrough-practice">
           <div className="walkthrough-task">
             <FiMousePointer size={17} />
-            <span>{locale.walkthroughTaskStyle || "Select the Regular style, then enter the tag that should trigger it."}</span>
+            <span>{locale.walkthroughTaskStyle || "Create and activate a real demo style with the REG: tag."}</span>
             {renderDone(completed.styles)}
           </div>
           <div className="walkthrough-style-list">
-            {["regular", "sfx", "narration"].map((styleId) => (
-              <button
-                key={styleId}
-                type="button"
-                className={`walkthrough-style${selectedStyle === styleId ? " m-active" : ""}`}
-                onClick={() => setSelectedStyle(styleId)}
-              >
-                {locale[`walkthroughStyle${styleId.charAt(0).toUpperCase()}${styleId.slice(1)}`] || styleId}
-              </button>
-            ))}
+            <button type="button" className={`walkthrough-style${completed.styles ? " m-active" : ""}`} onClick={prepareDemoStyle}>
+              {locale.walkthroughStyleRegular || "Walkthrough Regular"}
+            </button>
+            <div className="walkthrough-tag-pill">REG:</div>
           </div>
-          <input
-            className="topcoat-text-input--large"
-            value={tagValue}
-            onChange={(event) => setTagValue(event.target.value)}
-            placeholder={locale.walkthroughTagPlaceholder || "Type REG:"}
-          />
           {completed.styles && (
             <div className="walkthrough-result">
-              {locale.walkthroughStyleResult || "A line starting with REG: would now pick Regular automatically."}
+              {locale.walkthroughStyleResult || "Lines starting with REG: can now select the demo style automatically."}
             </div>
           )}
         </div>
@@ -176,26 +194,15 @@ const WalkthroughModal = React.memo(function WalkthroughModal() {
         <div className="walkthrough-practice">
           <div className="walkthrough-task">
             <FiMousePointer size={17} />
-            <span>{locale.walkthroughTaskSelection || "Press on the mock bubble, drag inside it, then release."}</span>
+            <span>{locale.walkthroughTaskSelection || "In Photoshop, draw a selection around a bubble, then click the button below to create a real text layer."}</span>
             {renderDone(completed.selection)}
           </div>
-          <div
-            className={`walkthrough-canvas${selectionStarted ? " m-dragging" : ""}${selectionDone ? " m-selected" : ""}`}
-            onMouseDown={() => setSelectionStarted(true)}
-            onMouseUp={() => {
-              if (selectionStarted) setSelectionDone(true);
-              setSelectionStarted(false);
-            }}
-            onMouseLeave={() => setSelectionStarted(false)}
-          >
-            <div className="walkthrough-bubble">
-              {selectionDone ? locale.walkthroughSelectionSelected || "Selection ready" : locale.walkthroughSelectionBubble || "Bubble"}
-            </div>
-            <div className="walkthrough-selection-box" />
-          </div>
+          <button type="button" className={completed.selection ? "topcoat-button--large--cta" : "topcoat-button--large"} onClick={createPhotoshopTextLayer}>
+            {completed.selection ? locale.walkthroughPhotoshopLayerCreated || "Text layer created" : locale.walkthroughCreateInPhotoshop || "Create text layer in Photoshop"}
+          </button>
           {completed.selection && (
             <div className="walkthrough-result">
-              {locale.walkthroughSelectionResult || "TypeR can use this selection to create or align a text layer."}
+              {locale.walkthroughSelectionResult || "TypeR created a real text layer in the current Photoshop selection."}
             </div>
           )}
         </div>
@@ -203,38 +210,21 @@ const WalkthroughModal = React.memo(function WalkthroughModal() {
     }
 
     if (step.id === "flow") {
-      const setFlow = (key) => setFlowDone((value) => ({ ...value, [key]: true }));
       return (
         <div className="walkthrough-practice">
           <div className="walkthrough-task">
             <FiRotateCw size={17} />
-            <span>{locale.walkthroughTaskFlow || "Run the mini workflow in order: Paste, Next line, Align."}</span>
+            <span>{locale.walkthroughTaskFlow || "Move or redraw the Photoshop selection, then align the active text layer for real."}</span>
             {renderDone(completed.flow)}
           </div>
           <div className="walkthrough-flow">
-            <button type="button" className={flowDone.paste ? "topcoat-button--large--cta" : "topcoat-button--large"} onClick={() => setFlow("paste")}>
-              {locale.createLayer || "Paste"}
-            </button>
-            <button
-              type="button"
-              className={flowDone.next ? "topcoat-button--large--cta" : "topcoat-button--large"}
-              onClick={() => flowDone.paste && setFlow("next")}
-              disabled={!flowDone.paste}
-            >
-              {locale.nextLine || "Next line"}
-            </button>
-            <button
-              type="button"
-              className={flowDone.align ? "topcoat-button--large--cta" : "topcoat-button--large"}
-              onClick={() => flowDone.next && setFlow("align")}
-              disabled={!flowDone.next}
-            >
-              {locale.alignLayer || "Align"}
+            <button type="button" className={completed.flow ? "topcoat-button--large--cta" : "topcoat-button--large"} onClick={alignPhotoshopTextLayer}>
+              {completed.flow ? locale.walkthroughAligned || "Aligned" : locale.alignLayer || "Align"}
             </button>
           </div>
           {completed.flow && (
             <div className="walkthrough-result">
-              {locale.walkthroughFlowResult || "That is the core loop: select bubble, paste text, advance, align when needed."}
+              {locale.walkthroughFlowResult || "That is the real loop: select a bubble, create a layer, then align it when needed."}
             </div>
           )}
         </div>
@@ -245,19 +235,9 @@ const WalkthroughModal = React.memo(function WalkthroughModal() {
       <div className="walkthrough-practice">
         <div className="walkthrough-task">
           <FiCheck size={17} />
-          <span>{locale.walkthroughTaskSettings || "Toggle the options you may revisit later, then confirm where this guide lives."}</span>
+          <span>{locale.walkthroughTaskSettings || "Confirm where this guide lives. The Done button will unlock immediately after this checkbox."}</span>
           {renderDone(completed.settings)}
         </div>
-        <Toggle
-          checked={settingDone.shortcuts}
-          onChange={() => setSettingDone((value) => ({ ...value, shortcuts: !value.shortcuts }))}
-          label={locale.settingsTabShortcuts || "Shortcuts"}
-        />
-        <Toggle
-          checked={settingDone.tips}
-          onChange={() => setSettingDone((value) => ({ ...value, tips: !value.tips }))}
-          label={locale.settingsShowTipsLabel || "Show tips"}
-        />
         <label className="walkthrough-confirm">
           <input
             type="checkbox"

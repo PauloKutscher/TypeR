@@ -361,9 +361,14 @@
     }
 }
 
-.walkthrough-script-input {
-    min-height: 82px;
-    resize: vertical;
+.walkthrough-script-preview {
+    min-height: 76px;
+    margin: 0;
+    padding: 8px;
+    overflow: auto;
+    white-space: pre-wrap;
+    line-height: 1.35;
+    background: rgba(0, 0, 0, 0.18);
 }
 
 .walkthrough-style-list,
@@ -387,51 +392,15 @@
     }
 }
 
-.walkthrough-canvas {
-    position: relative;
-    min-height: 130px;
-    overflow: hidden;
-    cursor: crosshair;
-    background:
-        linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px),
-        linear-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px),
-        rgba(0, 0, 0, 0.18);
-    background-size: 18px 18px;
-
-    &.m-dragging .walkthrough-selection-box,
-    &.m-selected .walkthrough-selection-box {
-        opacity: 1;
-    }
-}
-
-.walkthrough-bubble {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    display: flex;
+.walkthrough-tag-pill {
+    display: inline-flex;
     align-items: center;
-    justify-content: center;
-    width: 62%;
-    height: 58%;
-    transform: translate(-50%, -50%);
-    border-radius: 50%;
-    color: #222;
-    background: rgba(255, 255, 255, 0.9);
-    font-weight: 600;
+    min-height: 32px;
+    padding: 5px 8px;
+    color: #fff;
+    background: rgba(84, 190, 120, 0.55);
 }
 
-.walkthrough-selection-box {
-    position: absolute;
-    left: 17%;
-    top: 20%;
-    width: 66%;
-    height: 60%;
-    opacity: 0;
-    border: 1px dashed rgba(84, 190, 120, 0.95);
-    background: rgba(84, 190, 120, 0.12);
-}
-
-.walkthrough-toggle,
 .walkthrough-confirm {
     display: flex;
     align-items: center;
@@ -442,38 +411,6 @@
     color: inherit;
     text-align: left;
     background: rgba(0, 0, 0, 0.15);
-}
-
-.walkthrough-toggle {
-    cursor: pointer;
-}
-
-.walkthrough-toggle-knob {
-    position: relative;
-    width: 30px;
-    height: 16px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.25);
-
-    &::after {
-        content: "";
-        position: absolute;
-        left: 2px;
-        top: 2px;
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        background: #fff;
-        transition: left 0.12s ease;
-    }
-}
-
-.walkthrough-toggle.m-on .walkthrough-toggle-knob {
-    background: rgba(84, 190, 120, 0.75);
-
-    &::after {
-        left: 16px;
-    }
 }
 
 .walkthrough-confirm {
@@ -488,7 +425,6 @@
     .walkthrough-task,
     .walkthrough-result,
     .walkthrough-style,
-    .walkthrough-toggle,
     .walkthrough-confirm {
         background: rgba(0, 0, 0, 0.08);
     }
