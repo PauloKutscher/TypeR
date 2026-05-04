@@ -253,7 +253,7 @@ const StyleDetails = React.memo(function StyleDetails(props) {
   const fonts = getUserFonts();
   const textStyle = props.textProps.layerText.textStyleRange[0].textStyle;
   const paragStyle = props.textProps.layerText.paragraphStyleRange[0].paragraphStyle;
-  const sizeStep = Number(context.state.styleSizeStep) > 0 ? Number(context.state.styleSizeStep) : 0.1;
+  const sizeStep = Number(context.state.styleSizeStep) > 0 ? Number(context.state.styleSizeStep) : 1;
   const currentFont = fonts.find((font) => font.postScriptName === textStyle.fontPostScriptName) || {
     family: "[" + (textStyle.fontName || "none") + "]",
     style: "[" + (textStyle.fontStyleName || "none") + "]",

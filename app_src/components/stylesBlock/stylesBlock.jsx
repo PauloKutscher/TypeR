@@ -208,7 +208,7 @@ const StyleItem = React.memo(function StyleItem(props) {
   const sizeValue = textStyle.size || "";
   const unit = props.style.textProps?.typeUnit ? props.style.textProps.typeUnit.substr(0, 3) : "px";
   const showQuickStyleSize = context.state.showQuickStyleSize !== false;
-  const sizeStep = Number(context.state.styleSizeStep) > 0 ? Number(context.state.styleSizeStep) : 0.1;
+  const sizeStep = Number(context.state.styleSizeStep) > 0 ? Number(context.state.styleSizeStep) : 1;
   const sizeStepDecimals = (sizeStep.toString().split(".")[1] || "").length;
   const normalizeSizeStep = (value) => {
     const rounded = Math.round(value / sizeStep) * sizeStep;

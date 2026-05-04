@@ -47,7 +47,7 @@ const SettingsModal = React.memo(function SettingsModal() {
     context.state.showQuickStyleSize !== false
   );
   const [styleSizeStep, setStyleSizeStep] = React.useState(
-    context.state.styleSizeStep !== undefined ? String(context.state.styleSizeStep) : "0.1"
+    context.state.styleSizeStep !== undefined ? String(context.state.styleSizeStep) : "1"
   );
   const [internalPadding, setInternalPadding] = React.useState(
     context.state.internalPadding !== undefined ? context.state.internalPadding : 10
@@ -136,7 +136,7 @@ const SettingsModal = React.memo(function SettingsModal() {
   };
   const resetStyleSizeStep = () => {
     if (styleSizeStep === "") {
-      setStyleSizeStep(String(context.state.styleSizeStep ?? 0.1));
+      setStyleSizeStep(String(context.state.styleSizeStep ?? 1));
     }
   };
 

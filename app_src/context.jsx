@@ -154,7 +154,7 @@ const initialState = {
   multiBubbleMode: false,
   internalPadding: 10,
   interpretMarkdown: storage.data?.interpretMarkdown === true,
-  styleSizeStep: 0.1,
+  styleSizeStep: 1,
   ...storage.data,
   shortcut: { ...defaultShortcut, ...(storage.data?.shortcut || {}) },
 };
@@ -601,7 +601,7 @@ const reducer = (state, action) => {
 
     case "setStyleSizeStep": {
       let step = parseFloat(action.step);
-      if (!Number.isFinite(step) || step <= 0) step = 0.1;
+      if (!Number.isFinite(step) || step <= 0) step = 1;
       newState.styleSizeStep = step;
       break;
     }
