@@ -161,7 +161,8 @@
   margin-left: 50px;
   line-height: 17px;
   font-size: 14px;
-  color: rgba(#000, 0);
+  color: #000;
+  -webkit-text-fill-color: transparent;
   caret-color: #000;
   border: none;
   resize: none;
