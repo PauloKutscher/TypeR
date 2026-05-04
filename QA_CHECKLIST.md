@@ -70,6 +70,7 @@ Use this checklist before calling a build release-ready. Test in Photoshop CC 20
 - Run `npm run verify` for the full automated gate, or run the following commands individually while diagnosing failures.
 - Run `npm test`.
 - Confirm `textLayerPayload tests passed`.
+- Confirm `line numbering tests passed`.
 - Confirm `locale key tests passed`.
 - Run `npm run build`.
 - Confirm build exits with code 0.
@@ -83,6 +84,7 @@ Use this checklist before calling a build release-ready. Test in Photoshop CC 20
 
 - text size scaling does not mutate source style objects;
 - multi-bubble payload creation skips ignored/exhausted lines correctly and preserves tagged line styles;
+- line numbering resets correctly after `Page N` markers when that setting is enabled;
 - locale files have matching keys, no duplicate keys, and matching placeholders such as `{count}` and `{version}`.
 - `npm run test:build` verifies the generated `app/` contains the required CEP entry files, lazy modal chunks, and copied Topcoat theme CSS files after a build.
 
