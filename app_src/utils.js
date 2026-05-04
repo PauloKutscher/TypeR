@@ -88,6 +88,8 @@ const getOSType = () => {
   return 'win';
 };
 
+const getExtendScriptString = (value) => JSON.stringify(String(value || ""));
+
 const downloadAndInstallUpdate = async (downloadUrl, onProgress, onComplete, onError) => {
   try {
     const osType = getOSType();
@@ -106,7 +108,7 @@ const downloadAndInstallUpdate = async (downloadUrl, onProgress, onComplete, onE
     onProgress && onProgress(locale.updateDownloading || 'Downloading update...');
     
     // Clean and create download directory
-    csInterface.evalScript(`deleteFolder("${downloadsPath.replace(/\\/g, '\\\\').replace(/\//g, '\\\\')}")`, () => {
+    csInterface.evalScript(`deleteFolder(${getExtendScriptString(downloadsPath)})`, () => {
       // Use cep.fs to create directory
       const mkdirResult = window.cep.fs.makedir(downloadsPath);
       if (mkdirResult.err && mkdirResult.err !== 0 && mkdirResult.err !== 17) { // 17 = already exists
@@ -256,7 +258,7 @@ PowerShell -NoProfile -ExecutionPolicy Bypass -File "install_update.ps1"
           onProgress && onProgress(locale.updateReady || 'Update ready to install...');
           
           // Open the folder in Explorer
-          csInterface.evalScript(`openFolder("${downloadsPath.replace(/\\/g, '\\\\').replace(/\//g, '\\\\')}")`, () => {
+          csInterface.evalScript(`openFolder(${getExtendScriptString(downloadsPath)})`, () => {
             onComplete && onComplete(true); // true = needs manual step
           });
           
@@ -344,11 +346,11 @@ rm -rf "$SCRIPT_DIR"
           window.cep.fs.writeFile(shScriptPath, installScript);
           
           // Make executable
-          csInterface.evalScript(`makeExecutable("${shScriptPath}")`, () => {
+          csInterface.evalScript(`makeExecutable(${getExtendScriptString(shScriptPath)})`, () => {
             onProgress && onProgress(locale.updateReady || 'Update ready to install...');
             
             // Open the folder in Finder
-            csInterface.evalScript(`openFolder("${downloadsPath}")`, () => {
+            csInterface.evalScript(`openFolder(${getExtendScriptString(downloadsPath)})`, () => {
               onComplete && onComplete(true); // true = needs manual step
             });
           });
