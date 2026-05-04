@@ -9,8 +9,9 @@ TypeR - Photoshop extension for manga typesetters
 
 ## Build, Test, and Development Commands
 - Build: run the package script that triggers `clean.js → webpack → copyThemes.js` (e.g., `npm run build`; see `package.json`). This clears `app/`, bundles from `app_src/`, and copies themes. Note: Building is not necessary unless you intend to load the CEP in Photoshop.
+- Verify: run `npm run verify` before release handoff. It runs `npm test`, builds production assets, and checks required `app/` artifacts.
 - Dev/watch: if available, use the watch script (e.g., `npm run watch`) to iterate on `app_src/` with faster feedback.
-- Tests: none mandated yet. If added, expose via `npm test`.
+- Tests: run `npm test` for pure logic/localization checks and `npm run test:build` after a build to verify generated artifacts.
 
 ## Coding Style & Naming Conventions
 - Indentation: 2 spaces. Comments in English.

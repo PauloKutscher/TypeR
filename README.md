@@ -63,12 +63,14 @@ TypeR is an updated version of TyperTools, a Photoshop extension designed for ty
    npm install
    ```
 
-3. Build the project using npm. 
+3. Run the automated release gate.
 
 
    ```sh
-   npm run build
+   npm run verify
    ```
+
+   This runs the pure logic tests, builds the CEP files, and verifies the generated `app/` artifacts.
 
 4. Execute the installation script for your operating system.
 
