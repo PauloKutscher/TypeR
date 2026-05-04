@@ -128,13 +128,13 @@
         text-overflow: ellipsis;
         min-width: 0;
         
-        // Cache le texte sur les très petites fenêtres
+        // Hide text on very small windows.
         @media (max-width: 350px) {
             display: none;
         }
     }
     
-    // Réduit le padding sur les petites fenêtres
+    // Reduce padding on small windows.
     @media (max-width: 450px) {
         padding: 6px 8px;
         gap: 2px;

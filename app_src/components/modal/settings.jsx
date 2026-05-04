@@ -321,22 +321,20 @@ const SettingsModal = React.memo(function SettingsModal() {
         try {
           const data = JSON.parse(result.data);
           if (data.exportedStyles) {
-            const dataFolder = { name: data.name };
-            dataFolder.id = Math.random().toString(36).substring(2, 8);
-            context.dispatch({ type: "saveFolder", data: dataFolder });
-            data.exportedStyles.forEach((style) => {
-              const dataStyle = {
+            const folderId = Math.random().toString(36).substring(2, 8);
+            const importedAt = Date.now();
+            const dataFolder = { id: folderId, name: data.name };
+            const styles = data.exportedStyles.map((style) => ({
                 name: style.name,
-                folder: dataFolder.id,
+                id: Math.random().toString(36).substring(2, 8),
+                folder: folderId,
                 textProps: style.textProps,
                 prefixes: style.prefixes || [],
                 prefixColor: style.prefixColor,
                 stroke: style.stroke,
-              };
-              dataStyle.id = Math.random().toString(36).substring(2, 8);
-              dataStyle.edited = Date.now();
-              context.dispatch({ type: "saveStyle", data: dataStyle });
-            });
+                edited: importedAt,
+            }));
+            context.dispatch({ type: "importStyleFolder", folder: dataFolder, styles });
             foldersImported++;
           } else if (
             data.folders &&
@@ -355,34 +353,25 @@ const SettingsModal = React.memo(function SettingsModal() {
               idMap[folder.id] = newId;
               return { folder, newId };
             });
-            foldersWithNewIds.forEach(({ folder, newId }) => {
-              context.dispatch({
-                type: "saveFolder",
-                data: {
-                  id: newId,
-                  name: folder.name,
-                  parentId: folder.parentId ? idMap[folder.parentId] || null : null,
-                  order: typeof folder.order === "number" ? folder.order : undefined,
-                },
-              });
-              foldersImported++;
-            });
-            data.styles.forEach((style) => {
-              const newId = Math.random().toString(36).substring(2, 8);
-              context.dispatch({
-                type: "saveStyle",
-                data: {
-                  id: newId,
-                  name: style.name,
-                  folder: style.folder ? idMap[style.folder] : null,
-                  textProps: style.textProps,
-                  prefixes: style.prefixes || [],
-                  prefixColor: style.prefixColor,
-                  stroke: style.stroke,
-                  edited: Date.now(),
-                },
-              });
-            });
+            const folders = foldersWithNewIds.map(({ folder, newId }) => ({
+              id: newId,
+              name: folder.name,
+              parentId: folder.parentId ? idMap[folder.parentId] || null : null,
+              order: typeof folder.order === "number" ? folder.order : undefined,
+            }));
+            const importedAt = Date.now();
+            const styles = data.styles.map((style) => ({
+              id: Math.random().toString(36).substring(2, 8),
+              name: style.name,
+              folder: style.folder ? idMap[style.folder] : null,
+              textProps: style.textProps,
+              prefixes: style.prefixes || [],
+              prefixColor: style.prefixColor,
+              stroke: style.stroke,
+              edited: importedAt,
+            }));
+            context.dispatch({ type: "importStyleLibrary", folders, styles });
+            foldersImported += folders.length;
           } else {
             context.dispatch({ type: "import", data });
             setTimeout(() => window.location.reload(), 100);
@@ -420,21 +409,21 @@ const SettingsModal = React.memo(function SettingsModal() {
 
   const resetStorage = () => {
     nativeConfirm(
-      locale.settingsResetStorageConfirm || "Supprimer le fichier de stockage et réinitialiser les réglages ?",
+      locale.settingsResetStorageConfirm || "Delete the storage file and reset all settings?",
       locale.confirmTitle || "Confirmation",
       (confirmed) => {
         if (!confirmed) return;
         const success = deleteStorageFile();
         if (success) {
           nativeAlert(
-            locale.settingsResetStorageSuccess || "Réglages réinitialisés. L'extension va redémarrer.",
+            locale.settingsResetStorageSuccess || "Storage deleted. The panel will reload.",
             locale.successTitle,
             false
           );
           setTimeout(() => window.location.reload(), 300);
         } else {
           nativeAlert(
-            locale.settingsResetStorageError || "Impossible de supprimer le fichier de stockage.",
+            locale.settingsResetStorageError || "Unable to delete the storage file.",
             locale.errorTitle,
             true
           );
@@ -445,7 +434,7 @@ const SettingsModal = React.memo(function SettingsModal() {
 
   const resetShortcuts = () => {
     nativeConfirm(
-      locale.settingsResetShortcutsConfirm || "Voulez-vous vraiment réinitialiser les raccourcis ?",
+      locale.settingsResetShortcutsConfirm || "Reset shortcuts to default?",
       locale.confirmTitle || "Confirmation",
       (confirmed) => {
         if (!confirmed) return;
@@ -518,11 +507,11 @@ const SettingsModal = React.memo(function SettingsModal() {
   };
 
   const tabs = [
-    { id: "general", label: locale.settingsTabGeneral || "Général", icon: FiSettings },
-    { id: "appearance", label: locale.settingsTabAppearance || "Apparence", icon: FiEye },
-    { id: "behavior", label: locale.settingsTabBehavior || "Comportement", icon: FiToggleLeft },
-    { id: "shortcuts", label: locale.settingsTabShortcuts || "Raccourcis", icon: FaKeyboard },
-    { id: "data", label: locale.settingsTabData || "Données", icon: FiDatabase }
+    { id: "general", label: locale.settingsTabGeneral || "General", icon: FiSettings },
+    { id: "appearance", label: locale.settingsTabAppearance || "Appearance", icon: FiEye },
+    { id: "behavior", label: locale.settingsTabBehavior || "Behavior", icon: FiToggleLeft },
+    { id: "shortcuts", label: locale.settingsTabShortcuts || "Shortcuts", icon: FaKeyboard },
+    { id: "data", label: locale.settingsTabData || "Data", icon: FiDatabase }
   ];
 
   const renderTabContent = () => {
@@ -612,7 +601,7 @@ const SettingsModal = React.memo(function SettingsModal() {
         return (
           <div className="fields">
             <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupAutomations || "Automatisations"}</div>
+              <div className="settings-group-title">{locale.settingsGroupAutomations || "Automations"}</div>
               <div className="settings-checkbox-grid">
                 <div className="settings-checkbox-item">
                   <label className="settings-checkbox-label">
@@ -620,7 +609,7 @@ const SettingsModal = React.memo(function SettingsModal() {
                     <div className="settings-checkbox-custom"></div>
                     <div className="settings-checkbox-content">
                       <span>{locale.settingsAutoClosePsdLabel}</span>
-                      <div className="settings-checkbox-hint">{locale.settingsAutoClosePsdHint || "Ferme automatiquement les fichiers PSD après traitement"}</div>
+                      <div className="settings-checkbox-hint">{locale.settingsAutoClosePsdHint || "Automatically closes PSD files after processing"}</div>
                     </div>
                   </label>
                 </div>
@@ -630,7 +619,7 @@ const SettingsModal = React.memo(function SettingsModal() {
                     <div className="settings-checkbox-custom"></div>
                     <div className="settings-checkbox-content">
                       <span>{locale.settingsAutoScrollStyleLabel}</span>
-                      <div className="settings-checkbox-hint">{locale.settingsAutoScrollStyleHint || "Fait défiler automatiquement vers le style sélectionné"}</div>
+                      <div className="settings-checkbox-hint">{locale.settingsAutoScrollStyleHint || "Automatically scrolls to selected style"}</div>
                     </div>
                   </label>
                 </div>
@@ -640,7 +629,7 @@ const SettingsModal = React.memo(function SettingsModal() {
                     <div className="settings-checkbox-custom"></div>
                     <div className="settings-checkbox-content">
                       <span>{locale.settingsResizeTextBoxOnCenterLabel}</span>
-                      <div className="settings-checkbox-hint">{locale.settingsResizeTextBoxOnCenterHint || "Redimensionne la boîte de texte lors du centrage automatique"}</div>
+                      <div className="settings-checkbox-hint">{locale.settingsResizeTextBoxOnCenterHint || "Resizes text box during automatic centering"}</div>
                     </div>
                   </label>
                 </div>
@@ -651,7 +640,7 @@ const SettingsModal = React.memo(function SettingsModal() {
                     <div className="settings-checkbox-content">
                       <span>{locale.multiBubbleModeToggle || "Multi-Bubble Mode"}</span>
                       <div className="settings-checkbox-hint">
-                        {locale.multiBubbleModeHint || "Permet de capturer plusieurs sélections pour insérer plusieurs textes en une fois"}
+                        {locale.multiBubbleModeHint || "Allows capturing multiple selections to insert multiple texts at once"}
                         <br />
                         <a 
                           href="#"
@@ -661,7 +650,7 @@ const SettingsModal = React.memo(function SettingsModal() {
                           }}
                           style={{color: '#007acc', textDecoration: 'underline', cursor: 'pointer'}}
                         >
-                          {locale.multiBubbleModeHowToUse || "Comment utiliser"}
+                          {locale.multiBubbleModeHowToUse || "How to use"}
                         </a>
                       </div>
                     </div>
@@ -723,9 +712,9 @@ const SettingsModal = React.memo(function SettingsModal() {
               </div>
             </div>
             <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupTextPositioning || "Positionnement du texte"}</div>
+              <div className="settings-group-title">{locale.settingsGroupTextPositioning || "Text positioning"}</div>
               <div className="field">
-                <div className="field-label">{locale.settingsInternalPaddingLabel || "Padding interne (px)"}</div>
+                <div className="field-label">{locale.settingsInternalPaddingLabel || "Internal padding (px)"}</div>
                 <div className="field-input">
                   <input 
                     type="number" 
@@ -736,11 +725,11 @@ const SettingsModal = React.memo(function SettingsModal() {
                     className="topcoat-text-input--large" 
                   />
                 </div>
-                <div className="field-descr">{locale.settingsInternalPaddingHint || "Espace interne pour éviter que le texte touche les bords de la bulle (0-100 pixels)"}</div>
+                <div className="field-descr">{locale.settingsInternalPaddingHint || "Internal space to prevent text from touching bubble edges (0-100 pixels)"}</div>
               </div>
             </div>
             <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupUpdates || "Priorités et mises à jour"}</div>
+              <div className="settings-group-title">{locale.settingsGroupUpdates || "Priorities and Updates"}</div>
               <div className="settings-checkbox-grid">
                 <div className="settings-checkbox-item">
                   <label className="settings-checkbox-label">
@@ -748,7 +737,7 @@ const SettingsModal = React.memo(function SettingsModal() {
                     <div className="settings-checkbox-custom"></div>
                     <div className="settings-checkbox-content">
                       <span>{locale.settingsCurrentFolderTagPriorityLabel}</span>
-                      <div className="settings-checkbox-hint">{locale.settingsCurrentFolderTagPriorityHint || "Donne la priorité aux styles du dossier actuel"}</div>
+                      <div className="settings-checkbox-hint">{locale.settingsCurrentFolderTagPriorityHint || "Gives priority to styles from current folder"}</div>
                     </div>
                   </label>
                 </div>
@@ -758,7 +747,7 @@ const SettingsModal = React.memo(function SettingsModal() {
                     <div className="settings-checkbox-custom"></div>
                     <div className="settings-checkbox-content">
                       <span>{locale.settingsCheckUpdatesLabel}</span>
-                      <div className="settings-checkbox-hint">{locale.settingsCheckUpdatesHint || "Vérifie automatiquement les mises à jour disponibles"}</div>
+                      <div className="settings-checkbox-hint">{locale.settingsCheckUpdatesHint || "Automatically checks for available updates"}</div>
                     </div>
                   </label>
                 </div>
@@ -894,7 +883,7 @@ const SettingsModal = React.memo(function SettingsModal() {
               </div>
               <div className="field">
                 <button className="topcoat-button--large--cta" onClick={resetStorage}>
-                  {locale.settingsResetStorage || "Réinitialiser les réglages"}
+                  {locale.settingsResetStorage || "Reset settings"}
                 </button>
               </div>
             </div>

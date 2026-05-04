@@ -50,7 +50,7 @@ const AppFooter = React.memo(function AppFooter() {
       <span
         className="link footer-mode-indicator"
         onClick={toggleMultiBubble}
-        title={locale.multiBubbleModeHint || "Permet de capturer plusieurs sélections pour insérer plusieurs textes en une fois"}
+        title={locale.multiBubbleModeHint || "Allows capturing multiple selections to insert multiple texts at once"}
       >
         <span className={`footer-mode-dot ${context.state.multiBubbleMode ? "is-on" : ""}`} />
         <span className="footer-mode-label">{locale.multiBubbleModeShort || "MB"}</span>

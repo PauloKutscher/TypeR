@@ -366,35 +366,89 @@ rm -rf "$SCRIPT_DIR"
   }
 };
 
-const readStorage = (key) => {
+let storageCache = null;
+let storageReadError = null;
+let pendingStorageData = null;
+let pendingStorageTimer = null;
+
+const loadStorageCache = () => {
+  if (storageCache !== null) {
+    return { error: storageReadError, data: storageCache };
+  }
   const result = window.cep.fs.readFile(storagePath);
   if (result.err) {
-    return key
-      ? void 0
-      : {
-          error: result.err,
-          data: {},
-        };
+    storageReadError = result.err;
+    storageCache = {};
   } else {
-    const data = JSON.parse(result.data || "{}") || {};
-    return key ? data[key] : { data };
+    storageReadError = null;
+    try {
+      storageCache = JSON.parse(result.data || "{}") || {};
+    } catch (e) {
+      storageCache = {};
+    }
   }
+  return { error: storageReadError, data: storageCache };
 };
 
-const writeToStorage = (data, rewrite) => {
-  const storage = readStorage();
-  if (storage.error || rewrite) {
-    const result = window.cep.fs.writeFile(storagePath, JSON.stringify(data));
-    return !result.err;
-  } else {
-    data = Object.assign({}, storage.data, data);
-    const result = window.cep.fs.writeFile(storagePath, JSON.stringify(data));
-    return !result.err;
+const readStorage = (key) => {
+  const storage = loadStorageCache();
+  if (storage.error) {
+    return key ? void 0 : { error: storage.error, data: {} };
   }
+  return key ? storage.data[key] : { data: storage.data };
 };
+
+const commitStorageData = (data, rewrite) => {
+  const storage = loadStorageCache();
+  const nextData = storage.error || rewrite ? data : Object.assign({}, storage.data, data);
+  storageCache = nextData;
+  storageReadError = null;
+  const result = window.cep.fs.writeFile(storagePath, JSON.stringify(nextData));
+  return !result.err;
+};
+
+const flushStorageWrite = () => {
+  if (pendingStorageTimer) {
+    clearTimeout(pendingStorageTimer);
+    pendingStorageTimer = null;
+  }
+  if (!pendingStorageData) return true;
+  const data = pendingStorageData;
+  pendingStorageData = null;
+  const success = commitStorageData(data, false);
+  if (!success) {
+    pendingStorageData = Object.assign({}, data, pendingStorageData || {});
+  }
+  return success;
+};
+
+const writeToStorage = (data, rewrite, options = {}) => {
+  if (rewrite) {
+    flushStorageWrite();
+    return commitStorageData(data, true);
+  }
+  const debounce = options.debounce || 0;
+  if (debounce > 0) {
+    pendingStorageData = Object.assign({}, pendingStorageData || {}, data);
+    storageCache = Object.assign({}, loadStorageCache().data, pendingStorageData);
+    storageReadError = null;
+    if (pendingStorageTimer) clearTimeout(pendingStorageTimer);
+    pendingStorageTimer = setTimeout(flushStorageWrite, debounce);
+    return true;
+  }
+  flushStorageWrite();
+  return commitStorageData(data, false);
+};
+
+if (window.addEventListener) {
+  window.addEventListener("beforeunload", flushStorageWrite);
+}
 
 const deleteStorageFile = () => {
+  flushStorageWrite();
   const result = window.cep.fs.deleteFile(storagePath);
+  storageCache = {};
+  storageReadError = null;
   if (typeof result === "number") {
     return (
       result === window.cep.fs.NO_ERROR ||
@@ -880,7 +934,16 @@ const getHotkeyPressed = (callback) => {
   csInterface.evalScript("getHotkeyPressed()", callback);
 };
 
-const resizeTextArea = () => {
+let resizeTextAreaFrame = null;
+const resizeTextArea = (defer = false) => {
+  if (defer && window.requestAnimationFrame) {
+    if (resizeTextAreaFrame) return;
+    resizeTextAreaFrame = window.requestAnimationFrame(() => {
+      resizeTextAreaFrame = null;
+      resizeTextArea();
+    });
+    return;
+  }
   const textArea = document.querySelector(".text-area");
   const textLines = document.querySelector(".text-lines");
   if (textArea && textLines) {

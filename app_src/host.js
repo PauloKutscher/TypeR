@@ -1124,10 +1124,10 @@ function _changeActiveLayerTextSize() {
     return;
   }
 
-  // Version optimisée utilisant les actions Photoshop directes
+  // Optimized path using direct Photoshop actions.
   _forEachSelectedLayer(function () {
     try {
-      // Utiliser la méthode rapide d'actions Photoshop pour changer la taille
+      // Use the fast Photoshop action path to change text size.
       var ref = new ActionReference();
       ref.putProperty(charID.Property, charID.TextStyle);
       ref.putEnumerated(charID.TextLayer, charID.Ordinal, charID.Target);
@@ -1139,7 +1139,7 @@ function _changeActiveLayerTextSize() {
         var sizeUnit = textStyle.getUnitDoubleType(charID.Size);
         var newSize = currentSize + state.value;
         
-        // Appliquer le nouveau size directement
+        // Apply the new size directly.
         var descriptor = new ActionDescriptor();
         var reference = new ActionReference();
         reference.putProperty(charID.Property, charID.TextStyle);
@@ -1153,7 +1153,7 @@ function _changeActiveLayerTextSize() {
         executeAction(charID.Set, descriptor, DialogModes.NO);
       }
     } catch (e) {
-      // Si la méthode rapide échoue, utiliser l'ancienne méthode
+      // Fall back to the older text replacement path if the fast path fails.
       var oldTextParams = jamText.getLayerText();
       var text = oldTextParams.layerText.textKey.replace(/\n+/g, "");
       if (!text) {
@@ -1183,15 +1183,15 @@ function _changeActiveLayerTextSize() {
       var newTextSize = oldSize + state.value;
       newTextParams.layerText.textStyleRange[0].textStyle.size = newTextSize;
 
-      // Ajuster l'interligne
+      // Adjust leading.
       var textStyle = newTextParams.layerText.textStyleRange[0].textStyle;
       if (textStyle.autoLeading || textStyle.leading === undefined) {
-        // Si l'interligne est en auto, on le laisse en auto
+        // Keep auto leading enabled when it is already automatic.
         textStyle.autoLeading = true;
-        // On supprime la propriété leading si elle existe pour s'assurer que l'auto soit appliqué
+        // Remove leading when present so Photoshop applies auto leading.
         delete textStyle.leading;
       } else {
-        // Sinon, on ajuste l'interligne de la même valeur que la taille du texte
+        // Otherwise, adjust leading by the same delta as text size.
         var oldLeading = textStyle.leading;
         var newLeading = oldLeading + state.value;
         textStyle.leading = newLeading;
@@ -1567,7 +1567,7 @@ function _createTextLayersInStoredSelections() {
         return;
       }
 
-      // Créer le layer de texte
+      // Create the text layer.
       var data = { text: text, style: style, direction: state.data.direction, richTextRuns: textRuns };
       _createAndSetLayerText(data, dimensions.width, dimensions.height);
 
@@ -1579,7 +1579,7 @@ function _createTextLayersInStoredSelections() {
       }
       bounds = _getCurrentTextLayerBounds();
 
-      // Positionner le layer à l'emplacement de la sélection stockée
+      // Position the layer inside the stored selection.
       _positionLayerWithinSelection(selection, bounds);
     } catch (e) {
       state.result = "scriptError: " + (e && e.message ? e.message : e);
@@ -1587,7 +1587,7 @@ function _createTextLayersInStoredSelections() {
     }
   }
   
-  // Vider les sélections stockées après utilisation
+  // Clear stored selections after use.
   state.selections = [];
   state.result = "";
 }
@@ -1599,7 +1599,7 @@ function createTextLayersInStoredSelections(data, point) {
   state.padding = data.padding || 0;
   state.result = "";
   
-  // Les sélections sont passées directement depuis React
+  // Selections are passed directly from React.
   if (data && data.selections) {
     state.selections = data.selections;
   } else {

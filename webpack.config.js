@@ -26,6 +26,7 @@ const defaultConfig = {
     output: {
         path: __dirname + '/app/',
         filename: 'index.js',
+        chunkFilename: '[name].index.js',
         publicPath: './'
     },
     resolve: {

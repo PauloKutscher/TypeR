@@ -1,18 +1,57 @@
 import './modal.scss';
 
 import React from 'react';
-import PropTypes from 'prop-types';
 import {useContext} from '../../context';
-import HelpModal from './help';
-import SettingsModal from './settings';
-import EditStyleModal from './editStyle';
-import EditFolderModal from './editFolder';
-import ExportModal from './export';
-import UpdateModal from './update';
+import {locale} from '../../utils';
 
+const HelpModal = React.lazy(() => import(/* webpackChunkName: "modal-help" */ './help'));
+const SettingsModal = React.lazy(() => import(/* webpackChunkName: "modal-settings" */ './settings'));
+const EditStyleModal = React.lazy(() => import(/* webpackChunkName: "modal-edit-style" */ './editStyle'));
+const EditFolderModal = React.lazy(() => import(/* webpackChunkName: "modal-edit-folder" */ './editFolder'));
+const ExportModal = React.lazy(() => import(/* webpackChunkName: "modal-export" */ './export'));
+const UpdateModal = React.lazy(() => import(/* webpackChunkName: "modal-update" */ './update'));
+
+class ModalErrorBoundary extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = {hasError: false};
+    }
+
+    static getDerivedStateFromError() {
+        return {hasError: true};
+    }
+
+    componentDidUpdate(prevProps) {
+        if (prevProps.modalType !== this.props.modalType && this.state.hasError) {
+            this.setState({hasError: false});
+        }
+    }
+
+    render() {
+        if (!this.state.hasError) return this.props.children;
+        return (
+            <React.Fragment>
+                <div className="app-modal-header hostBrdBotContrast">
+                    <div className="app-modal-title">{locale.errorTitle}</div>
+                </div>
+                <div className="app-modal-body">
+                    <div className="app-modal-body-inner article-format">
+                        <p>{locale.modalLoadError || 'Unable to load this window. Please close and reopen TypeR.'}</p>
+                    </div>
+                </div>
+                <div className="app-modal-footer hostBrdTopContrast">
+                    <button className="topcoat-button--large" onClick={this.props.onClose}>{locale.close}</button>
+                </div>
+            </React.Fragment>
+        );
+    }
+}
 
 const Modal = React.memo(function Modal() {
     const context = useContext();
+    const close = React.useCallback(() => {
+        context.dispatch({type: 'setModal'});
+    }, [context.dispatch]);
 
     let modalContent = null;
     let modalType = context.state.modalType;
@@ -33,7 +72,11 @@ const Modal = React.memo(function Modal() {
         <div className="app-modal">
             <div className="app-modal-hatch hostBgd"></div>
             <div className="app-modal-inner hostBgdLight">
-                {modalContent}
+                <ModalErrorBoundary modalType={modalType} onClose={close}>
+                    <React.Suspense fallback={<div className="app-modal-body"><div className="app-modal-body-inner">{locale.loading || 'Loading...'}</div></div>}>
+                        {modalContent}
+                    </React.Suspense>
+                </ModalErrorBoundary>
             </div>
         </div>
     ) : null;

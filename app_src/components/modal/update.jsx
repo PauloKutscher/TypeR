@@ -4,12 +4,39 @@ import { FiX, FiDownload, FiRefreshCw, FiCheckCircle } from 'react-icons/fi';
 import { locale, openUrl, downloadAndInstallUpdate, nativeAlert } from '../../utils';
 import { useContext } from '../../context';
 
+const sanitizeReleaseHtml = (html) => {
+  if (!html) return "";
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const blockedTags = ["script", "style", "iframe", "object", "embed", "link", "meta"];
+  blockedTags.forEach((tag) => {
+    Array.from(doc.querySelectorAll(tag)).forEach((node) => node.parentNode.removeChild(node));
+  });
+  Array.from(doc.body.querySelectorAll("*")).forEach((node) => {
+    Array.from(node.attributes).forEach((attr) => {
+      const name = attr.name.toLowerCase();
+      const value = attr.value || "";
+      if (name.indexOf("on") === 0 || name === "style") {
+        node.removeAttribute(attr.name);
+        return;
+      }
+      if ((name === "href" || name === "src") && !/^(https?:|mailto:)/i.test(value)) {
+        node.removeAttribute(attr.name);
+      }
+    });
+  });
+  return doc.body.innerHTML;
+};
+
 const UpdateModal = React.memo(function UpdateModal() {
   const context = useContext();
   const { version, releases, downloadUrl } = context.state.modalData;
   const [isUpdating, setIsUpdating] = React.useState(false);
   const [updateStatus, setUpdateStatus] = React.useState('');
   const [updateReady, setUpdateReady] = React.useState(false);
+  const sanitizedReleases = React.useMemo(
+    () => (releases || []).map((release) => ({ ...release, safeBody: sanitizeReleaseHtml(release.body) })),
+    [releases]
+  );
   
   const close = () => {
     if (isUpdating) return; // Prevent closing during update
@@ -142,13 +169,13 @@ const UpdateModal = React.memo(function UpdateModal() {
               <p style={{ marginTop: '0.5rem', marginBottom: 0 }}>{updateStatus}</p>
             </div>
           )}
-          {releases && releases.map((release, index) => (
+          {sanitizedReleases.map((release, index) => (
             <React.Fragment key={release.version}>
               <h3 style={{ marginTop: index === 0 ? '1rem' : '2rem', marginBottom: '0.5rem' }}>
                 Version {release.version}
               </h3>
-              {release.body && (
-                <div dangerouslySetInnerHTML={{ __html: release.body }} />
+              {release.safeBody && (
+                <div dangerouslySetInnerHTML={{ __html: release.safeBody }} />
               )}
             </React.Fragment>
           ))}

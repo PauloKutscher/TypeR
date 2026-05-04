@@ -1,18 +1,20 @@
 import React from "react";
-import deepClone from "./deepClone";
 
 import { csInterface, setActiveLayerText, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, getHotkeyPressed, changeActiveLayerTextSize } from "./utils";
 import { useContext } from "./context";
-
-const CTRL = "CTRL";
-const SHIFT = "SHIFT";
-const ALT = "ALT";
-const WIN = "WIN";
+import { buildStoredSelectionPayload, getScaledStyle } from "./textLayerPayload";
 
 const intervalTime = 50;
 
 const checkShortcut = (state, ref) => {
   return Array.isArray(ref) && ref.length > 0 && ref.every((key) => state.includes(key));
+};
+
+const isFormFieldActive = () => {
+  const active = document.activeElement;
+  if (!active) return false;
+  const tagName = active.tagName;
+  return active.isContentEditable || tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
 };
 
 const HotkeysListner = React.memo(function HotkeysListner() {
@@ -22,6 +24,7 @@ const HotkeysListner = React.memo(function HotkeysListner() {
 
   const keyUpRef = React.useRef(true);
   const lastActionRef = React.useRef(0);
+  const hotkeyPollPendingRef = React.useRef(false);
 
   React.useEffect(() => {
     const checkRepeatTime = (time = 0) => {
@@ -33,6 +36,7 @@ const HotkeysListner = React.memo(function HotkeysListner() {
     };
 
     const checkState = (state) => {
+      if (!state) return;
       const ctx = contextRef.current;
       const realState = state.split("a");
       realState.shift();
@@ -43,85 +47,26 @@ const HotkeysListner = React.memo(function HotkeysListner() {
         const storedSelections = ctx.state.storedSelections || [];
 
         if (ctx.state.multiBubbleMode && storedSelections.length > 0) {
-          const texts = [];
-          const styles = [];
-          const lines = ctx.state.lines || [];
-          let nextFallbackIndex = ctx.state.currentLineIndex;
-
-          const resolveStyleForLine = (targetLine, selection) => {
-            if (targetLine?.style) {
-              return targetLine.style;
-            }
-            if (selection?.styleId) {
-              const storedStyle = ctx.state.styles.find((s) => s.id === selection.styleId);
-              if (storedStyle) return storedStyle;
-            }
-            return ctx.state.currentStyle;
-          };
-
-          const resolveLineForSelection = (selection) => {
-            if (typeof selection.lineIndex === "number" && selection.lineIndex >= 0) {
-              const storedLine = lines[selection.lineIndex];
-              if (storedLine && !storedLine.ignore) {
-                nextFallbackIndex = Math.max(nextFallbackIndex, selection.lineIndex + 1);
-                return storedLine;
-              }
-            }
-
-            while (nextFallbackIndex < lines.length) {
-              const candidate = lines[nextFallbackIndex];
-              nextFallbackIndex++;
-              if (candidate && !candidate.ignore) {
-                return candidate;
-              }
-            }
-            return null;
-          };
-
-          for (let i = 0; i < storedSelections.length; i++) {
-            const selection = storedSelections[i];
-            const targetLine = resolveLineForSelection(selection);
-            if (!targetLine) {
-              break;
-            }
-
-            texts.push(targetLine.text);
-
-            let lineStyle = resolveStyleForLine(targetLine, selection);
-            if (lineStyle && ctx.state.textScale) {
-              lineStyle = deepClone(lineStyle);
-              const txtStyle = lineStyle.textProps?.layerText.textStyleRange?.[0]?.textStyle || {};
-              if (typeof txtStyle.size === "number") {
-                txtStyle.size *= ctx.state.textScale / 100;
-              }
-              if (typeof txtStyle.leading === "number" && txtStyle.leading) {
-                txtStyle.leading *= ctx.state.textScale / 100;
-              }
-            }
-            styles.push(lineStyle);
-          }
+          const payload = buildStoredSelectionPayload({
+            storedSelections,
+            lines: ctx.state.lines,
+            currentLineIndex: ctx.state.currentLineIndex,
+            styles: ctx.state.styles,
+            currentStyle: ctx.state.currentStyle,
+            textScale: ctx.state.textScale,
+          });
 
           const pointText = ctx.state.pastePointText;
           const padding = ctx.state.internalPadding || 0;
           const direction = ctx.state.direction;
-          createTextLayersInStoredSelections(texts, styles, storedSelections, pointText, padding, direction, (ok) => {
+          createTextLayersInStoredSelections(payload.texts, payload.styles, storedSelections, pointText, padding, direction, (ok) => {
             if (ok) {
               ctx.dispatch({ type: "clearSelections" });
             }
           });
         } else {
           const line = ctx.state.currentLine || { text: "" };
-          let style = ctx.state.currentStyle;
-          if (style && ctx.state.textScale) {
-            style = deepClone(style);
-            const txtStyle = style.textProps?.layerText.textStyleRange?.[0]?.textStyle || {};
-            if (typeof txtStyle.size === "number") {
-              txtStyle.size *= ctx.state.textScale / 100;
-            }
-            if (typeof txtStyle.leading === "number" && txtStyle.leading) {
-              txtStyle.leading *= ctx.state.textScale / 100;
-            }
-          }
+          const style = getScaledStyle(ctx.state.currentStyle, ctx.state.textScale);
           const pointText = ctx.state.pastePointText;
           const padding = ctx.state.internalPadding || 0;
           createTextLayerInSelection(line.text, style, pointText, padding, ctx.state.direction, (ok) => {
@@ -131,17 +76,7 @@ const HotkeysListner = React.memo(function HotkeysListner() {
       } else if (checkShortcut(realState, ctx.state.shortcut.apply)) {
         if (!checkRepeatTime()) return;
         const line = ctx.state.currentLine || { text: "" };
-        let style = ctx.state.currentStyle;
-        if (style && ctx.state.textScale) {
-          style = deepClone(style);
-          const txtStyle = style.textProps?.layerText.textStyleRange?.[0]?.textStyle || {};
-          if (typeof txtStyle.size === "number") {
-            txtStyle.size *= ctx.state.textScale / 100;
-          }
-          if (typeof txtStyle.leading === "number" && txtStyle.leading) {
-            txtStyle.leading *= ctx.state.textScale / 100;
-          }
-        }
+        const style = getScaledStyle(ctx.state.currentStyle, ctx.state.textScale);
         setActiveLayerText(line.text, style, ctx.state.direction, (ok) => {
           if (ok) ctx.dispatch({ type: "nextLine", add: true });
         });
@@ -179,8 +114,12 @@ const HotkeysListner = React.memo(function HotkeysListner() {
     };
 
     const interval = setInterval(() => {
-      if (contextRef.current.state.modalType === "settings") return;
-      getHotkeyPressed(checkState);
+      if (contextRef.current.state.modalType || isFormFieldActive() || hotkeyPollPendingRef.current) return;
+      hotkeyPollPendingRef.current = true;
+      getHotkeyPressed((state) => {
+        hotkeyPollPendingRef.current = false;
+        checkState(state);
+      });
     }, intervalTime);
 
     const handleKeyDown = (e) => {

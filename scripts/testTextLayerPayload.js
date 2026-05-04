@@ -1,0 +1,132 @@
+const assert = require("assert");
+const fs = require("fs");
+const Module = require("module");
+const path = require("path");
+process.env.BROWSERSLIST_IGNORE_OLD_DATA = "1";
+const babel = require("@babel/core");
+
+const rootDir = path.resolve(__dirname, "..");
+const moduleCache = {};
+
+const loadAppModule = (relativePath) => {
+  const filePath = path.resolve(rootDir, relativePath);
+  if (moduleCache[filePath]) return moduleCache[filePath].exports;
+
+  const source = fs.readFileSync(filePath, "utf8");
+  const { code } = babel.transformSync(source, {
+    filename: filePath,
+    babelrc: false,
+    configFile: false,
+    plugins: [
+      "@babel/plugin-transform-modules-commonjs",
+      "@babel/plugin-proposal-optional-chaining",
+      "@babel/plugin-proposal-class-properties",
+    ],
+  });
+
+  const mod = new Module(filePath, module);
+  moduleCache[filePath] = mod;
+  mod.filename = filePath;
+  mod.paths = Module._nodeModulePaths(path.dirname(filePath));
+  const nativeRequire = mod.require.bind(mod);
+  mod.require = (request) => {
+    if (request.startsWith(".")) {
+      const target = path.resolve(path.dirname(filePath), request);
+      return loadAppModule(path.relative(rootDir, `${target}.js`));
+    }
+    return nativeRequire(request);
+  };
+  mod._compile(code, filePath);
+  return mod.exports;
+};
+
+const { getScaledStyle, buildStoredSelectionPayload } = loadAppModule("app_src/textLayerPayload.js");
+
+const makeStyle = (id, size = 20, leading = 24) => ({
+  id,
+  textProps: {
+    layerText: {
+      textStyleRange: [{ textStyle: { size, leading } }],
+    },
+  },
+});
+
+const baseStyle = makeStyle("base");
+assert.strictEqual(getScaledStyle(null, 50), null);
+assert.strictEqual(getScaledStyle(baseStyle, null), baseStyle);
+
+const scaled = getScaledStyle(baseStyle, 50);
+assert.notStrictEqual(scaled, baseStyle);
+assert.strictEqual(scaled.textProps.layerText.textStyleRange[0].textStyle.size, 10);
+assert.strictEqual(scaled.textProps.layerText.textStyleRange[0].textStyle.leading, 12);
+assert.strictEqual(baseStyle.textProps.layerText.textStyleRange[0].textStyle.size, 20);
+
+const partialStyle = {
+  id: "partial",
+  textProps: {
+    layerText: {
+      textStyleRange: [{ textStyle: { size: 12, leading: "auto" } }],
+    },
+  },
+};
+const partialScaled = getScaledStyle(partialStyle, 150);
+assert.strictEqual(partialScaled.textProps.layerText.textStyleRange[0].textStyle.size, 18);
+assert.strictEqual(partialScaled.textProps.layerText.textStyleRange[0].textStyle.leading, "auto");
+
+const currentStyle = makeStyle("current", 30, 36);
+const taggedStyle = makeStyle("tagged", 18, 22);
+const storedStyle = makeStyle("stored", 16, 20);
+const lines = [
+  { text: "ignored", ignore: true },
+  { text: "first", ignore: false, style: taggedStyle },
+  { text: "second", ignore: false },
+  { text: "third", ignore: false },
+];
+const payload = buildStoredSelectionPayload({
+  storedSelections: [
+    { lineIndex: 1 },
+    { styleId: "stored" },
+    {},
+  ],
+  lines,
+  currentLineIndex: 2,
+  styles: [storedStyle],
+  currentStyle,
+  textScale: 200,
+});
+
+assert.deepStrictEqual(payload.texts, ["first", "second", "third"]);
+assert.strictEqual(payload.styles[0].id, "tagged");
+assert.strictEqual(payload.styles[1].id, "stored");
+assert.strictEqual(payload.styles[2].id, "current");
+assert.strictEqual(payload.styles[0].textProps.layerText.textStyleRange[0].textStyle.size, 36);
+assert.strictEqual(storedStyle.textProps.layerText.textStyleRange[0].textStyle.size, 16);
+
+const sparsePayload = buildStoredSelectionPayload({
+  storedSelections: [
+    { lineIndex: 0 },
+    { lineIndex: 99 },
+    { lineIndex: 3 },
+    {},
+  ],
+  lines,
+  currentLineIndex: 0,
+  styles: [],
+  currentStyle,
+});
+
+assert.deepStrictEqual(sparsePayload.texts, ["first", "second", "third"]);
+assert.strictEqual(sparsePayload.styles[0].id, "tagged");
+assert.strictEqual(sparsePayload.styles[1].id, "current");
+assert.strictEqual(sparsePayload.styles[2].id, "current");
+
+const exhaustedPayload = buildStoredSelectionPayload({
+  storedSelections: [{}, {}, {}],
+  lines: [{ text: "comment", ignore: true }],
+  currentLineIndex: 0,
+  currentStyle,
+});
+assert.deepStrictEqual(exhaustedPayload.texts, []);
+assert.deepStrictEqual(exhaustedPayload.styles, []);
+
+console.log("textLayerPayload tests passed");

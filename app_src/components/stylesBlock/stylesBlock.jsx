@@ -15,7 +15,16 @@ import { buildFolderTree } from "../../folderUtils";
 
 const StylesBlock = React.memo(function StylesBlock() {
   const context = useContext();
-  const unsortedStyles = context.state.styles.filter((s) => !s.folder);
+  const stylesByFolder = React.useMemo(() => {
+    const map = new Map();
+    (context.state.styles || []).forEach((style) => {
+      const key = style.folder || "__unsorted__";
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(style);
+    });
+    return map;
+  }, [context.state.styles]);
+  const unsortedStyles = stylesByFolder.get("__unsorted__") || [];
   const folderTree = React.useMemo(() => buildFolderTree(context.state.folders), [context.state.folders]);
   const hasContent = context.state.folders.length || context.state.styles.length;
   return (
@@ -23,8 +32,8 @@ const StylesBlock = React.memo(function StylesBlock() {
       <div className="folders-list">
         {hasContent ? (
           <React.Fragment>
-            {unsortedStyles.length > 0 && <FolderItem data={{ name: locale.noFolderTitle }} depth={0} />}
-            <FolderTree folders={folderTree} parentId={null} depth={0} />
+            {unsortedStyles.length > 0 && <FolderItem data={{ name: locale.noFolderTitle }} depth={0} stylesByFolder={stylesByFolder} />}
+            <FolderTree folders={folderTree} parentId={null} depth={0} stylesByFolder={stylesByFolder} />
           </React.Fragment>
         ) : (
           <div className="styles-empty">
@@ -44,7 +53,7 @@ const StylesBlock = React.memo(function StylesBlock() {
   );
 });
 
-const FolderTree = React.memo(function FolderTree({ folders, parentId, depth }) {
+const FolderTree = React.memo(function FolderTree({ folders, parentId, depth, stylesByFolder }) {
   const context = useContext();
   if (!folders || !folders.length) return null;
   const handleOrder = React.useCallback(
@@ -56,7 +65,7 @@ const FolderTree = React.memo(function FolderTree({ folders, parentId, depth }) 
   return (
     <ReactSortable className={"folders-sortable" + (depth > 0 ? " m-nested" : "")} list={folders} setList={handleOrder} animation={150}>
       {folders.map((folder) => (
-        <FolderItem key={folder.id} data={folder} depth={depth} />
+        <FolderItem key={folder.id} data={folder} depth={depth} stylesByFolder={stylesByFolder} />
       ))}
     </ReactSortable>
   );
@@ -65,6 +74,7 @@ FolderTree.propTypes = {
   folders: PropTypes.array,
   parentId: PropTypes.oneOfType([PropTypes.string, PropTypes.oneOf([null])]),
   depth: PropTypes.number.isRequired,
+  stylesByFolder: PropTypes.object.isRequired,
 };
 
 const FolderItem = React.memo(function FolderItem(props) {
@@ -80,7 +90,7 @@ const FolderItem = React.memo(function FolderItem(props) {
     context.dispatch({ type: "setStyles", data: styles });
   }, [context.dispatch, context.state.styles, props.data.id]);
 
-  const styles = props.data.id ? context.state.styles.filter((s) => s.folder === props.data.id) : context.state.styles.filter((s) => !s.folder);
+  const styles = props.stylesByFolder.get(props.data.id || "__unsorted__") || [];
   const childFolders = props.data.children || [];
 
   const exportFolder = React.useCallback((e) => {
@@ -89,17 +99,16 @@ const FolderItem = React.memo(function FolderItem(props) {
     if (!pathSelect?.data) return false;
     const exportedFolder = {};
     exportedFolder.name = props.data.name;
-    const currentStyles = props.data.id ? context.state.styles.filter((s) => s.folder === props.data.id) : context.state.styles.filter((s) => !s.folder);
-    const exportedStyles = currentStyles.map((style) => ({
+    const exportedStyles = styles.map((style) => ({
       name: style.name,
       textProps: style.textProps,
-      prefixes: style.prefixes,
+      prefixes: style.prefixes || [],
       prefixColor: style.prefixColor,
       stroke: style.stroke,
     }));
     exportedFolder.exportedStyles = exportedStyles;
     window.cep.fs.writeFile(pathSelect.data, JSON.stringify(exportedFolder));
-  }, [props.data.id, props.data.name, context.state.styles]);
+  }, [props.data.name, styles]);
 
   const duplicateFolder = React.useCallback((e) => {
     e.stopPropagation();
@@ -151,7 +160,7 @@ const FolderItem = React.memo(function FolderItem(props) {
         <div className="folder-content">
           {!!childFolders.length && props.data.id && (
             <div className="folder-subfolders hostBrdTopContrast">
-              <FolderTree folders={childFolders} parentId={props.data.id} depth={props.depth + 1} />
+              <FolderTree folders={childFolders} parentId={props.data.id} depth={props.depth + 1} stylesByFolder={props.stylesByFolder} />
             </div>
           )}
           <div className={"folder-styles hostBrdTopContrast" + (childFolders.length && props.data.id ? " m-with-subfolders" : "")}>
@@ -179,14 +188,16 @@ const FolderItem = React.memo(function FolderItem(props) {
 FolderItem.propTypes = {
   data: PropTypes.object.isRequired,
   depth: PropTypes.number.isRequired,
+  stylesByFolder: PropTypes.object.isRequired,
 };
 
 const StyleItem = React.memo(function StyleItem(props) {
-  const textStyle = props.style.textProps.layerText.textStyleRange[0]?.textStyle || {};
+  const layerText = props.style.textProps?.layerText || {};
+  const textStyle = layerText.textStyleRange?.[0]?.textStyle || {};
   const styleObject = getStyleObject(textStyle);
+  const prefixes = props.style.prefixes || [];
   const context = useContext();
 
-  // Fix derived state: use override only during active editing instead of syncing via useEffect
   const [quickSizeOverride, setQuickSizeOverride] = React.useState(null);
   const displaySize = quickSizeOverride !== null ? quickSizeOverride : (textStyle.size || "");
 
@@ -225,13 +236,18 @@ const StyleItem = React.memo(function StyleItem(props) {
     const direction = context.state.direction;
     if (e.ctrlKey) {
       getActiveLayerText((data) => {
-        textStyle.size = data.textProps.layerText.textStyleRange[0].textStyle.size;
-        setActiveLayerText("", props.style, direction);
+        const activeTextStyle = data?.textProps?.layerText?.textStyleRange?.[0]?.textStyle;
+        if (!activeTextStyle?.size) return;
+        const styleWithActiveSize = deepClone(props.style);
+        const nextTextStyle = styleWithActiveSize.textProps?.layerText?.textStyleRange?.[0]?.textStyle;
+        if (!nextTextStyle) return;
+        nextTextStyle.size = activeTextStyle.size;
+        setActiveLayerText("", styleWithActiveSize, direction);
       });
     } else {
       setActiveLayerText("", props.style, direction);
     }
-  }, [context.state.direction, props.style, textStyle]);
+  }, [context.state.direction, props.style]);
 
   const duplicateStyle = React.useCallback((e) => {
     e.stopPropagation();
@@ -294,18 +310,20 @@ const StyleItem = React.memo(function StyleItem(props) {
     <div id={props.style.id} className={"style-item hostBgdLight" + (props.active ? " m-current" : "") + (props.style.prefixesDisabled ? " m-disabled" : "")} onClick={selectStyle}>
       <div className="style-marker">
         <div className="style-color" style={{ background: rgbToHex(textStyle.color) }} title={locale.styleTextColor + ": " + rgbToHex(textStyle.color)}></div>
-        {!!props.style.prefixes.length && (
+        {!!prefixes.length && (
           <div className="style-prefix-color" title={locale.stylePrefixColor + ": " + (props.style.prefixColor || config.defaultPrefixColor)}>
             <div style={{ background: props.style.prefixColor || config.defaultPrefixColor }}></div>
           </div>
         )}
-        {!!props.style.prefixes.length && (
-          <div className="style-prefix-toggle" onClick={togglePrefixes} title={props.style.prefixesDisabled ? "Activer les préfixes automatiques" : "Désactiver les préfixes automatiques"}>
+        {!!prefixes.length && (
+          <div className="style-prefix-toggle" onClick={togglePrefixes} title={props.style.prefixesDisabled ? locale.enableStylePrefixes : locale.disableStylePrefixes}>
             {props.style.prefixesDisabled ? <FiEyeOff size={10} /> : <FiEye size={10} />}
           </div>
         )}
       </div>
-      <div className="style-name" style={styleObject} dangerouslySetInnerHTML={{ __html: `<span style='font-family: "${styleObject.fontFamily || "Tahoma"}"'>${props.style.name}</span>` }}></div>
+      <div className="style-name" style={styleObject}>
+        <span style={{ fontFamily: styleObject.fontFamily || "Tahoma" }}>{props.style.name}</span>
+      </div>
       <div className="style-actions">
         {showQuickStyleSize ? (
           <div
@@ -321,6 +339,11 @@ const StyleItem = React.memo(function StyleItem(props) {
             <button className={"topcoat-icon-button--large--quiet" + (props.active ? " m-cta" : "")} title={locale.editStyle} onClick={openStyle}>
               <MdEdit size={16} />
             </button>
+            {sizeValue !== "" && (
+              <span className="style-quick-size-badge" title={locale.editStyleFontSize || "Font size"}>
+                {sizeValue}{unit}
+              </span>
+            )}
             <div className="style-quick-size hostBrdContrast" title={locale.editStyleFontSize || "Font size"} onMouseDown={stopQuickEvent} onClick={stopQuickEvent}>
               <button className="style-quick-size-btn" title={locale.shortcut_decrease || "Decrease text size"} onClick={nudgeQuickSize(-1)}>
                 <FiMinus size={12} />

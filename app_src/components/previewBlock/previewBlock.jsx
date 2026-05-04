@@ -1,14 +1,13 @@
 import "./previewBlock.scss";
 
 import React from "react";
-import deepClone from "../../deepClone";
-import PropTypes from "prop-types";
 import { FiArrowRightCircle, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiX } from "react-icons/fi";
 import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 
-import { locale, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
+import { locale, setActiveLayerText, getSelectionBoundsHash, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
+import { buildStoredSelectionPayload, getScaledStyle } from "../../textLayerPayload";
 
 const PreviewBlock = React.memo(function PreviewBlock() {
   const context = useContext();
@@ -35,9 +34,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     });
   }, [markdownEnabled]);
 
-  // État pour la détection automatique des sélections
-  const [lastSelectionHash, setLastSelectionHash] = React.useState(null);
   const selectionCheckInterval = React.useRef(null);
+  const selectionCheckPending = React.useRef(false);
   const [shiftSelectionWarning, setShiftSelectionWarning] = React.useState(false);
   const shiftTipTimeout = React.useRef(null);
   const [showClearAllTip, setShowClearAllTip] = React.useState(false);
@@ -53,7 +51,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   }, []);
 
   const showClearAllTipFunc = React.useCallback(() => {
-    if (clearAllTipShown) return; // Ne montrer qu'une seule fois
+    if (clearAllTipShown) return;
     setShowClearAllTip(true);
     setClearAllTipShown(true);
     if (clearAllTipTimeout.current) {
@@ -79,14 +77,6 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     if (context.state.multiBubbleMode) {
       context.dispatch({ type: "nextLine", add: true });
     }
-  };
-
-  const addCurrentSelection = () => {
-    getCurrentSelection((selection) => {
-      if (selection) {
-        addSelectionAndAdvance(selection);
-      }
-    });
   };
 
   const clearButtonTimeout = React.useRef(null);
@@ -121,11 +111,12 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     }
   };
 
-  // Fonction pour vérifier les changements de sélection
   const checkForSelectionChange = React.useCallback(() => {
-    if (!context.state.multiBubbleMode) return;
+    if (!context.state.multiBubbleMode || context.state.modalType || selectionCheckPending.current) return;
+    selectionCheckPending.current = true;
 
     getSelectionChanged((selection) => {
+      selectionCheckPending.current = false;
       if (selection) {
         const getNextLineIndex = (lineIndex) => {
           const lines = context.state.lines || [];
@@ -150,10 +141,6 @@ const PreviewBlock = React.memo(function PreviewBlock() {
             }
 
             storedHashSet.add(selectionHash);
-            if (addedCount === 0) {
-              setLastSelectionHash(selectionHash);
-            }
-
             context.dispatch({
               type: "addSelection",
               selection: cleanSelection,
@@ -175,37 +162,31 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         }
         const { shiftKey, ...cleanSelection } = selection;
         const newHash = getSelectionBoundsHash(cleanSelection);
-        const storedHashes = context.state.storedSelections?.map(s => getSelectionBoundsHash(s)) || [];
-        
-        // Si la sélection n'est pas déjà stockée, l'ajouter
-        if (!storedHashes.includes(newHash)) {
-          setLastSelectionHash(newHash);
+        const storedHashSet = new Set((context.state.storedSelections || []).map((storedSelection) => getSelectionBoundsHash(storedSelection)));
+
+        if (!storedHashSet.has(newHash)) {
           addSelectionAndAdvance(cleanSelection);
         }
       }
     });
-  }, [context.state.multiBubbleMode, context.state.storedSelections, context.state.currentLineIndex, context.state.lines, showShiftTip]);
+  }, [context.state.multiBubbleMode, context.state.modalType, context.state.storedSelections, context.state.currentLineIndex, context.state.lines, showShiftTip]);
 
-  // Effect pour démarrer/arrêter la surveillance automatique
   React.useEffect(() => {
-    if (context.state.multiBubbleMode) {
-      // Démarrer la surveillance Photoshop
+    if (context.state.multiBubbleMode && !context.state.modalType) {
       startSelectionMonitoring();
-      // Vérifier les changements toutes les 200ms
       selectionCheckInterval.current = setInterval(checkForSelectionChange, 200);
     } else {
-      // Arrêter la surveillance
       stopSelectionMonitoring();
+      selectionCheckPending.current = false;
       if (selectionCheckInterval.current) {
         clearInterval(selectionCheckInterval.current);
         selectionCheckInterval.current = null;
       }
-      setLastSelectionHash(null);
     }
 
-    // Nettoyage lors du démontage
     return () => {
       stopSelectionMonitoring();
+      selectionCheckPending.current = false;
       if (selectionCheckInterval.current) {
         clearInterval(selectionCheckInterval.current);
       }
@@ -219,20 +200,18 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         clearTimeout(clearButtonTimeout.current);
       }
     };
-  }, [context.state.multiBubbleMode, checkForSelectionChange]);
+  }, [context.state.multiBubbleMode, context.state.modalType, checkForSelectionChange]);
   React.useEffect(() => {
     if (!context.state.multiBubbleMode && shiftSelectionWarning) {
       setShiftSelectionWarning(false);
     }
   }, [context.state.multiBubbleMode, shiftSelectionWarning]);
 
-  // Afficher le tip "hold to clear all" quand on dépasse 10 sélections
   React.useEffect(() => {
     const storedSelections = context.state.storedSelections || [];
     if (context.state.multiBubbleMode && storedSelections.length > 10 && !clearAllTipShown) {
       showClearAllTipFunc();
     }
-    // Réinitialiser le flag quand on quitte le mode multi-bubble ou qu'on vide les sélections
     if (!context.state.multiBubbleMode || storedSelections.length === 0) {
       setClearAllTipShown(false);
       setShowClearAllTip(false);
@@ -243,87 +222,25 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     const storedSelections = context.state.storedSelections || [];
     
     if (context.state.multiBubbleMode && storedSelections.length > 0) {
-      // Mode sélections multiples
-      const texts = [];
-      const styles = [];
-      const lines = context.state.lines || [];
-      let nextFallbackIndex = context.state.currentLineIndex;
+      const payload = buildStoredSelectionPayload({
+        storedSelections,
+        lines: context.state.lines,
+        currentLineIndex: context.state.currentLineIndex,
+        styles: context.state.styles,
+        currentStyle: context.state.currentStyle,
+        textScale: context.state.textScale,
+      });
 
-      const resolveStyleForLine = (targetLine, selection) => {
-        if (targetLine?.style) {
-          return targetLine.style;
-        }
-        if (selection?.styleId) {
-          const storedStyle = context.state.styles.find((s) => s.id === selection.styleId);
-          if (storedStyle) return storedStyle;
-        }
-        return context.state.currentStyle;
-      };
-
-      const resolveLineForSelection = (selection) => {
-        if (typeof selection.lineIndex === "number" && selection.lineIndex >= 0) {
-          const storedLine = lines[selection.lineIndex];
-          if (storedLine && !storedLine.ignore) {
-            nextFallbackIndex = Math.max(nextFallbackIndex, selection.lineIndex + 1);
-            return storedLine;
-          }
-        }
-
-        while (nextFallbackIndex < lines.length) {
-          const candidate = lines[nextFallbackIndex];
-          nextFallbackIndex++;
-          if (candidate && !candidate.ignore) {
-            return candidate;
-          }
-        }
-        return null;
-      };
-
-      for (let i = 0; i < storedSelections.length; i++) {
-        const selection = storedSelections[i];
-        const targetLine = resolveLineForSelection(selection);
-        if (!targetLine) {
-          break;
-        }
-
-        texts.push(targetLine.text);
-
-        let lineStyle = resolveStyleForLine(targetLine, selection);
-        if (lineStyle && context.state.textScale) {
-          lineStyle = deepClone(lineStyle);
-          const txtStyle = lineStyle.textProps?.layerText.textStyleRange?.[0]?.textStyle || {};
-          if (typeof txtStyle.size === "number") {
-            txtStyle.size *= context.state.textScale / 100;
-          }
-          if (typeof txtStyle.leading === "number" && txtStyle.leading) {
-            txtStyle.leading *= context.state.textScale / 100;
-          }
-        }
-        styles.push(lineStyle);
-      }
-      
       const pointText = context.state.pastePointText;
       const padding = context.state.internalPadding || 0;
       const direction = context.state.direction;
-      createTextLayersInStoredSelections(texts, styles, storedSelections, pointText, padding, direction, (ok) => {
+      createTextLayersInStoredSelections(payload.texts, payload.styles, storedSelections, pointText, padding, direction, (ok) => {
         if (ok) {
-          // Vider les sélections stockées
           context.dispatch({ type: "clearSelections" });
         }
       });
     } else {
-      // Mode sélection unique (comportement original)
-      let lineStyle = context.state.currentStyle;
-      if (lineStyle && context.state.textScale) {
-        lineStyle = deepClone(lineStyle);
-        const txtStyle = lineStyle.textProps?.layerText.textStyleRange?.[0]?.textStyle || {};
-        if (typeof txtStyle.size === "number") {
-          txtStyle.size *= context.state.textScale / 100;
-        }
-        if (typeof txtStyle.leading === "number" && txtStyle.leading) {
-          txtStyle.leading *= context.state.textScale / 100;
-        }
-      }
+      const lineStyle = getScaledStyle(context.state.currentStyle, context.state.textScale);
       const pointText = context.state.pastePointText;
       const padding = context.state.internalPadding || 0;
       const direction = context.state.direction;
@@ -337,21 +254,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     const storedSelections = context.state.storedSelections || [];
     
     if (context.state.multiBubbleMode && storedSelections.length > 0) {
-      // En mode multi-bubble, utiliser la même logique que createLayer
       createLayer();
     } else {
-      // Mode normal
-      let lineStyle = context.state.currentStyle;
-      if (lineStyle && context.state.textScale) {
-        lineStyle = deepClone(lineStyle);
-        const txtStyle = lineStyle.textProps?.layerText.textStyleRange?.[0]?.textStyle || {};
-        if (typeof txtStyle.size === "number") {
-          txtStyle.size *= context.state.textScale / 100;
-        }
-        if (typeof txtStyle.leading === "number" && txtStyle.leading) {
-          txtStyle.leading *= context.state.textScale / 100;
-        }
-      }
+      const lineStyle = getScaledStyle(context.state.currentStyle, context.state.textScale);
       setActiveLayerText(line.text, lineStyle, context.state.direction, (ok) => {
         if (ok) context.dispatch({ type: "nextLine", add: true });
       });
@@ -428,7 +333,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         {context.state.multiBubbleMode && context.state.showTips !== false && shiftSelectionWarning && (
           <div className="preview-top_selection-warning">
             <FiAlertTriangle size={14} />
-            <span>{locale.multiBubbleShiftTip || "Le mode multi-bubble fonctionne avec une sélection à la fois. Relâchez Shift et faites vos sélections une par une."}</span>
+            <span>{locale.multiBubbleShiftTip || "Multi-bubble works with one selection at a time. Release Shift and create selections one by one."}</span>
           </div>
         )}
         {context.state.multiBubbleMode && context.state.showTips !== false && showClearAllTip && (
@@ -446,8 +351,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         )}
         <div className="preview-top_main-controls">
           <button className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large--cta" title={
-            context.state.multiBubbleMode && context.state.storedSelections && context.state.storedSelections.length > 0 
-              ? `Insérer ${context.state.storedSelections.length} texte${context.state.storedSelections.length > 1 ? 's' : ''}` 
+            context.state.multiBubbleMode && context.state.storedSelections && context.state.storedSelections.length > 0
+              ? (locale.multiBubbleCreateLayersDescr || "Paste {count} text layer(s)").replace("{count}", context.state.storedSelections.length)
               : locale.createLayerDescr
           } onClick={createLayer}>
             <AiOutlineBorderInner size={18} /> {locale.createLayer}

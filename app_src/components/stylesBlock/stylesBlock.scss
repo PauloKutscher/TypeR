@@ -205,7 +205,8 @@
 }
 .style-name {
   -webkit-font-smoothing: antialiased;
-  max-width: calc(100% - 70px);
+  min-width: 0;
+  max-width: calc(100% - 116px);
   text-overflow: ellipsis;
   letter-spacing: 1px;
   white-space: nowrap;
@@ -230,6 +231,27 @@
   display: flex;
   align-items: center;
   margin-right: 3px;
+}
+.style-quick-size-badge {
+  max-width: 38px;
+  margin-left: 3px;
+  padding: 0 3px;
+  height: 16px;
+  line-height: 16px;
+  border-radius: 2px;
+  background: rgba(#000, 0.22);
+  color: inherit;
+  font-size: 9px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  opacity: 0.75;
+}
+.style-item.m-current .style-quick-size-badge {
+  background: rgba(#fff, 0.18);
+  color: #fff;
+  opacity: 0.95;
 }
 .style-quick-size {
   position: absolute;
