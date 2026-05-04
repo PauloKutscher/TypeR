@@ -3,6 +3,7 @@ import {
   FiCheck,
   FiChevronLeft,
   FiChevronRight,
+  FiDownload,
   FiMousePointer,
   FiRotateCw,
   FiSkipForward,
@@ -10,22 +11,11 @@ import {
   FiX,
 } from "react-icons/fi";
 
+import config from "../../config";
 import { useContext } from "../../context";
 import { alignTextLayerToSelection, createTextLayerInSelection, getDefaultStroke, getDefaultStyle, locale } from "../../utils";
 
 const SAMPLE_SCRIPT = "Page 1\nREG: This bubble is ready.\nSFX: BOOM!\n## translator note";
-const DEMO_STYLE_ID = "typer_walkthrough_regular";
-const DEMO_STYLE = {
-  id: DEMO_STYLE_ID,
-  name: "Walkthrough Regular",
-  folder: null,
-  textProps: getDefaultStyle(),
-  prefixes: ["REG:"],
-  prefixColor: "#54be78",
-  stroke: getDefaultStroke(),
-  edited: 1,
-};
-
 const hasSampleScript = (value) => /Page\s*1/i.test(value) && /REG:/i.test(value) && /SFX:/i.test(value);
 
 const getSteps = () => [
@@ -59,20 +49,22 @@ const getSteps = () => [
   },
   {
     id: "settings",
-    title: locale.walkthroughStepSettingsTitle || "Tune the workflow",
+    title: locale.walkthroughStepExportTitle || "Export a JSON backup",
     text:
-      locale.walkthroughStepSettingsText ||
-      "Settings control shortcuts, markdown, line numbering, auto-scroll, quick size edits, imports, exports, and saved work states.",
+      locale.walkthroughStepExportText ||
+      "Save a JSON file so styles and settings can be restored or shared later.",
   },
 ];
 
 const WalkthroughModal = React.memo(function WalkthroughModal() {
   const context = useContext();
   const [stepIndex, setStepIndex] = React.useState(0);
-  const [demoStyleReady, setDemoStyleReady] = React.useState(false);
+  const [styleName, setStyleName] = React.useState(locale.walkthroughDefaultStyleName || "Regular");
+  const [styleTag, setStyleTag] = React.useState("REG:");
+  const [createdStyleId, setCreatedStyleId] = React.useState(null);
   const [photoshopLayerDone, setPhotoshopLayerDone] = React.useState(false);
   const [alignDone, setAlignDone] = React.useState(false);
-  const [settingDone, setSettingDone] = React.useState({ reopen: false });
+  const [exportDone, setExportDone] = React.useState(false);
   const steps = React.useMemo(getSteps, []);
   const step = steps[stepIndex];
   const isFirst = stepIndex === 0;
@@ -81,10 +73,10 @@ const WalkthroughModal = React.memo(function WalkthroughModal() {
 
   const completed = {
     script: sampleLoaded,
-    styles: demoStyleReady || context.state.styles.some((style) => style.id === DEMO_STYLE_ID),
+    styles: !!createdStyleId && context.state.styles.some((style) => style.id === createdStyleId),
     selection: photoshopLayerDone,
     flow: alignDone,
-    settings: settingDone.reopen,
+    settings: exportDone,
   };
   const canContinue = completed[step.id];
 
@@ -116,16 +108,39 @@ const WalkthroughModal = React.memo(function WalkthroughModal() {
     context.dispatch({ type: "setCurrentLineIndex", index: 1 });
   };
 
-  const prepareDemoStyle = () => {
-    context.dispatch({ type: "saveStyle", data: DEMO_STYLE });
-    context.dispatch({ type: "setCurrentStyleId", id: DEMO_STYLE_ID });
-    setDemoStyleReady(true);
+  const currentWalkthroughStyle = React.useMemo(() => {
+    if (!createdStyleId) return null;
+    return context.state.styles.find((style) => style.id === createdStyleId) || null;
+  }, [context.state.styles, createdStyleId]);
+
+  const createWalkthroughStyle = () => {
+    const name = (styleName || "").trim();
+    const tag = (styleTag || "").trim();
+    if (!name || !tag) return;
+    const styleId = `typer_walkthrough_${Date.now()}`;
+    const data = {
+      id: styleId,
+      name,
+      folder: null,
+      textProps: getDefaultStyle(),
+      prefixes: [tag],
+      prefixColor: "#54be78",
+      stroke: getDefaultStroke(),
+      edited: Date.now(),
+    };
+    context.dispatch({ type: "saveStyle", data });
+    context.dispatch({ type: "setCurrentStyleId", id: styleId });
+    setCreatedStyleId(styleId);
   };
 
   const createPhotoshopTextLayer = () => {
+    const style = currentWalkthroughStyle || context.state.currentStyle || {
+      textProps: getDefaultStyle(),
+      stroke: getDefaultStroke(),
+    };
     createTextLayerInSelection(
       "This bubble is ready.",
-      DEMO_STYLE,
+      style,
       context.state.pastePointText,
       context.state.internalPadding || 0,
       context.state.direction,
@@ -142,6 +157,26 @@ const WalkthroughModal = React.memo(function WalkthroughModal() {
     alignTextLayerToSelection(context.state.resizeTextBoxOnCenter, context.state.internalPadding || 0, (ok) => {
       if (ok) setAlignDone(true);
     });
+  };
+
+  const exportJson = () => {
+    const pathSelect = window.cep.fs.showSaveDialogEx(false, false, ["json"], `${config.exportFileName}.json`);
+    if (!pathSelect?.data) return;
+    const data = {
+      folders: context.state.folders,
+      styles: context.state.styles,
+      version: config.appVersion,
+      exported: new Date(),
+      ignoreLinePrefixes: context.state.ignoreLinePrefixes,
+      ignoreTags: context.state.ignoreTags,
+      defaultStyleId: context.state.defaultStyleId,
+      language: context.state.language,
+      autoClosePSD: context.state.autoClosePSD,
+      autoScrollStyle: context.state.autoScrollStyle,
+      currentFolderTagPriority: context.state.currentFolderTagPriority,
+    };
+    const result = window.cep.fs.writeFile(pathSelect.data, JSON.stringify(data));
+    if (!result || !result.err) setExportDone(true);
   };
 
   const renderPractice = () => {
@@ -171,18 +206,29 @@ const WalkthroughModal = React.memo(function WalkthroughModal() {
         <div className="walkthrough-practice">
           <div className="walkthrough-task">
             <FiMousePointer size={17} />
-            <span>{locale.walkthroughTaskStyle || "Create and activate a real demo style with the REG: tag."}</span>
+            <span>{locale.walkthroughTaskStyle || "Create a real style. It will be added to your style list and activated."}</span>
             {renderDone(completed.styles)}
           </div>
-          <div className="walkthrough-style-list">
-            <button type="button" className={`walkthrough-style${completed.styles ? " m-active" : ""}`} onClick={prepareDemoStyle}>
-              {locale.walkthroughStyleRegular || "Walkthrough Regular"}
-            </button>
-            <div className="walkthrough-tag-pill">REG:</div>
+          <div className="walkthrough-inline-fields">
+            <input
+              className="topcoat-text-input--large"
+              value={styleName}
+              onChange={(event) => setStyleName(event.target.value)}
+              placeholder={locale.walkthroughStyleNamePlaceholder || "Style name"}
+            />
+            <input
+              className="topcoat-text-input--large"
+              value={styleTag}
+              onChange={(event) => setStyleTag(event.target.value)}
+              placeholder={locale.walkthroughStyleTagPlaceholder || "Tag"}
+            />
           </div>
+          <button type="button" className={completed.styles ? "topcoat-button--large--cta" : "topcoat-button--large"} onClick={createWalkthroughStyle}>
+            {completed.styles ? locale.walkthroughStyleCreated || "Style created" : locale.walkthroughCreateStyle || "Create style"}
+          </button>
           {completed.styles && (
             <div className="walkthrough-result">
-              {locale.walkthroughStyleResult || "Lines starting with REG: can now select the demo style automatically."}
+              {locale.walkthroughStyleResult || "Your new style is now active and can be reused from the style list."}
             </div>
           )}
         </div>
@@ -234,18 +280,16 @@ const WalkthroughModal = React.memo(function WalkthroughModal() {
     return (
       <div className="walkthrough-practice">
         <div className="walkthrough-task">
-          <FiCheck size={17} />
-          <span>{locale.walkthroughTaskSettings || "Confirm where this guide lives. The Done button will unlock immediately after this checkbox."}</span>
+          <FiDownload size={17} />
+          <span>{locale.walkthroughTaskExport || "Export a JSON backup with your current styles and settings."}</span>
           {renderDone(completed.settings)}
         </div>
-        <label className="walkthrough-confirm">
-          <input
-            type="checkbox"
-            checked={settingDone.reopen}
-            onChange={(event) => setSettingDone((value) => ({ ...value, reopen: event.target.checked }))}
-          />
-          <span>{locale.walkthroughSettingsConfirm || "I can reopen this guide from Settings > General."}</span>
-        </label>
+        <button type="button" className={completed.settings ? "topcoat-button--large--cta" : "topcoat-button--large"} onClick={exportJson}>
+          <FiDownload size={16} /> {completed.settings ? locale.walkthroughJsonExported || "JSON exported" : locale.walkthroughExportJson || "Export JSON"}
+        </button>
+        <div className="walkthrough-result">
+          {locale.walkthroughSettingsConfirm || "You can reopen this guide from Settings > General."}
+        </div>
       </div>
     );
   };

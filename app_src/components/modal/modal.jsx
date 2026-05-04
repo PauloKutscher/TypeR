@@ -71,9 +71,9 @@ const Modal = React.memo(function Modal() {
     }, []);
 
     return modalContent ? (
-        <div className="app-modal">
-            <div className="app-modal-hatch hostBgd"></div>
-            <div className="app-modal-inner hostBgdLight">
+        <div className={`app-modal${modalType === 'walkthrough' ? ' app-modal--walkthrough' : ''}`}>
+            {modalType !== 'walkthrough' && <div className="app-modal-hatch hostBgd"></div>}
+            <div className={`app-modal-inner hostBgdLight${modalType === 'walkthrough' ? ' app-modal-inner--walkthrough' : ''}`}>
                 <ModalErrorBoundary modalType={modalType} onClose={close}>
                     <React.Suspense fallback={<div className="app-modal-body"><div className="app-modal-body-inner">{locale.loading || 'Loading...'}</div></div>}>
                         {modalContent}
