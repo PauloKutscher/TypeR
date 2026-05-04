@@ -5,7 +5,7 @@ import PropTypes from 'prop-types';
 import {FiX} from "react-icons/fi";
 import {MdDelete, MdCancel, MdSave} from "react-icons/md";
 
-import {locale, nativeAlert, nativeConfirm} from '../../utils';
+import {locale, nativeAlert, nativeConfirm, getStyleObject, rgbToHex} from '../../utils';
 import {useContext} from '../../context';
 import {buildFolderTree, flattenFolderTree, collectDescendantIds} from '../../folderUtils';
 
@@ -90,13 +90,52 @@ const EditFolderModal = React.memo(function EditFolderModal() {
         if (nameInputRef.current) nameInputRef.current.focus();
     }, []);
 
-    const unsortedStyles = context.state.styles.filter(s => !s.folder);
-
     const parentOptions = flatFolders.filter(folder => {
         if (folder.id === currentData.id) return false;
         if (descendantIds.includes(folder.id)) return false;
         return true;
     });
+
+    const styleGroups = React.useMemo(() => {
+        const groups = [];
+        const knownFolderIds = flatFolders.map(folder => folder.id);
+        const unsortedStyles = context.state.styles.filter(s => !s.folder);
+
+        if (unsortedStyles.length) {
+            groups.push({
+                id: '__unsorted__',
+                label: locale.noFolderTitle,
+                depth: 0,
+                styles: unsortedStyles
+            });
+        }
+
+        flatFolders.forEach(folder => {
+            const styles = context.state.styles.filter(s => (s.folder === folder.id));
+            if (!styles.length) return;
+            groups.push({
+                id: folder.id,
+                label: folder.label,
+                depth: folder.depth,
+                styles
+            });
+        });
+
+        context.state.folders
+            .filter(folder => !knownFolderIds.includes(folder.id))
+            .forEach(folder => {
+                const styles = context.state.styles.filter(s => (s.folder === folder.id));
+                if (!styles.length) return;
+                groups.push({
+                    id: folder.id,
+                    label: folder.name,
+                    depth: 0,
+                    styles
+                });
+            });
+
+        return groups;
+    }, [context.state.folders, context.state.styles, flatFolders]);
 
     return (
         <React.Fragment>
@@ -152,28 +191,12 @@ const EditFolderModal = React.memo(function EditFolderModal() {
                                 <div className="folder-styles-list hostBrdContrast">
                                     {context.state.styles.length ? (
                                         <React.Fragment>
-                                            {(unsortedStyles.length > 0) && (
-                                                <FolderStylesList 
-                                                    label={locale.noFolderTitle}
-                                                    styles={unsortedStyles}
-                                                    toggleStyle={changeFolderStyles}
-                                                    selected={styleIds}
-                                                />
-                                            )}
-                                            {flatFolders.map(folder => (
-                                                <FolderStylesList 
-                                                    key={folder.id}
-                                                    label={folder.label}
-                                                    styles={context.state.styles.filter(s => (s.folder === folder.id))}
-                                                    toggleStyle={changeFolderStyles}
-                                                    selected={styleIds}
-                                                />
-                                            ))}
-                                            {context.state.folders.filter(folder => !flatFolders.find(f => f.id === folder.id)).map(folder => (
-                                                <FolderStylesList 
-                                                    key={folder.id} 
-                                                    label={folder.name}
-                                                    styles={context.state.styles.filter(s => (s.folder === folder.id))}
+                                            {styleGroups.map(group => (
+                                                <FolderStylesList
+                                                    key={group.id}
+                                                    label={group.label}
+                                                    depth={group.depth}
+                                                    styles={group.styles}
                                                     toggleStyle={changeFolderStyles}
                                                     selected={styleIds}
                                                 />
@@ -211,28 +234,62 @@ const EditFolderModal = React.memo(function EditFolderModal() {
 
 const FolderStylesList = React.memo(function FolderStylesList(props) {
     return (
-        <React.Fragment>
+        <div className="folder-style-group">
+            <div className="folder-style-group-title hostBrdBotContrast" style={{ paddingLeft: props.depth ? props.depth * 10 + 6 : 6 }}>
+                <span>{props.label}</span>
+                <em>{props.styles.length}</em>
+            </div>
             {props.styles.map(style => (
-                <label key={style.id} className={'folder-style-item topcoat-checkbox hostBgdLight' + (props.selected.includes(style.id) ? ' m-selected' : '')}>
+                <label key={style.id} className={'folder-style-item topcoat-checkbox hostBgdLight' + (props.selected.includes(style.id) ? ' m-selected' : '')} style={{ marginLeft: props.depth ? props.depth * 10 : 0 }}>
                     <div className="folder-style-cbx">
-                        <input 
-                            type="checkbox" 
+                        <input
+                            type="checkbox"
                             checked={props.selected.includes(style.id)}
                             onChange={e => props.toggleStyle(style.id, e.target.checked)}
                         />
                         <div className="topcoat-checkbox__checkmark"></div>
                     </div>
-                    <div className="folder-style-title">{style.name} <span>({props.label})</span></div>
+                    <StylePreview style={style} />
+                    <div className="folder-style-title">{style.name}</div>
                 </label>
             ))}
-        </React.Fragment>
+        </div>
     );
 });
 FolderStylesList.propTypes = {
     label: PropTypes.string.isRequired,
+    depth: PropTypes.number.isRequired,
     styles: PropTypes.array.isRequired,
     toggleStyle: PropTypes.func.isRequired,
     selected: PropTypes.array.isRequired
+};
+
+const StylePreview = React.memo(function StylePreview(props) {
+    const textStyle = props.style.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {};
+    const styleObject = getStyleObject(textStyle);
+    const previewStyle = {
+        ...styleObject,
+        color: '#fff',
+        fontFamily: styleObject.fontFamily || 'Tahoma'
+    };
+    if (props.style.stroke?.enabled && props.style.stroke?.size > 0) {
+        const strokeColor = rgbToHex(props.style.stroke.color);
+        previewStyle.textShadow = [
+            `1px 0 ${strokeColor}`,
+            `-1px 0 ${strokeColor}`,
+            `0 1px ${strokeColor}`,
+            `0 -1px ${strokeColor}`
+        ].join(', ');
+    }
+
+    return (
+        <div className="folder-style-preview" title={props.style.name}>
+            <span style={previewStyle}>Aa</span>
+        </div>
+    );
+});
+StylePreview.propTypes = {
+    style: PropTypes.object.isRequired
 };
 
 export default EditFolderModal;

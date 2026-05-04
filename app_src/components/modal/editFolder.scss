@@ -2,16 +2,47 @@
     background: rgba(#000, .2);
     max-height: 345px;
     overflow-y: auto;
-    padding: 4px;
+    padding: 4px 4px 1px;
+}
+.folder-style-group {
+    & + & {
+        margin-top: 7px;
+    }
+}
+.folder-style-group-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-sizing: border-box;
+    height: 22px;
+    margin-bottom: 3px;
+    padding: 0 6px;
+    font-size: 11px;
+    letter-spacing: 0;
+    text-transform: uppercase;
+    opacity: .58;
+    SPAN {
+        min-width: 0;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        overflow: hidden;
+    }
+    EM {
+        flex: 0 0 auto;
+        margin-left: 8px;
+        font-style: normal;
+        opacity: .65;
+    }
 }
 .folder-style-item {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 4px;
+    box-sizing: border-box;
+    padding: 4px 6px 4px 4px;
     opacity: .7;
+    min-height: 34px;
     & + & {
-        margin-top: 4px;
+        margin-top: 3px;
     }
     &:hover {
         outline: 1px solid rgba(#fff, .5);
@@ -28,14 +59,40 @@
     margin-right: 6px;
     flex: 0 0 auto;
 }
-.folder-style-title {
-    flex-grow: 2;
+.folder-style-preview {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 42px;
+    height: 24px;
+    margin-right: 8px;
+    padding: 0 4px;
+    border-radius: 2px;
+    background: rgba(#000, .24);
+    box-shadow: inset 0 0 0 1px rgba(#fff, .08);
+    overflow: hidden;
     SPAN {
-        font-weight: normal;
-        margin-left: 4px;
-        font-size: 12px;
-        opacity: .5;
+        display: block;
+        max-width: 100%;
+        font-size: 15px;
+        line-height: 22px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        overflow: hidden;
     }
+    .light-theme & {
+        background: rgba(#fff, .45);
+        box-shadow: inset 0 0 0 1px rgba(#000, .08);
+    }
+}
+.folder-style-title {
+    min-width: 0;
+    flex-grow: 2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
 }
 .folder-styles-list-empty {
     text-align: center;
