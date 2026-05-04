@@ -2,6 +2,7 @@ import React from "react";
 import PropTypes from "prop-types";
 import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, checkUpdate } from "./utils";
 import config from "./config";
+import { getNextLineNumberState } from "./lineNumbering";
 
 const storage = readStorage();
 const storeFields = [
@@ -832,8 +833,14 @@ const reducer = (state, action) => {
       const isPage = rawText.match(/Page [0-9]+/i);
       const ignore = !!ignorePrefix || !text || isPage;
       if (isPage && newState.images.length && lastTextLine) lastTextLine.last = true;
-      if (isPage && newState.resetLineCounterOnPage !== false) linesCounter = 0;
-      const index = ignore ? 0 : ++linesCounter;
+      const lineNumberState = getNextLineNumberState({
+        linesCounter,
+        isPage,
+        ignore,
+        resetLineCounterOnPage: newState.resetLineCounterOnPage,
+      });
+      linesCounter = lineNumberState.linesCounter;
+      const index = lineNumberState.index;
       const line = { rawText, rawIndex, ignorePrefix, stylePrefix, style, ignore, index, text };
       if (!line.ignore) lastTextLine = line;
       if (!line.ignore && line.style) {
