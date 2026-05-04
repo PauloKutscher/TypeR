@@ -67,6 +67,7 @@ Use this checklist before calling a build release-ready. Test in Photoshop CC 20
 
 ## Build Gates
 
+- Run `npm run verify` for the full automated gate, or run the following commands individually while diagnosing failures.
 - Run `npm test`.
 - Confirm `textLayerPayload tests passed`.
 - Confirm `locale key tests passed`.
