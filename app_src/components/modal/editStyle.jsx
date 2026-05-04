@@ -36,6 +36,14 @@ const EditStyleModal = React.memo(function EditStyleModal() {
   const folderOptions = React.useMemo(() => flattenFolderTree(folderTree), [folderTree]);
 
   const close = () => {
+    if (currentData.walkthroughReturn) {
+      context.dispatch({
+        type: "setModal",
+        modal: "walkthrough",
+        data: currentData.walkthroughState || { initialStep: 1 },
+      });
+      return;
+    }
     context.dispatch({ type: "setModal" });
   };
 
@@ -122,6 +130,19 @@ const EditStyleModal = React.memo(function EditStyleModal() {
     }
     data.edited = Date.now();
     context.dispatch({ type: "saveStyle", data });
+    context.dispatch({ type: "setCurrentStyleId", id: data.id });
+    if (currentData.walkthroughReturn) {
+      context.dispatch({
+        type: "setModal",
+        modal: "walkthrough",
+        data: {
+          ...(currentData.walkthroughState || {}),
+          initialStep: 1,
+          createdStyleId: data.id,
+        },
+      });
+      return;
+    }
     close();
   };
 

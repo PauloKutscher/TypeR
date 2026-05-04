@@ -58,13 +58,12 @@ const getSteps = () => [
 
 const WalkthroughModal = React.memo(function WalkthroughModal() {
   const context = useContext();
-  const [stepIndex, setStepIndex] = React.useState(0);
-  const [styleName, setStyleName] = React.useState(locale.walkthroughDefaultStyleName || "Regular");
-  const [styleTag, setStyleTag] = React.useState("REG:");
-  const [createdStyleId, setCreatedStyleId] = React.useState(null);
-  const [photoshopLayerDone, setPhotoshopLayerDone] = React.useState(false);
-  const [alignDone, setAlignDone] = React.useState(false);
-  const [exportDone, setExportDone] = React.useState(false);
+  const modalData = context.state.modalData || {};
+  const [stepIndex, setStepIndex] = React.useState(modalData.initialStep || 0);
+  const [createdStyleId, setCreatedStyleId] = React.useState(modalData.createdStyleId || null);
+  const [photoshopLayerDone, setPhotoshopLayerDone] = React.useState(!!modalData.photoshopLayerDone);
+  const [alignDone, setAlignDone] = React.useState(!!modalData.alignDone);
+  const [exportDone, setExportDone] = React.useState(!!modalData.exportDone);
   const steps = React.useMemo(getSteps, []);
   const step = steps[stepIndex];
   const isFirst = stepIndex === 0;
@@ -113,24 +112,25 @@ const WalkthroughModal = React.memo(function WalkthroughModal() {
     return context.state.styles.find((style) => style.id === createdStyleId) || null;
   }, [context.state.styles, createdStyleId]);
 
-  const createWalkthroughStyle = () => {
-    const name = (styleName || "").trim();
-    const tag = (styleTag || "").trim();
-    if (!name || !tag) return;
-    const styleId = `typer_walkthrough_${Date.now()}`;
-    const data = {
-      id: styleId,
-      name,
-      folder: null,
-      textProps: getDefaultStyle(),
-      prefixes: [tag],
-      prefixColor: "#54be78",
-      stroke: getDefaultStroke(),
-      edited: Date.now(),
-    };
-    context.dispatch({ type: "saveStyle", data });
-    context.dispatch({ type: "setCurrentStyleId", id: styleId });
-    setCreatedStyleId(styleId);
+  const openStyleEditor = () => {
+    context.dispatch({
+      type: "setModal",
+      modal: "editStyle",
+      data: {
+        create: true,
+        name: locale.walkthroughDefaultStyleName || "Regular",
+        prefixes: ["REG:"],
+        prefixColor: "#54be78",
+        walkthroughReturn: true,
+        walkthroughState: {
+          initialStep: 1,
+          createdStyleId,
+          photoshopLayerDone,
+          alignDone,
+          exportDone,
+        },
+      },
+    });
   };
 
   const createPhotoshopTextLayer = () => {
@@ -209,21 +209,7 @@ const WalkthroughModal = React.memo(function WalkthroughModal() {
             <span>{locale.walkthroughTaskStyle || "Create a real style. It will be added to your style list and activated."}</span>
             {renderDone(completed.styles)}
           </div>
-          <div className="walkthrough-inline-fields">
-            <input
-              className="topcoat-text-input--large"
-              value={styleName}
-              onChange={(event) => setStyleName(event.target.value)}
-              placeholder={locale.walkthroughStyleNamePlaceholder || "Style name"}
-            />
-            <input
-              className="topcoat-text-input--large"
-              value={styleTag}
-              onChange={(event) => setStyleTag(event.target.value)}
-              placeholder={locale.walkthroughStyleTagPlaceholder || "Tag"}
-            />
-          </div>
-          <button type="button" className={completed.styles ? "topcoat-button--large--cta" : "topcoat-button--large"} onClick={createWalkthroughStyle}>
+          <button type="button" className={completed.styles ? "topcoat-button--large--cta" : "topcoat-button--large"} onClick={openStyleEditor}>
             {completed.styles ? locale.walkthroughStyleCreated || "Style created" : locale.walkthroughCreateStyle || "Create style"}
           </button>
           {completed.styles && (
