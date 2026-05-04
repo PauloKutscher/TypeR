@@ -72,7 +72,8 @@ Use this checklist before calling a build release-ready. Test in Photoshop CC 20
 - Confirm `locale key tests passed`.
 - Run `npm run build`.
 - Confirm build exits with code 0.
-- Confirm generated files exist in `app/`: `index.html`, `index.js`, `index.css`, `host.jsx`, lazy modal chunks, and Topcoat theme CSS files.
+- Run `npm run test:build`.
+- Confirm `build artifact tests passed`.
 - Record any warnings. Current expected warnings are old Browserslist data, Sass legacy JS API, and Webpack size warnings for `index.js`.
 
 ## Automated Coverage Notes
@@ -82,5 +83,6 @@ Use this checklist before calling a build release-ready. Test in Photoshop CC 20
 - text size scaling does not mutate source style objects;
 - multi-bubble payload creation skips ignored/exhausted lines correctly and preserves tagged line styles;
 - locale files have matching keys, no duplicate keys, and matching placeholders such as `{count}` and `{version}`.
+- `npm run test:build` verifies the generated `app/` contains the required CEP entry files, lazy modal chunks, and copied Topcoat theme CSS files after a build.
 
 These tests do not validate CEP or Photoshop behavior. Always run the manual Photoshop sections above before treating a build as release-ready.
