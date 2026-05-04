@@ -35,6 +35,7 @@ const storeFields = [
   "internalPadding",
   "interpretMarkdown",
   "styleSizeStep",
+  "resetLineCounterOnPage",
 ];
 
 const defaultShortcut = {
@@ -155,6 +156,7 @@ const initialState = {
   internalPadding: 10,
   interpretMarkdown: storage.data?.interpretMarkdown === true,
   styleSizeStep: 1,
+  resetLineCounterOnPage: storage.data?.resetLineCounterOnPage !== false,
   ...storage.data,
   shortcut: { ...defaultShortcut, ...(storage.data?.shortcut || {}) },
 };
@@ -682,6 +684,11 @@ const reducer = (state, action) => {
       newState.interpretMarkdown = action.value !== false;
       break;
     }
+
+    case "setResetLineCounterOnPage": {
+      newState.resetLineCounterOnPage = action.value !== false;
+      break;
+    }
   }
 
   // Detect which fields changed to skip unnecessary recomputation
@@ -694,10 +701,12 @@ const reducer = (state, action) => {
   const imagesChanged = newState.images !== state.images;
   const lineIndexChanged = newState.currentLineIndex !== state.currentLineIndex;
   const styleIdChanged = newState.currentStyleId !== state.currentStyleId;
+  const resetLineCounterOnPageChanged = newState.resetLineCounterOnPage !== state.resetLineCounterOnPage;
 
   const needsStyleProcessing = !state.initiated || stylesChanged || foldersChanged;
   const needsLineProcessing = needsStyleProcessing || textChanged ||
-    ignoreLinePrefixesChanged || ignoreTagsChanged || currentFolderTagPriorityChanged || imagesChanged || styleIdChanged;
+    ignoreLinePrefixesChanged || ignoreTagsChanged || currentFolderTagPriorityChanged ||
+    imagesChanged || styleIdChanged || resetLineCounterOnPageChanged;
 
   // Phase 1: Style/folder validation and sorting (only when styles or folders changed)
   if (needsStyleProcessing) {
@@ -823,6 +832,7 @@ const reducer = (state, action) => {
       const isPage = rawText.match(/Page [0-9]+/i);
       const ignore = !!ignorePrefix || !text || isPage;
       if (isPage && newState.images.length && lastTextLine) lastTextLine.last = true;
+      if (isPage && newState.resetLineCounterOnPage !== false) linesCounter = 0;
       const index = ignore ? 0 : ++linesCounter;
       const line = { rawText, rawIndex, ignorePrefix, stylePrefix, style, ignore, index, text };
       if (!line.ignore) lastTextLine = line;

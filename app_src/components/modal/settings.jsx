@@ -55,6 +55,9 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [interpretMarkdown, setInterpretMarkdown] = React.useState(
     context.state.interpretMarkdown !== false
   );
+  const [resetLineCounterOnPage, setResetLineCounterOnPage] = React.useState(
+    context.state.resetLineCounterOnPage !== false
+  );
   const [edited, setEdited] = React.useState(false);
 
   // States manager
@@ -174,6 +177,11 @@ const SettingsModal = React.memo(function SettingsModal() {
     setEdited(true);
   };
 
+  const changeResetLineCounterOnPage = (e) => {
+    setResetLineCounterOnPage(e.target.checked);
+    setEdited(true);
+  };
+
   const save = (e) => {
     e.preventDefault();
     if (pastePointText !== context.state.pastePointText) {
@@ -289,6 +297,12 @@ const SettingsModal = React.memo(function SettingsModal() {
       context.dispatch({
         type: "setInterpretMarkdown",
         value: interpretMarkdown,
+      });
+    }
+    if (resetLineCounterOnPage !== context.state.resetLineCounterOnPage) {
+      context.dispatch({
+        type: "setResetLineCounterOnPage",
+        value: resetLineCounterOnPage,
       });
     }
     const shortcut = {};
@@ -688,6 +702,18 @@ const SettingsModal = React.memo(function SettingsModal() {
                       <span>{locale.settingsMarkdownLabel || "Interpret markdown (bold/italic)"}</span>
                       <div className="settings-checkbox-hint">
                         {locale.settingsMarkdownHint || "Convert markdown and rich text on paste and apply bold/italic in the text block."}
+                      </div>
+                    </div>
+                  </label>
+                </div>
+                <div className="settings-checkbox-item">
+                  <label className="settings-checkbox-label">
+                    <input type="checkbox" checked={resetLineCounterOnPage} onChange={changeResetLineCounterOnPage} />
+                    <div className="settings-checkbox-custom"></div>
+                    <div className="settings-checkbox-content">
+                      <span>{locale.settingsResetLineCounterOnPageLabel || "Reset line counter on page markers"}</span>
+                      <div className="settings-checkbox-hint">
+                        {locale.settingsResetLineCounterOnPageHint || "Restarts text line numbering at 1 after each Page N marker."}
                       </div>
                     </div>
                   </label>
