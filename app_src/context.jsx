@@ -173,6 +173,22 @@ const reducer = (state, action) => {
       break;
     }
 
+    case "showFirstRunWalkthrough": {
+      newState.notFirstTime = true;
+      if (!state.modalType) {
+        newState.modalType = "walkthrough";
+        newState.modalData = {};
+      }
+      break;
+    }
+
+    case "completeWalkthrough": {
+      newState.notFirstTime = true;
+      newState.modalType = null;
+      newState.modalData = {};
+      break;
+    }
+
     case "import": {
       for (const field in action.data) {
         if (!action.data.hasOwnProperty(field)) continue;

@@ -411,6 +411,10 @@ const SettingsModal = React.memo(function SettingsModal() {
     context.dispatch({ type: "setModal", modal: "export" });
   };
 
+  const openWalkthrough = () => {
+    context.dispatch({ type: "setModal", modal: "walkthrough", data: { source: "settings" } });
+  };
+
   const checkUpdatesNow = () => {
     checkUpdate(config.appVersion).then((data) => {
       if (data) {
@@ -533,6 +537,17 @@ const SettingsModal = React.memo(function SettingsModal() {
       case "general":
         return (
           <div className="fields">
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupOnboarding || "Getting started"}</div>
+              <div className="field">
+                <button type="button" className="topcoat-button--large" onClick={openWalkthrough}>
+                  {locale.settingsOpenWalkthrough || "Open walkthrough"}
+                </button>
+              </div>
+              <div className="field-descr">
+                {locale.settingsOpenWalkthroughHint || "Replay the first-time guide for the complete TypeR workflow."}
+              </div>
+            </div>
             <div className="field">
               <div className="field-label">{locale.settingsTextItemKindLabel}</div>
               <div className="field-input">

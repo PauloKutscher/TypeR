@@ -5,6 +5,7 @@ import {useContext} from '../../context';
 import {locale} from '../../utils';
 
 const HelpModal = React.lazy(() => import(/* webpackChunkName: "modal-help" */ './help'));
+const WalkthroughModal = React.lazy(() => import(/* webpackChunkName: "modal-walkthrough" */ './walkthrough'));
 const SettingsModal = React.lazy(() => import(/* webpackChunkName: "modal-settings" */ './settings'));
 const EditStyleModal = React.lazy(() => import(/* webpackChunkName: "modal-edit-style" */ './editStyle'));
 const EditFolderModal = React.lazy(() => import(/* webpackChunkName: "modal-edit-folder" */ './editFolder'));
@@ -56,6 +57,7 @@ const Modal = React.memo(function Modal() {
     let modalContent = null;
     let modalType = context.state.modalType;
     if (modalType === 'help') modalContent = <HelpModal />;
+    else if (modalType === 'walkthrough') modalContent = <WalkthroughModal />;
     else if (modalType === 'settings') modalContent = <SettingsModal />;
     else if (modalType === 'editStyle') modalContent = <EditStyleModal />;
     else if (modalType === 'editFolder') modalContent = <EditFolderModal />;
@@ -64,7 +66,7 @@ const Modal = React.memo(function Modal() {
 
     React.useEffect(() => {
         if (!context.state.notFirstTime) {
-            context.dispatch({type: 'removeFirstTime'});
+            context.dispatch({type: 'showFirstRunWalkthrough'});
         }
     }, []);
 

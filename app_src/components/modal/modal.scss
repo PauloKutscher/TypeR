@@ -240,6 +240,85 @@
     color: #333;
 }
 
+.walkthrough {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 260px;
+
+    h2 {
+        margin: 2px 0 0;
+        font-size: 18px;
+        line-height: 1.25;
+    }
+
+    p {
+        margin: 0;
+        line-height: 1.45;
+    }
+
+    ul {
+        margin: 2px 0 0;
+        padding-left: 18px;
+    }
+
+    li {
+        margin-bottom: 6px;
+        line-height: 1.35;
+    }
+}
+
+.walkthrough-progress {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.walkthrough-dot {
+    width: 22px;
+    height: 6px;
+    border: 0;
+    border-radius: 3px;
+    padding: 0;
+    background: rgba(255, 255, 255, 0.25);
+    cursor: pointer;
+
+    &.m-active {
+        background: rgba(255, 255, 255, 0.9);
+    }
+
+    .light-theme & {
+        background: rgba(0, 0, 0, 0.2);
+
+        &.m-active {
+            background: rgba(0, 0, 0, 0.65);
+        }
+    }
+}
+
+.walkthrough-step-count {
+    font-size: 11px;
+    opacity: 0.72;
+}
+
+.walkthrough-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+
+    button {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+    }
+}
+
+.walkthrough-footer-nav {
+    display: flex;
+    gap: 6px;
+}
+
 .settings-checkbox-custom {
     width: 16px;
     height: 16px;
