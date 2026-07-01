@@ -32,7 +32,13 @@ const loadAppModule = (relativePath) => {
   return mod.exports;
 };
 
-const { generateTextShapRVariants, visibleLength, visibleWidth } = loadAppModule("app_src/textShapR.js");
+const {
+  estimateManualLineCount,
+  generateManualTextShapRVariant,
+  generateTextShapRVariants,
+  visibleLength,
+  visibleWidth,
+} = loadAppModule("app_src/textShapR.js");
 
 const variants = generateTextShapRVariants("This sentence needs a pleasant bubble shaped manga layout today.");
 assert.strictEqual(variants.length, 10);
@@ -66,5 +72,22 @@ assert.ok(visibleWidth("minimum") < visibleWidth("maximum"));
 
 const punctuated = generateTextShapRVariants("Mais attends, je voulais juste te parler de ce qui est arrive hier soir.", { limit: 10 });
 assert.ok(/attends,\n/.test(punctuated[0].text));
+
+const manualText = "Manual shaping should follow the bubble selection and still keep a readable text block.";
+const manual = generateManualTextShapRVariant(manualText, {
+  width: 260,
+  height: 360,
+  shape: "ellipse",
+  lineCount: 5,
+  softness: 0.6,
+  floor: 0.15,
+});
+assert.strictEqual(manual.lines.length, 5);
+assert.strictEqual(manual.text.split("\n").length, 5);
+assert.ok(manual.widths.length === manual.targets.length);
+
+const manualTall = estimateManualLineCount(manualText, 220, 440);
+const manualWide = estimateManualLineCount(manualText, 440, 220);
+assert.ok(manualTall > manualWide);
 
 console.log("TextShapR tests passed");

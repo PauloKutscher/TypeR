@@ -46,6 +46,7 @@ const PROFILE_PRESETS = {
 };
 
 const normalizeText = (text) => String(text || "").replace(/\s+/g, " ").trim();
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 const stripMarkdownForMeasure = (text) => String(text || "")
   .replace(/\\([\\*_])/g, "$1")
@@ -272,6 +273,111 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
 
 const makeBaseTokens = (words) => words.map((word) => ({ text: word }));
 
+const sumTokenRange = (tokens, from, to) => {
+  let width = 0;
+  for (let index = from; index < to; index++) {
+    if (index > from) width += 0.45;
+    width += tokenLength(tokens[index]);
+  }
+  return width;
+};
+
+const getManualShapeWeight = (position, shape, softness, floor) => {
+  const normalized = Math.abs(position);
+  let weight = 1;
+  if (shape === "diamond") {
+    weight = 1 - normalized;
+  } else if (shape === "ellipse") {
+    weight = Math.sqrt(Math.max(0, 1 - normalized * normalized));
+  } else {
+    weight = Math.cos(Math.PI * normalized / 2);
+  }
+  return Math.max(floor, Math.pow(Math.max(0, weight), softness));
+};
+
+const buildManualTargets = (tokens, lineCount, settings) => {
+  const shape = settings.shape || "sine";
+  const softness = settings.softness || 0.6;
+  const floor = settings.floor == null ? 0.15 : settings.floor;
+  const weights = Array.from({ length: lineCount }, (_, index) => {
+    const position = lineCount <= 1 ? 0 : (2 * index + 1) / lineCount - 1;
+    return getManualShapeWeight(position, shape, softness, floor);
+  });
+  const total = tokens.reduce((sum, token) => sum + tokenLength(token), 0) + Math.max(0, tokens.length - lineCount) * 0.45;
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+  const peak = total / weightTotal;
+  return weights.map((weight) => Math.max(1, weight * peak));
+};
+
+const splitTokensForManualTargets = (tokens, targets, settings) => {
+  const lineCount = targets.length;
+  const tokenCount = tokens.length;
+  if (!tokenCount || lineCount < 1 || tokenCount < lineCount) return null;
+
+  const punctuationBonus = settings.punctuationBonus == null ? 0.04 : settings.punctuationBonus;
+  const edgeMin = settings.edgeMin || 0;
+  const edgeMinPenalty = settings.edgeMinPenalty == null ? 1.8 : settings.edgeMinPenalty;
+  const dp = Array.from({ length: lineCount + 1 }, () => Array(tokenCount + 1).fill(Infinity));
+  const prev = Array.from({ length: lineCount + 1 }, () => Array(tokenCount + 1).fill(-1));
+  dp[0][0] = 0;
+
+  const lineCost = (lineIndex, from, to) => {
+    const width = sumTokenRange(tokens, from, to);
+    const target = targets[lineIndex] || 1;
+    const ratio = (width - target) / target;
+    let cost = ratio * ratio;
+    const text = lineText(tokens.slice(from, to));
+    if (lineIndex < lineCount - 1 && endsWithBreakPunctuation(text)) {
+      cost = Math.max(0, cost - punctuationBonus);
+    }
+    if ((lineIndex === 0 || lineIndex === lineCount - 1) && edgeMin > 0 && visibleLength(text) < edgeMin) {
+      cost += edgeMinPenalty;
+    }
+    if (/^[.,;:!?…]+$/.test(stripMarkdownForMeasure(text))) cost += 3;
+    return cost;
+  };
+
+  for (let lineIndex = 0; lineIndex < lineCount; lineIndex++) {
+    for (let from = lineIndex; from <= tokenCount; from++) {
+      if (!Number.isFinite(dp[lineIndex][from])) continue;
+      const remainingLines = lineCount - lineIndex - 1;
+      const maxTo = tokenCount - remainingLines;
+      for (let to = from + 1; to <= maxTo; to++) {
+        const nextCost = dp[lineIndex][from] + lineCost(lineIndex, from, to);
+        if (nextCost < dp[lineIndex + 1][to]) {
+          dp[lineIndex + 1][to] = nextCost;
+          prev[lineIndex + 1][to] = from;
+        }
+      }
+    }
+  }
+
+  if (!Number.isFinite(dp[lineCount][tokenCount])) return null;
+
+  const ranges = [];
+  let cursor = tokenCount;
+  for (let lineIndex = lineCount; lineIndex > 0; lineIndex--) {
+    const from = prev[lineIndex][cursor];
+    if (from < 0) return null;
+    ranges.unshift([from, cursor]);
+    cursor = from;
+  }
+  return {
+    ranges,
+    cost: dp[lineCount][tokenCount],
+  };
+};
+
+const estimateManualLineCount = (text, width = 320, height = 280) => {
+  const normalized = normalizeText(text);
+  if (!normalized) return 1;
+  const wordCount = splitWordsPreservingMarkdown(normalized).length;
+  if (wordCount <= 2) return 1;
+  const aspect = clamp((height || 1) / Math.max(1, width || 1), 0.35, 2.4);
+  const maxLines = Math.min(8, Math.max(1, wordCount));
+  return clamp(Math.round(Math.sqrt(wordCount * aspect * 1.35)), 2, maxLines);
+};
+
 const addCandidate = (resultMap, tokens, lineCount, curve, shift, bias, hyphenCount, profile) => {
   const lines = buildCandidate(tokens, lineCount, curve, shift, bias, profile.minWeight);
   if (!lines) return;
@@ -345,4 +451,51 @@ const generateTextShapRVariants = (text, options = {}) => {
     .map((variant, index) => ({ ...variant, id: `shape-${index + 1}` }));
 };
 
-export { generateTextShapRVariants, visibleLength, visibleWidth };
+const generateManualTextShapRVariant = (text, options = {}) => {
+  const normalized = normalizeText(text);
+  if (!normalized) return null;
+  const words = splitWordsPreservingMarkdown(normalized);
+  if (!words.length) return null;
+  const tokens = makeBaseTokens(words);
+  const maxLines = Math.min(options.maxLines || 8, tokens.length);
+  const requestedLineCount = options.lineCount || estimateManualLineCount(normalized, options.width, options.height);
+  const lineCount = clamp(requestedLineCount, 1, Math.max(1, maxLines));
+  const settings = {
+    shape: options.shape || "sine",
+    softness: options.softness == null ? 0.6 : options.softness,
+    floor: options.floor == null ? 0.15 : options.floor,
+    punctuationBonus: options.punctuationBonus == null ? 0.04 : options.punctuationBonus,
+    edgeMin: options.edgeMin == null ? 3 : options.edgeMin,
+  };
+  const targets = buildManualTargets(tokens, lineCount, settings);
+  const split = splitTokensForManualTargets(tokens, targets, settings);
+  if (!split) {
+    return {
+      id: "manual",
+      text: normalized,
+      lines: [normalized],
+      targets: [visibleWidth(normalized)],
+      widths: [visibleWidth(normalized)],
+      lineCount: 1,
+      shape: settings.shape,
+      width: options.width,
+      height: options.height,
+    };
+  }
+
+  const lines = split.ranges.map(([from, to]) => lineText(tokens.slice(from, to)));
+  return {
+    id: "manual",
+    text: lines.join("\n"),
+    lines,
+    targets,
+    widths: split.ranges.map(([from, to]) => sumTokenRange(tokens, from, to)),
+    lineCount,
+    shape: settings.shape,
+    width: options.width,
+    height: options.height,
+    score: split.cost,
+  };
+};
+
+export { generateTextShapRVariants, generateManualTextShapRVariant, estimateManualLineCount, visibleLength, visibleWidth };

@@ -2,6 +2,52 @@
   overflow: auto;
 }
 
+.textshapr-mode-tabs {
+  display: inline-flex;
+  flex: 0 1 auto;
+  margin-left: auto;
+  margin-right: 8px;
+
+  button {
+    background: rgba(#000, 0.18);
+    border: 1px solid rgba(#fff, 0.12);
+    color: inherit;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 20px;
+    min-width: 54px;
+    padding: 0 8px;
+
+    &:first-child {
+      border-radius: 4px 0 0 4px;
+    }
+
+    &:last-child {
+      border-radius: 0 4px 4px 0;
+      margin-left: -1px;
+    }
+
+    &.is-active {
+      background: rgba(#288edf, 0.28);
+      border-color: rgba(#288edf, 0.72);
+      color: #fff;
+      position: relative;
+      z-index: 1;
+    }
+  }
+}
+
+.light-theme .textshapr-mode-tabs button {
+  background: rgba(#000, 0.05);
+  border-color: rgba(#000, 0.12);
+
+  &.is-active {
+    background: rgba(#1976d2, 0.14);
+    border-color: rgba(#1976d2, 0.5);
+    color: #111;
+  }
+}
+
 .textshapr-controls {
   align-items: center;
   box-sizing: border-box;
@@ -182,6 +228,158 @@
   text-align: center;
 }
 
+.textshapr-manual {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.textshapr-manual-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  padding: 7px 8px;
+
+  > button {
+    align-items: center;
+    display: inline-flex;
+    flex: 0 0 auto;
+    gap: 4px;
+    min-height: 22px;
+  }
+}
+
+.textshapr-shape-tabs {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-width: 0;
+
+  button {
+    background: rgba(#000, 0.16);
+    border: 1px solid rgba(#fff, 0.1);
+    color: inherit;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 20px;
+    min-width: 0;
+    overflow: hidden;
+    padding: 0 5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    &:first-child {
+      border-radius: 4px 0 0 4px;
+    }
+
+    &:last-child {
+      border-radius: 0 4px 4px 0;
+    }
+
+    & + button {
+      margin-left: -1px;
+    }
+
+    &.is-active {
+      background: rgba(#288edf, 0.28);
+      border-color: rgba(#288edf, 0.72);
+      color: #fff;
+      position: relative;
+      z-index: 1;
+    }
+  }
+}
+
+.light-theme .textshapr-shape-tabs button {
+  background: rgba(#000, 0.04);
+  border-color: rgba(#000, 0.12);
+
+  &.is-active {
+    background: rgba(#1976d2, 0.14);
+    border-color: rgba(#1976d2, 0.5);
+    color: #111;
+  }
+}
+
+.textshapr-manual-preview {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: 172px;
+  padding: 10px 8px 4px;
+}
+
+.textshapr-manual-stage {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  position: relative;
+}
+
+.textshapr-manual-bubble {
+  border: 2px solid #f2c21e;
+  box-sizing: border-box;
+  left: 0;
+  position: absolute;
+  top: 0;
+}
+
+.textshapr-manual-text {
+  align-items: center;
+  border: 2px solid #43a047;
+  box-sizing: border-box;
+  display: flex;
+  font-size: 11px !important;
+  justify-content: center;
+  letter-spacing: 0;
+  line-height: 1.12;
+  max-width: 88%;
+  min-height: 42%;
+  padding: 3px 8px;
+  position: relative;
+  text-align: center;
+  word-break: break-word;
+}
+
+.textshapr-manual-status {
+  font-size: 10px;
+  line-height: 13px;
+  min-height: 15px;
+  opacity: 0.68;
+  padding: 0 10px 4px;
+  text-align: center;
+}
+
+.textshapr-manual-controls {
+  box-sizing: border-box;
+  display: grid;
+  gap: 5px;
+  padding: 4px 8px 10px;
+}
+
+.textshapr-manual-slider {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 66px minmax(0, 1fr) 42px;
+
+  span {
+    font-size: 11px;
+    opacity: 0.78;
+  }
+
+  input {
+    min-width: 0;
+    width: 100%;
+  }
+
+  b {
+    color: #57b65b;
+    font-size: 11px;
+    text-align: right;
+  }
+}
+
 .textshapr-footer {
   align-items: center;
   display: flex;
@@ -210,6 +408,11 @@
 }
 
 @media (max-width: 390px) {
+  .textshapr-mode-tabs button {
+    min-width: 46px;
+    padding: 0 5px;
+  }
+
   .textshapr-controls {
     align-items: stretch;
     flex-direction: column;
@@ -227,6 +430,12 @@
 
   .textshapr-footer-actions {
     justify-content: flex-end;
+  }
+
+  .textshapr-manual-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 5px;
   }
 }
 
@@ -248,5 +457,19 @@
   .textshapr-tile-text {
     font-size: 10px !important;
     min-height: 44px;
+  }
+
+  .textshapr-manual-preview {
+    min-height: 136px;
+    padding-top: 6px;
+  }
+
+  .textshapr-manual-text {
+    font-size: 10px !important;
+  }
+
+  .textshapr-manual-controls {
+    gap: 3px;
+    padding-bottom: 6px;
   }
 }
