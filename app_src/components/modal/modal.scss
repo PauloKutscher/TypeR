@@ -237,6 +237,27 @@
     opacity: 0.7;
 }
 
+.settings-new-badge {
+    background: rgba(40, 142, 223, 0.22);
+    border: 1px solid rgba(40, 142, 223, 0.55);
+    border-radius: 3px;
+    color: #bfe4ff;
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 12px;
+    margin-left: 6px;
+    padding: 0 4px;
+    text-transform: uppercase;
+    vertical-align: 1px;
+}
+
+.light-theme .settings-new-badge {
+    background: rgba(25, 118, 210, 0.1);
+    border-color: rgba(25, 118, 210, 0.32);
+    color: #1976d2;
+}
+
 .light-theme .settings-checkbox-label span,
 .light-theme .settings-checkbox-content span,
 .light-theme .settings-checkbox-hint {

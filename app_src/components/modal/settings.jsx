@@ -644,6 +644,26 @@ const SettingsModal = React.memo(function SettingsModal() {
         return (
           <div className="fields">
             <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupExperimental || "Experimental"}</div>
+              <div className="settings-checkbox-grid">
+                <div className="settings-checkbox-item">
+                  <label className="settings-checkbox-label">
+                    <input type="checkbox" checked={inlineTextShapR} onChange={changeInlineTextShapR} />
+                    <div className="settings-checkbox-custom"></div>
+                    <div className="settings-checkbox-content">
+                      <span>
+                        {locale.settingsInlineTextShapRLabel || "TextShapR"}
+                        <b className="settings-new-badge">{locale.settingsNewBadge || "New"}</b>
+                      </span>
+                      <div className="settings-checkbox-hint">
+                        {locale.settingsInlineTextShapRHint || "Shows text shape suggestions directly in the main panel."}
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupAutomations || "Automations"}</div>
               <div className="settings-checkbox-grid">
                 <div className="settings-checkbox-item">
@@ -731,18 +751,6 @@ const SettingsModal = React.memo(function SettingsModal() {
                       <span>{locale.settingsMarkdownLabel || "Interpret markdown (bold/italic)"}</span>
                       <div className="settings-checkbox-hint">
                         {locale.settingsMarkdownHint || "Convert markdown and rich text on paste and apply bold/italic in the text block."}
-                      </div>
-                    </div>
-                  </label>
-                </div>
-                <div className="settings-checkbox-item">
-                  <label className="settings-checkbox-label">
-                    <input type="checkbox" checked={inlineTextShapR} onChange={changeInlineTextShapR} />
-                    <div className="settings-checkbox-custom"></div>
-                    <div className="settings-checkbox-content">
-                      <span>{locale.settingsInlineTextShapRLabel || "Inline TextShapR"}</span>
-                      <div className="settings-checkbox-hint">
-                        {locale.settingsInlineTextShapRHint || "Replace the line preview with compact TextShapR suggestions."}
                       </div>
                     </div>
                   </label>
