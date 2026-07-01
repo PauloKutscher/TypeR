@@ -815,6 +815,46 @@ const getCurrentSelection = (callback = () => {}) => {
   });
 };
 
+// Photoshop action event IDs (charIDToTypeID values): 'slct' fires on layer
+// selection, 'setd' on property/text edits — both mean the active text layer
+// may have changed and inline TextShapR should refresh.
+const PS_EVENT_SELECT = 1936483188;
+const PS_EVENT_SET = 1936028772;
+
+const photoshopEventCallbacks = new Set();
+let photoshopEventsRegistered = false;
+let photoshopEventsReceived = false;
+
+const registerPhotoshopEvents = () => {
+  if (photoshopEventsRegistered || !window.CSEvent) return;
+  photoshopEventsRegistered = true;
+  const extensionId = csInterface.getExtensionID();
+  csInterface.addEventListener("com.adobe.PhotoshopJSONCallback" + extensionId, (event) => {
+    photoshopEventsReceived = true;
+    photoshopEventCallbacks.forEach((callback) => {
+      try {
+        callback(event);
+      } catch (error) {
+        // Listener errors must not break the CEP event bridge
+      }
+    });
+  });
+  const registerEvent = new window.CSEvent("com.adobe.PhotoshopRegisterEvent", "APPLICATION");
+  registerEvent.extensionId = extensionId;
+  registerEvent.data = `${PS_EVENT_SELECT}, ${PS_EVENT_SET}`;
+  csInterface.dispatchEvent(registerEvent);
+};
+
+const addPhotoshopEventListener = (callback) => {
+  registerPhotoshopEvents();
+  photoshopEventCallbacks.add(callback);
+  return () => {
+    photoshopEventCallbacks.delete(callback);
+  };
+};
+
+const hasReceivedPhotoshopEvents = () => photoshopEventsReceived;
+
 const getSelectionBoundsHash = (selection) => {
   if (!selection) return null;
   return `${selection.xMid}_${selection.yMid}_${selection.width}_${selection.height}`;
@@ -949,11 +989,8 @@ const resizeTextArea = (defer = false) => {
   }
   const textArea = document.querySelector(".text-area");
   const textLines = document.querySelector(".text-lines");
-  const textBlock = document.querySelector(".text-block");
   if (textArea && textLines) {
-    const lineHeight = textLines.offsetHeight || 0;
-    const blockHeight = textBlock ? textBlock.clientHeight : 0;
-    textArea.style.height = Math.max(lineHeight, blockHeight) + "px";
+    textArea.style.height = textLines.offsetHeight + "px";
   }
 };
 
@@ -1073,4 +1110,4 @@ const openFile = (path, autoClose = false) => {
   );
 };
 
-export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, getActiveLayerText, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
+export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, getActiveLayerText, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };

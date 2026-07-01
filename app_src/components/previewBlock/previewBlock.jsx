@@ -5,10 +5,11 @@ import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiRefreshCw, FiPlusC
 import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 
-import { csInterface, locale, setActiveLayerText, getSelectionBoundsHash, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
+import { csInterface, locale, setActiveLayerText, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { buildStoredSelectionPayload, getScaledStyle } from "../../textLayerPayload";
 import { generateTextShapRVariants } from "../../textShapR";
+import TextShapRFitPreview from "../textShapRFitPreview";
 
 const normalizeLayerText = (text) => String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
 
@@ -56,7 +57,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   });
   const inlineSourceKey = React.useRef("");
   const inlineSourcePending = React.useRef(false);
-  const inlineRefreshTimeouts = React.useRef([]);
+  const inlineEventDebounce = React.useRef(null);
+  const inlineLastRefreshAt = React.useRef(0);
   const inlineTextStyle = inlineLayerSource.style?.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {};
   const inlineStyleObject = getStyleObject(inlineTextStyle);
   const markdownEnabled = context.state.interpretMarkdown !== false;
@@ -98,14 +100,10 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const clearAllTipTimeout = React.useRef(null);
   const [clearAllTipShown, setClearAllTipShown] = React.useState(false);
 
-  const clearInlineRefreshTimeouts = React.useCallback(() => {
-    inlineRefreshTimeouts.current.forEach((timeout) => clearTimeout(timeout));
-    inlineRefreshTimeouts.current = [];
-  }, []);
-
   const refreshInlineLayerSource = React.useCallback((showLoading = false) => {
     if (inlineSourcePending.current) return;
     inlineSourcePending.current = true;
+    inlineLastRefreshAt.current = Date.now();
     setInlineLayerSource((current) => (
       showLoading || (!current.text && !current.error) ? { ...current, loading: true, error: "" } : current
     ));
@@ -138,27 +136,44 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   React.useEffect(() => {
     if (!context.state.inlineTextShapR) return undefined;
     refreshInlineLayerSource();
+
+    // Primary signal: Photoshop notifies the panel when a layer is selected
+    // or edited. Debounced because 'setd' events arrive in bursts.
+    const unsubscribePhotoshopEvents = addPhotoshopEventListener(() => {
+      if (inlineEventDebounce.current) clearTimeout(inlineEventDebounce.current);
+      inlineEventDebounce.current = setTimeout(() => {
+        inlineEventDebounce.current = null;
+        refreshInlineLayerSource();
+      }, 120);
+    });
+
     const refreshOnFocus = () => refreshInlineLayerSource();
-    const refreshAfterBlur = () => {
-      clearInlineRefreshTimeouts();
-      [180, 700, 1400].forEach((delay) => {
-        inlineRefreshTimeouts.current.push(setTimeout(() => refreshInlineLayerSource(), delay));
-      });
-    };
     const refreshOnVisibility = () => {
       if (!document.hidden) refreshInlineLayerSource();
     };
     window.addEventListener("focus", refreshOnFocus);
-    window.addEventListener("blur", refreshAfterBlur);
     document.addEventListener("visibilitychange", refreshOnVisibility);
+
+    // Fallback polling for hosts where the event bridge stays silent; slows
+    // down to a keep-alive once real Photoshop events are flowing.
+    const pollTimer = setInterval(() => {
+      if (document.hidden) return;
+      const idleDelay = hasReceivedPhotoshopEvents() ? 6000 : 1200;
+      if (Date.now() - inlineLastRefreshAt.current >= idleDelay) refreshInlineLayerSource();
+    }, 1200);
+
     return () => {
+      unsubscribePhotoshopEvents();
       window.removeEventListener("focus", refreshOnFocus);
-      window.removeEventListener("blur", refreshAfterBlur);
       document.removeEventListener("visibilitychange", refreshOnVisibility);
-      clearInlineRefreshTimeouts();
+      clearInterval(pollTimer);
+      if (inlineEventDebounce.current) {
+        clearTimeout(inlineEventDebounce.current);
+        inlineEventDebounce.current = null;
+      }
       inlineSourcePending.current = false;
     };
-  }, [clearInlineRefreshTimeouts, context.state.inlineTextShapR, refreshInlineLayerSource]);
+  }, [context.state.inlineTextShapR, refreshInlineLayerSource]);
 
   React.useEffect(() => {
     setInlineVariantPage(0);
@@ -590,15 +605,18 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                   title={locale.textShapRApply || "Apply this shape"}
                 >
                   <span className="preview-textshapr-rank">{inlineVariantPage * inlinePageSize + index + 1}</span>
-                  <span className="preview-textshapr-text" style={inlineStyleObject}>
-                    <span style={{ fontFamily: inlineStyleObject.fontFamily || "Tahoma" }}>
-                      {variant.lines.map((variantLine, lineIndex) => (
-                        <span key={`${variant.id}-${lineIndex}`} className="preview-textshapr-line">
-                          {renderMarkdownText(variantLine)}
-                        </span>
-                      ))}
-                    </span>
-                  </span>
+                  <TextShapRFitPreview
+                    outerClassName="preview-textshapr-text"
+                    innerClassName="preview-textshapr-fit"
+                    contentKey={`${variant.text}|${markdownEnabled}|${inlineStyleObject.fontFamily || ""}`}
+                    style={{ ...inlineStyleObject, fontFamily: inlineStyleObject.fontFamily || "Tahoma" }}
+                  >
+                    {variant.lines.map((variantLine, lineIndex) => (
+                      <span key={`${variant.id}-${lineIndex}`} className="preview-textshapr-line">
+                        {renderMarkdownText(variantLine)}
+                      </span>
+                    ))}
+                  </TextShapRFitPreview>
                 </button>
               )) : (
                 <div className="preview-textshapr-empty">{inlineLayerSource.error || locale.textShapREmpty || "No text available for TextShapR."}</div>

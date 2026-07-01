@@ -376,19 +376,30 @@
 }
 
 .preview-textshapr-text {
-  display: block;
-  font-size: 9px !important;
+  align-items: center;
+  align-self: stretch;
+  display: flex;
+  flex: 1 1 auto;
+  justify-content: center;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.preview-textshapr-fit {
+  display: inline-block;
+  flex: 0 0 auto;
+  font-size: 9px;
   letter-spacing: 0;
   line-height: 1.05;
-  max-height: 42px;
-  overflow: hidden;
-  word-break: break-word;
+  text-align: center;
+  transform-origin: center center;
 }
 
 .preview-textshapr-line {
   display: block;
   min-height: 1em;
-  white-space: pre-wrap;
+  white-space: nowrap;
 }
 
 .preview-textshapr-empty {
