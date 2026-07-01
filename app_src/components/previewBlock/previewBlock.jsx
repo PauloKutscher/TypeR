@@ -8,14 +8,20 @@ import { MdCenterFocusWeak } from "react-icons/md";
 import { locale, setActiveLayerText, getSelectionBoundsHash, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { buildStoredSelectionPayload, getScaledStyle } from "../../textLayerPayload";
+import { generateTextShapRVariants } from "../../textShapR";
 
 const PreviewBlock = React.memo(function PreviewBlock() {
   const context = useContext();
   const style = context.state.currentStyle || {};
   const line = context.state.currentLine || { text: "" };
-  const textStyle = style.textProps?.layerText.textStyleRange[0].textStyle || {};
+  const textStyle = style.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {};
   const styleObject = getStyleObject(textStyle);
   const markdownEnabled = context.state.interpretMarkdown !== false;
+  const inlineTextShapRVariants = React.useMemo(
+    () => generateTextShapRVariants(line.text, { limit: 3, allowHyphenation: true, profile: "balanced" }),
+    [line.text]
+  );
+  const [applyingTextShapRId, setApplyingTextShapRId] = React.useState(null);
   const renderMarkdownText = React.useCallback((text) => {
     if (!markdownEnabled) return text;
     const parsed = parseMarkdownRuns(text || "");
@@ -318,6 +324,16 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     context.dispatch({ type: "setModal", modal: "textShapR" });
   }, [context.dispatch]);
 
+  const applyTextShapRVariant = React.useCallback((variant, advance = false) => {
+    if (!variant || applyingTextShapRId) return;
+    setApplyingTextShapRId(variant.id);
+    const lineStyle = getScaledStyle(context.state.currentStyle, context.state.textScale);
+    setActiveLayerText(variant.text, lineStyle, context.state.direction, (ok) => {
+      setApplyingTextShapRId(null);
+      if (ok && advance) context.dispatch({ type: "nextLine", add: true });
+    });
+  }, [applyingTextShapRId, context]);
+
   const handleIncrementChange = React.useCallback((e) => {
     context.dispatch({ type: "setTextSizeIncrement", increment: e.target.value });
   }, [context.dispatch]);
@@ -400,26 +416,62 @@ const PreviewBlock = React.memo(function PreviewBlock() {
             <FiArrowDown size={18} />
           </button>
         </div>
-        <div className="preview-current hostBgdDark" title={locale.scrollToLine} onClick={currentLineClick}>
-          <div className="preview-line-info">
-            <div className="preview-line-info-text">
-              {locale.previewLine}: <b>{line.index || "—"}</b>, {locale.previewStyle}: <b className="preview-line-style-name">{style.name || "—"}</b>, {locale.previewTextScale}:
-              <div className="preview-line-scale">
-                <input min={1} max={999} type="number" placeholder="100" value={context.state.textScale || ""} onChange={handleScaleChange} onFocus={focusScale} onBlur={blurScale} className="topcoat-text-input" />
-                <span>%</span>
+        {context.state.inlineTextShapR ? (
+          <div className="preview-textshapr hostBgdDark">
+            <div className="preview-textshapr-head">
+              <button type="button" className="preview-textshapr-open" onClick={openTextShapR} title={locale.textShapRTitle || "TextShapR"}>
+                <FiType size={13} />
+                <span>{locale.textShapRTitle || "TextShapR"}</span>
+              </button>
+              <span>{locale.previewLine}: {line.index || "—"}</span>
+            </div>
+            <div className="preview-textshapr-list">
+              {inlineTextShapRVariants.length ? inlineTextShapRVariants.map((variant, index) => (
+                <button
+                  key={variant.id}
+                  type="button"
+                  className={"preview-textshapr-choice" + (applyingTextShapRId === variant.id ? " is-applying" : "")}
+                  onClick={(event) => applyTextShapRVariant(variant, event.shiftKey)}
+                  title={locale.textShapRApply || "Apply this shape"}
+                >
+                  <span className="preview-textshapr-rank">{index + 1}</span>
+                  <span className="preview-textshapr-text" style={styleObject}>
+                    <span style={{ fontFamily: styleObject.fontFamily || "Tahoma" }}>
+                      {variant.lines.map((variantLine, lineIndex) => (
+                        <span key={`${variant.id}-${lineIndex}`} className="preview-textshapr-line">
+                          {renderMarkdownText(variantLine)}
+                        </span>
+                      ))}
+                    </span>
+                  </span>
+                </button>
+              )) : (
+                <div className="preview-textshapr-empty">{locale.textShapREmpty || "No text available for TextShapR."}</div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="preview-current hostBgdDark" title={locale.scrollToLine} onClick={currentLineClick}>
+            <div className="preview-line-info">
+              <div className="preview-line-info-text">
+                {locale.previewLine}: <b>{line.index || "—"}</b>, {locale.previewStyle}: <b className="preview-line-style-name">{style.name || "—"}</b>, {locale.previewTextScale}:
+                <div className="preview-line-scale">
+                  <input min={1} max={999} type="number" placeholder="100" value={context.state.textScale || ""} onChange={handleScaleChange} onFocus={focusScale} onBlur={blurScale} className="topcoat-text-input" />
+                  <span>%</span>
+                </div>
+              </div>
+              <div className="preview-line-info-actions">
+                <FiType size={16} onClick={openTextShapR} title={locale.textShapRTitle || "TextShapR"} />
+                <FiArrowRightCircle size={16} onClick={insertStyledText} title={locale.insertStyledText} />
               </div>
             </div>
-            <div className="preview-line-info-actions">
-              <FiType size={16} onClick={openTextShapR} title={locale.textShapRTitle || "TextShapR"} />
-              <FiArrowRightCircle size={16} onClick={insertStyledText} title={locale.insertStyledText} />
+            <div className="preview-line-text" style={styleObject}>
+              <span style={{ fontFamily: styleObject.fontFamily || "Tahoma" }}>
+                {renderMarkdownText(line.text || "")}
+              </span>
             </div>
           </div>
-          <div className="preview-line-text" style={styleObject}>
-            <span style={{ fontFamily: styleObject.fontFamily || "Tahoma" }}>
-              {renderMarkdownText(line.text || "")}
-            </span>
-          </div>
-        </div>
+        )}
       </div>
     </React.Fragment>
   );

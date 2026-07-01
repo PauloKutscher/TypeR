@@ -33,6 +33,7 @@ const storeFields = [
   "multiBubbleMode",
   "showTips",
   "showQuickStyleSize",
+  "inlineTextShapR",
   "internalPadding",
   "interpretMarkdown",
   "styleSizeStep",
@@ -145,6 +146,7 @@ const initialState = {
   resizeTextBoxOnCenter: false,
   showTips: storage.data?.showTips !== false,
   showQuickStyleSize: storage.data?.showQuickStyleSize !== false,
+  inlineTextShapR: storage.data?.inlineTextShapR === true,
   modalType: null,
   modalData: {},
   images: [],
@@ -632,6 +634,11 @@ const reducer = (state, action) => {
 
     case "setShowQuickStyleSize": {
       newState.showQuickStyleSize = !!action.value;
+      break;
+    }
+
+    case "setInlineTextShapR": {
+      newState.inlineTextShapR = !!action.value;
       break;
     }
 

@@ -46,6 +46,9 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [showQuickStyleSize, setShowQuickStyleSize] = React.useState(
     context.state.showQuickStyleSize !== false
   );
+  const [inlineTextShapR, setInlineTextShapR] = React.useState(
+    context.state.inlineTextShapR === true
+  );
   const [styleSizeStep, setStyleSizeStep] = React.useState(
     context.state.styleSizeStep !== undefined ? String(context.state.styleSizeStep) : "1"
   );
@@ -122,6 +125,11 @@ const SettingsModal = React.memo(function SettingsModal() {
   };
   const changeShowQuickStyleSize = (e) => {
     setShowQuickStyleSize(e.target.checked);
+    setEdited(true);
+  };
+
+  const changeInlineTextShapR = (e) => {
+    setInlineTextShapR(e.target.checked);
     setEdited(true);
   };
   const changeStyleSizeStep = (e) => {
@@ -274,6 +282,12 @@ const SettingsModal = React.memo(function SettingsModal() {
       context.dispatch({
         type: "setShowQuickStyleSize",
         value: showQuickStyleSize,
+      });
+    }
+    if (inlineTextShapR !== context.state.inlineTextShapR) {
+      context.dispatch({
+        type: "setInlineTextShapR",
+        value: inlineTextShapR,
       });
     }
     const parsedStyleSizeStep = parseFloat(String(styleSizeStep).replace(",", "."));
@@ -717,6 +731,18 @@ const SettingsModal = React.memo(function SettingsModal() {
                       <span>{locale.settingsMarkdownLabel || "Interpret markdown (bold/italic)"}</span>
                       <div className="settings-checkbox-hint">
                         {locale.settingsMarkdownHint || "Convert markdown and rich text on paste and apply bold/italic in the text block."}
+                      </div>
+                    </div>
+                  </label>
+                </div>
+                <div className="settings-checkbox-item">
+                  <label className="settings-checkbox-label">
+                    <input type="checkbox" checked={inlineTextShapR} onChange={changeInlineTextShapR} />
+                    <div className="settings-checkbox-custom"></div>
+                    <div className="settings-checkbox-content">
+                      <span>{locale.settingsInlineTextShapRLabel || "Inline TextShapR"}</span>
+                      <div className="settings-checkbox-hint">
+                        {locale.settingsInlineTextShapRHint || "Replace the line preview with compact TextShapR suggestions."}
                       </div>
                     </div>
                   </label>
