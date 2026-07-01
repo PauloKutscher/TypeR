@@ -48,8 +48,12 @@ assert.ok(variants[0].lines.length >= 2);
 const bestLengths = variants[0].lines.map(visibleLength);
 const middleIndex = Math.floor((bestLengths.length - 1) / 2);
 const middleLength = bestLengths[middleIndex];
-assert.ok(middleLength >= bestLengths[0]);
-assert.ok(middleLength >= bestLengths[bestLengths.length - 1]);
+if (bestLengths.length > 2) {
+  assert.ok(middleLength >= bestLengths[0]);
+  assert.ok(middleLength >= bestLengths[bestLengths.length - 1]);
+} else {
+  assert.ok(Math.abs(bestLengths[0] - bestLengths[1]) <= 6);
+}
 
 const hyphenated = generateTextShapRVariants("extraordinarily shaped lettering can fit better", { limit: 10 });
 assert.ok(hyphenated.some((variant) => /-\n/.test(variant.text)));
@@ -72,6 +76,21 @@ assert.ok(visibleWidth("minimum") < visibleWidth("maximum"));
 
 const punctuated = generateTextShapRVariants("Mais attends, je voulais juste te parler de ce qui est arrive hier soir.", { limit: 10 });
 assert.ok(/attends,\n/.test(punctuated[0].text));
+
+const clyde = generateTextShapRVariants("CLYDE, JE PEUX UTILISER UN M\u00c9DAILLON ?", { limit: 10 });
+const hasAbruptJump = (variant) => {
+  const widths = variant.lines.map(visibleWidth);
+  const maxWidth = Math.max.apply(null, widths);
+  return widths.some((width, index) => (
+    index > 0 && Math.abs(width - widths[index - 1]) / maxWidth > 0.55
+  ));
+};
+assert.ok(!/^CLYDE,\nJE PEUX UTILISER/.test(clyde[0].text));
+assert.ok(clyde.slice(0, 5).every((variant) => variant.lines.length <= 2 || !hasAbruptJump(variant)));
+
+const frenchHyphenation = generateTextShapRVariants("utiliser", { limit: 10 });
+assert.ok(frenchHyphenation.some((variant) => /uti-\nliser/i.test(variant.text)));
+assert.ok(frenchHyphenation.every((variant) => !/util-\niser/i.test(variant.text)));
 
 const manualText = "Manual shaping should follow the bubble selection and still keep a readable text block.";
 const manual = generateManualTextShapRVariant(manualText, {

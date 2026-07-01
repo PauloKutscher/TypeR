@@ -11,7 +11,10 @@ const PROFILE_PRESETS = {
     shifts: [0, -0.12, 0.12],
     biases: [-1, 0, 1],
     minWeight: 0.35,
-    punctuationBreakBonus: 7,
+    punctuationBreakBonus: 14,
+    adjacentSlack: 0.3,
+    smoothnessWeight: 170,
+    minLineRatio: 0.36,
   },
   round: {
     minLines: 3,
@@ -21,7 +24,10 @@ const PROFILE_PRESETS = {
     shifts: [0, -0.08, 0.08],
     biases: [-1, 0, 1],
     minWeight: 0.3,
-    punctuationBreakBonus: 7,
+    punctuationBreakBonus: 14,
+    adjacentSlack: 0.28,
+    smoothnessWeight: 190,
+    minLineRatio: 0.34,
   },
   tall: {
     minLines: 4,
@@ -31,7 +37,10 @@ const PROFILE_PRESETS = {
     shifts: [0, -0.1, 0.1],
     biases: [-1, 0],
     minWeight: 0.46,
-    punctuationBreakBonus: 6,
+    punctuationBreakBonus: 11,
+    adjacentSlack: 0.34,
+    smoothnessWeight: 120,
+    minLineRatio: 0.32,
   },
   wide: {
     minLines: 2,
@@ -41,7 +50,10 @@ const PROFILE_PRESETS = {
     shifts: [0, -0.08, 0.08],
     biases: [0, 1, 2],
     minWeight: 0.58,
-    punctuationBreakBonus: 6,
+    punctuationBreakBonus: 11,
+    adjacentSlack: 0.26,
+    smoothnessWeight: 190,
+    minLineRatio: 0.46,
   },
 };
 
@@ -79,6 +91,17 @@ const lineText = (tokens) => tokens.map((token) => token.text).join(" ").trim();
 const lineLength = (tokens) => visibleWidth(lineText(tokens));
 
 const isVowel = (char) => VOWELS.indexOf(char) !== -1;
+
+const isLetter = (char) => /[A-Za-z\u00e0\u00e2\u00e4\u00e9\u00e8\u00ea\u00eb\u00ee\u00ef\u00f4\u00f6\u00f9\u00fb\u00fc\u00c0\u00c2\u00c4\u00c9\u00c8\u00ca\u00cb\u00ce\u00cf\u00d4\u00d6\u00d9\u00db\u00dc]/.test(char || "");
+
+const isConsonant = (char) => isLetter(char) && !isVowel(char);
+
+const hasVowel = (text) => {
+  for (let index = 0; index < text.length; index++) {
+    if (isVowel(text[index])) return true;
+  }
+  return false;
+};
 
 const hasMarkdownSyntax = (word) => /[*_\\]/.test(word);
 
@@ -142,6 +165,24 @@ const splitTrailingPunctuation = (word) => {
   };
 };
 
+const getSyllableSplitPenalty = (body, index) => {
+  const left = body.slice(0, index);
+  const right = body.slice(index);
+  const prev2 = body[index - 2];
+  const prev = body[index - 1];
+  const current = body[index];
+  const next = body[index + 1];
+
+  if (!hasVowel(left) || !hasVowel(right)) return Infinity;
+  if (isConsonant(prev) && isVowel(current)) return 16;
+  if (isVowel(prev) && isConsonant(current) && isVowel(next)) return 0;
+  if (isVowel(prev2) && isConsonant(prev) && isConsonant(current) && isVowel(next)) return 1.2;
+  if (isVowel(prev) && isConsonant(current) && isConsonant(next)) return 2.4;
+  if (isVowel(prev) && isConsonant(current)) return 3;
+  if (isVowel(prev) && isVowel(current)) return 7;
+  return 10;
+};
+
 const getHyphenSplits = (word) => {
   const { body, punctuation } = splitTrailingPunctuation(word);
   if (!body || body.length < 8) return [];
@@ -149,13 +190,12 @@ const getHyphenSplits = (word) => {
 
   const positions = [];
   for (let index = 3; index <= body.length - 3; index++) {
-    const before = body[index - 1];
-    const after = body[index];
-    const patternBonus = isVowel(before) && !isVowel(after) ? 0 : 3;
+    const syllablePenalty = getSyllableSplitPenalty(body, index);
+    if (!Number.isFinite(syllablePenalty) || syllablePenalty >= 12) continue;
     const centerPenalty = Math.abs(index - body.length / 2);
     positions.push({
       index,
-      penalty: patternBonus + centerPenalty,
+      penalty: syllablePenalty * 10 + centerPenalty,
       prefix: body.slice(0, index) + "-",
       suffix: body.slice(index) + punctuation,
     });
@@ -185,64 +225,64 @@ const buildTargets = (tokens, lineCount, curve, shift, bias, minWeight) => {
 
 const serializeLines = (lines) => lines.map((line) => line.map((token) => token.text).join(" ").trim()).join("\n");
 
+const rangeRespectsForcedBreaks = (tokens, from, to) => {
+  for (let index = from; index < to; index++) {
+    if (tokens[index].forceBreakAfter && index !== to - 1) return false;
+  }
+  return true;
+};
+
 const buildCandidate = (tokens, lineCount, curve, shift, bias, minWeight) => {
   if (!tokens.length || lineCount < 1) return null;
+  if (tokens.length < lineCount) return null;
   const targets = buildTargets(tokens, lineCount, curve, shift, bias, minWeight);
+  const tokenCount = tokens.length;
+  const dp = Array.from({ length: lineCount + 1 }, () => Array(tokenCount + 1).fill(Infinity));
+  const prev = Array.from({ length: lineCount + 1 }, () => Array(tokenCount + 1).fill(-1));
+  dp[0][0] = 0;
+
+  const lineCost = (lineIndex, from, to) => {
+    if (!rangeRespectsForcedBreaks(tokens, from, to)) return Infinity;
+    const line = tokens.slice(from, to);
+    const target = targets[lineIndex] || 1;
+    const width = lineLength(line);
+    const ratio = (width - target) / target;
+    let cost = ratio * ratio;
+    if (lineIndex < lineCount - 1 && endsWithBreakPunctuation(lineText(line))) {
+      cost = Math.max(0, cost - 0.09);
+    }
+    if (/^[.,;:!?…]+$/.test(serializeLines([line]))) cost += 3;
+    return cost;
+  };
+
+  for (let lineIndex = 0; lineIndex < lineCount; lineIndex++) {
+    for (let from = lineIndex; from <= tokenCount; from++) {
+      if (!Number.isFinite(dp[lineIndex][from])) continue;
+      const remainingLines = lineCount - lineIndex - 1;
+      const maxTo = tokenCount - remainingLines;
+      for (let to = from + 1; to <= maxTo; to++) {
+        const cost = lineCost(lineIndex, from, to);
+        if (!Number.isFinite(cost)) continue;
+        const nextCost = dp[lineIndex][from] + cost;
+        if (nextCost < dp[lineIndex + 1][to]) {
+          dp[lineIndex + 1][to] = nextCost;
+          prev[lineIndex + 1][to] = from;
+        }
+      }
+    }
+  }
+
+  if (!Number.isFinite(dp[lineCount][tokenCount])) return null;
+
   const lines = [];
-  let cursor = 0;
-
-  for (let lineIndex = 0; lineIndex < lineCount && cursor < tokens.length; lineIndex++) {
-    const remainingLines = lineCount - lineIndex;
-    const remainingTokens = tokens.length - cursor;
-    if (remainingLines <= 1 || remainingTokens <= remainingLines) {
-      const take = remainingLines <= 1 ? tokens.length - cursor : 1;
-      lines.push(tokens.slice(cursor, cursor + take));
-      cursor += take;
-      continue;
-    }
-
-    const target = targets[lineIndex];
-    const line = [];
-    while (cursor < tokens.length) {
-      const remainingAfterTake = tokens.length - cursor - 1;
-      const needsForLater = remainingLines - 1;
-      const nextToken = tokens[cursor];
-      const currentLength = lineLength(line);
-      const nextLength = lineLength(line.concat(nextToken));
-      const currentEndsWithPunctuation = line.length > 0 && endsWithBreakPunctuation(lineText(line));
-      const punctuationBreakIsGood =
-        currentEndsWithPunctuation &&
-        currentLength >= target * 0.62 &&
-        nextLength > target * 0.78 &&
-        remainingAfterTake >= needsForLater;
-      const punctuationBreakKeepsShape = Math.abs(currentLength - target) <= Math.abs(nextLength - target) + 4;
-      const shouldTake =
-        line.length === 0 ||
-        remainingAfterTake < needsForLater ||
-        (
-          !(punctuationBreakIsGood && punctuationBreakKeepsShape) &&
-          (
-            nextLength <= target ||
-            Math.abs(nextLength - target) <= Math.abs(currentLength - target)
-          )
-        );
-
-      if (!shouldTake && remainingAfterTake >= needsForLater) break;
-      line.push(nextToken);
-      cursor++;
-      if (nextToken.forceBreakAfter) break;
-      if (tokens.length - cursor <= needsForLater) break;
-    }
-    lines.push(line);
+  let cursor = tokenCount;
+  for (let lineIndex = lineCount; lineIndex > 0; lineIndex--) {
+    const from = prev[lineIndex][cursor];
+    if (from < 0) return null;
+    lines.unshift(tokens.slice(from, cursor));
+    cursor = from;
   }
-
-  if (cursor < tokens.length) {
-    lines[lines.length - 1] = lines[lines.length - 1].concat(tokens.slice(cursor));
-  }
-
-  const normalized = lines.filter((line) => line.length);
-  if (normalized.length !== lineCount) return null;
-  return normalized;
+  return lines;
 };
 
 const scoreCandidate = (lines, hyphenCount, profile) => {
@@ -254,12 +294,14 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
   const targets = weights.map((weight) => (totalLength * weight) / weightTotal);
   const centerIndex = Math.floor((lineCount - 1) / 2);
   const maxLength = Math.max.apply(null, lengths);
+  const minLength = Math.min.apply(null, lengths);
   const centerLength = lengths[centerIndex] || 0;
 
-  let score = hyphenCount * 18 + Math.abs(lineCount - profile.lineTarget) * 1.5;
+  let score = hyphenCount * 34 + Math.abs(lineCount - profile.lineTarget) * 1.5;
   lengths.forEach((length, index) => {
     score += Math.pow(length - targets[index], 2);
     if (length <= 1) score += 30;
+    if (lineCount > 3 && visibleLength(lineText(lines[index])) <= 4) score += 8;
     if (/^[.,;:!?]+$/.test(serializeLines([lines[index]]))) score += 40;
     if (index < lineCount - 1 && endsWithBreakPunctuation(lineText(lines[index]))) {
       score -= profile.punctuationBreakBonus || 0;
@@ -268,6 +310,23 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
   if (centerLength < maxLength) score += (maxLength - centerLength) * 5;
   if (lineCount > 2 && lengths[0] > centerLength * 0.95) score += 16;
   if (lineCount > 2 && lengths[lineCount - 1] > centerLength * 0.95) score += 16;
+  if (maxLength > 0 && lineCount > 2) {
+    const adjacentSlack = profile.adjacentSlack == null ? 0.3 : profile.adjacentSlack;
+    const smoothnessWeight = profile.smoothnessWeight == null ? 160 : profile.smoothnessWeight;
+    const minLineRatio = profile.minLineRatio == null ? 0.34 : profile.minLineRatio;
+    const minRatio = minLength / maxLength;
+
+    for (let index = 1; index < lengths.length; index++) {
+      const difference = Math.abs(lengths[index] - lengths[index - 1]) / maxLength;
+      const excess = Math.max(0, difference - adjacentSlack);
+      score += excess * excess * smoothnessWeight;
+      score += Math.max(0, difference - 0.5) * 140;
+    }
+
+    if (minRatio < minLineRatio) {
+      score += Math.pow(minLineRatio - minRatio, 2) * 260;
+    }
+  }
   return score;
 };
 
