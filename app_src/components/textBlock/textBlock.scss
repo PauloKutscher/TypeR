@@ -83,6 +83,9 @@
 .text-line-num {
   text-align: center;
   flex: 0 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   width: 32px;
 }
 .text-line-select {
@@ -168,6 +171,9 @@
   resize: none;
   width: 100%;
   z-index: 4;
+  &.m-focused {
+    -webkit-text-fill-color: currentColor;
+  }
 }
 .text-area-overlay {
   box-sizing: border-box;
@@ -187,6 +193,9 @@
   z-index: 3;
   top: 0;
   pointer-events: none;
+  &.m-hidden {
+    visibility: hidden;
+  }
 }
 .text-message {
   display: flex;

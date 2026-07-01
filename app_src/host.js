@@ -869,6 +869,7 @@ function _forEachSelectedLayer(action) {
   } else if (selectedLayers.length === 1) {
     action(selectedLayers[0]);
   }
+  return selectedLayers.length;
 }
 
 /* ========================================================= */
@@ -1062,14 +1063,10 @@ function _createTextLayerInSelection() {
   state.result = "";
 }
 
-function _alignTextLayerToSelection() {
+function _alignCurrentTextLayerToSelection() {
   var state = _hostState.alignTextLayerToSelection;
-  if (!documents.length) {
-    state.result = "doc";
-    return;
-  } else if (!_layerIsTextLayer()) {
-    state.result = "layer";
-    return;
+  if (!_layerIsTextLayer()) {
+    return "layer";
   }
   
   // Get the text size to pre-expand/dilate selection
@@ -1088,8 +1085,7 @@ function _alignTextLayerToSelection() {
       });
     }
     if (selection.error) {
-      state.result = selection.error;
-      return;
+      return selection.error;
     }
   }
   var wasPoint = _textLayerIsPointText();
@@ -1108,7 +1104,33 @@ function _alignTextLayerToSelection() {
   if (wasPoint) {
     _changeToPointText();
   }
-  state.result = "";
+  return "";
+}
+
+function _alignTextLayerToSelection() {
+  var state = _hostState.alignTextLayerToSelection;
+  if (!documents.length) {
+    state.result = "doc";
+    return;
+  }
+
+  var alignedCount = 0;
+  var firstError = "";
+  var selectedCount = _forEachSelectedLayer(function () {
+    var result = _alignCurrentTextLayerToSelection();
+    if (result) {
+      if (!firstError) firstError = result;
+      return;
+    }
+    alignedCount++;
+  });
+
+  if (!selectedCount) {
+    firstError = _alignCurrentTextLayerToSelection();
+    if (!firstError) alignedCount++;
+  }
+
+  state.result = alignedCount > 0 ? "" : firstError;
 }
 
 function _changeActiveLayerTextSize() {

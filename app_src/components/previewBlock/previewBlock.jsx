@@ -120,12 +120,16 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       if (selection) {
         const getNextLineIndex = (lineIndex) => {
           const lines = context.state.lines || [];
+          const currentLine = lines[lineIndex];
+          if (currentLine?.last) {
+            return { index: lineIndex, advanced: false };
+          }
           for (let i = lineIndex + 1; i < lines.length; i++) {
             if (!lines[i].ignore) {
-              return lines[i].rawIndex;
+              return { index: lines[i].rawIndex, advanced: true };
             }
           }
-          return lineIndex;
+          return { index: lineIndex, advanced: false };
         };
 
         if (selection.multiSelection && selection.multiSelection.length > 0) {
@@ -133,11 +137,11 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           let nextLineIndex = context.state.currentLineIndex;
           let addedCount = 0;
 
-          selection.multiSelection.forEach((multiSelection) => {
+          for (const multiSelection of selection.multiSelection) {
             const { shiftKey, ...cleanSelection } = multiSelection;
             const selectionHash = getSelectionBoundsHash(cleanSelection);
             if (storedHashSet.has(selectionHash)) {
-              return;
+              continue;
             }
 
             storedHashSet.add(selectionHash);
@@ -147,8 +151,12 @@ const PreviewBlock = React.memo(function PreviewBlock() {
               lineIndex: nextLineIndex,
             });
             addedCount++;
-            nextLineIndex = getNextLineIndex(nextLineIndex);
-          });
+            const nextLine = getNextLineIndex(nextLineIndex);
+            nextLineIndex = nextLine.index;
+            if (!nextLine.advanced) {
+              break;
+            }
+          }
 
           if (addedCount > 0 && nextLineIndex !== context.state.currentLineIndex) {
             context.dispatch({ type: "setCurrentLineIndex", index: nextLineIndex });
@@ -270,8 +278,12 @@ const PreviewBlock = React.memo(function PreviewBlock() {
 
   const handleAlignLayer = React.useCallback(() => {
     const padding = context.state.internalPadding || 0;
-    alignTextLayerToSelection(context.state.resizeTextBoxOnCenter, padding);
-  }, [context.state.internalPadding, context.state.resizeTextBoxOnCenter]);
+    alignTextLayerToSelection(context.state.resizeTextBoxOnCenter, padding, () => {
+      if (context.state.multiBubbleMode && (context.state.storedSelections || []).length > 0) {
+        context.dispatch({ type: "clearSelections" });
+      }
+    });
+  }, [context.state.internalPadding, context.state.resizeTextBoxOnCenter, context.state.multiBubbleMode, context.state.storedSelections, context.dispatch]);
 
   const handleDecrease = React.useCallback(() => {
     changeActiveLayerTextSize(-(context.state.textSizeIncrement || 1));

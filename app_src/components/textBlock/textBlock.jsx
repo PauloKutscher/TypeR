@@ -31,7 +31,7 @@ const LineItem = React.memo(function LineItem({ line, direction, isCurrent, imag
 
   return (
     <div className={className}>
-      <div className="text-line-num">{lineNum}</div>
+      <div className="text-line-num" title={String(lineNum || "")}>{lineNum}</div>
       <div className="text-line-select" title={line.ignore ? "" : locale.selectLine}>
         {line.ignore ? " " : <FiTarget size={14} onClick={handleSelect} />}
       </div>
@@ -271,12 +271,12 @@ const TextBlock = React.memo(function TextBlock() {
           />
         ))}
       </div>
-      <div className="text-area-overlay" dir={direction}>
+      <div className={"text-area-overlay" + (focused ? " m-hidden" : "")} dir={direction}>
         {renderMarkdownOverlay(context.state.text || "")}
       </div>
       <textarea
         ref={textAreaRef}
-        className="text-area"
+        className={"text-area" + (focused ? " m-focused" : "")}
         dir={direction}
         value={context.state.text}
         onChange={handleTextChange}
