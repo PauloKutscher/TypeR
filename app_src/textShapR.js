@@ -1,6 +1,44 @@
 const VOWELS = "aeiouyAEIOUY\u00e0\u00e2\u00e4\u00e9\u00e8\u00ea\u00eb\u00ee\u00ef\u00f4\u00f6\u00f9\u00fb\u00fc\u00c0\u00c2\u00c4\u00c9\u00c8\u00ca\u00cb\u00ce\u00cf\u00d4\u00d6\u00d9\u00db\u00dc";
 const MAX_VARIANTS = 10;
 const MARKDOWN_TOKENS = ["***", "**", "__", "*", "_"];
+const PROFILE_PRESETS = {
+  balanced: {
+    minLines: 2,
+    maxLines: 6,
+    lineTarget: 4,
+    curves: [0.45, 0.6, 0.75],
+    shifts: [0, -0.12, 0.12],
+    biases: [-1, 0, 1],
+    minWeight: 0.35,
+  },
+  round: {
+    minLines: 3,
+    maxLines: 5,
+    lineTarget: 4,
+    curves: [0.65, 0.8, 0.95],
+    shifts: [0, -0.08, 0.08],
+    biases: [-1, 0, 1],
+    minWeight: 0.3,
+  },
+  tall: {
+    minLines: 4,
+    maxLines: 7,
+    lineTarget: 5,
+    curves: [0.3, 0.42, 0.55],
+    shifts: [0, -0.1, 0.1],
+    biases: [-1, 0],
+    minWeight: 0.46,
+  },
+  wide: {
+    minLines: 2,
+    maxLines: 4,
+    lineTarget: 3,
+    curves: [0.22, 0.34, 0.46],
+    shifts: [0, -0.08, 0.08],
+    biases: [0, 1, 2],
+    minWeight: 0.58,
+  },
+};
 
 const normalizeText = (text) => String(text || "").replace(/\s+/g, " ").trim();
 
@@ -10,7 +48,25 @@ const stripMarkdownForMeasure = (text) => String(text || "")
 
 const visibleLength = (text) => stripMarkdownForMeasure(text).length;
 
-const tokenLength = (token) => visibleLength(token.text);
+const getCharWidth = (char) => {
+  if (!char) return 0;
+  if (/\s/.test(char)) return 0.45;
+  if (/[ilI.,;:!|'’]/.test(char)) return 0.45;
+  if (/[mwMW@#%&]/.test(char)) return 1.32;
+  if (/[A-ZÀÂÄÉÈÊËÎÏÔÖÙÛÜ]/.test(char)) return 1.12;
+  return 1;
+};
+
+const visibleWidth = (text) => {
+  const clean = stripMarkdownForMeasure(text);
+  let width = 0;
+  for (let index = 0; index < clean.length; index++) {
+    width += getCharWidth(clean[index]);
+  }
+  return width;
+};
+
+const tokenLength = (token) => visibleWidth(token.text);
 
 const lineLength = (tokens) => visibleLength(tokens.map((token) => token.text).join(" "));
 
@@ -95,28 +151,28 @@ const getHyphenSplits = (word) => {
     .slice(0, 3);
 };
 
-const buildWeights = (lineCount, curve = 0.5, shift = 0) => {
+const buildWeights = (lineCount, curve = 0.5, shift = 0, minWeight = 0.35) => {
   if (lineCount <= 1) return [1];
   const center = (lineCount - 1) / 2 + shift;
   const maxDistance = Math.max(center, lineCount - 1 - center) || 1;
   return Array.from({ length: lineCount }, (_, index) => {
     const distance = Math.abs(index - center) / maxDistance;
-    return Math.max(0.35, 1 - distance * curve);
+    return Math.max(minWeight, 1 - distance * curve);
   });
 };
 
-const buildTargets = (tokens, lineCount, curve, shift, bias) => {
+const buildTargets = (tokens, lineCount, curve, shift, bias, minWeight) => {
   const total = tokens.reduce((sum, token) => sum + tokenLength(token), 0) + Math.max(0, tokens.length - lineCount);
-  const weights = buildWeights(lineCount, curve, shift);
+  const weights = buildWeights(lineCount, curve, shift, minWeight);
   const weightTotal = weights.reduce((sum, weight) => sum + weight, 0) || 1;
   return weights.map((weight) => Math.max(1, (total * weight) / weightTotal + bias));
 };
 
 const serializeLines = (lines) => lines.map((line) => line.map((token) => token.text).join(" ").trim()).join("\n");
 
-const buildCandidate = (tokens, lineCount, curve, shift, bias) => {
+const buildCandidate = (tokens, lineCount, curve, shift, bias, minWeight) => {
   if (!tokens.length || lineCount < 1) return null;
-  const targets = buildTargets(tokens, lineCount, curve, shift, bias);
+  const targets = buildTargets(tokens, lineCount, curve, shift, bias, minWeight);
   const lines = [];
   let cursor = 0;
 
@@ -162,10 +218,10 @@ const buildCandidate = (tokens, lineCount, curve, shift, bias) => {
   return normalized;
 };
 
-const scoreCandidate = (lines, hyphenCount) => {
+const scoreCandidate = (lines, hyphenCount, profile) => {
   const lengths = lines.map((line) => lineLength(line));
   const lineCount = lines.length;
-  const weights = buildWeights(lineCount, 0.65, 0);
+  const weights = buildWeights(lineCount, profile.scoreCurve || 0.65, 0, profile.minWeight);
   const totalLength = lengths.reduce((sum, length) => sum + length, 0);
   const weightTotal = weights.reduce((sum, weight) => sum + weight, 0) || 1;
   const targets = weights.map((weight) => (totalLength * weight) / weightTotal);
@@ -173,7 +229,7 @@ const scoreCandidate = (lines, hyphenCount) => {
   const maxLength = Math.max.apply(null, lengths);
   const centerLength = lengths[centerIndex] || 0;
 
-  let score = hyphenCount * 18 + Math.abs(lineCount - 4) * 1.5;
+  let score = hyphenCount * 18 + Math.abs(lineCount - profile.lineTarget) * 1.5;
   lengths.forEach((length, index) => {
     score += Math.pow(length - targets[index], 2);
     if (length <= 1) score += 30;
@@ -187,8 +243,8 @@ const scoreCandidate = (lines, hyphenCount) => {
 
 const makeBaseTokens = (words) => words.map((word) => ({ text: word }));
 
-const addCandidate = (resultMap, tokens, lineCount, curve, shift, bias, hyphenCount) => {
-  const lines = buildCandidate(tokens, lineCount, curve, shift, bias);
+const addCandidate = (resultMap, tokens, lineCount, curve, shift, bias, hyphenCount, profile) => {
+  const lines = buildCandidate(tokens, lineCount, curve, shift, bias, profile.minWeight);
   if (!lines) return;
   const text = serializeLines(lines);
   if (!text || resultMap.has(text)) return;
@@ -196,7 +252,7 @@ const addCandidate = (resultMap, tokens, lineCount, curve, shift, bias, hyphenCo
     id: `shape-${resultMap.size + 1}`,
     text,
     lines: text.split("\n"),
-    score: scoreCandidate(lines, hyphenCount),
+    score: scoreCandidate(lines, hyphenCount, profile),
     hyphenCount,
   });
 };
@@ -224,29 +280,31 @@ const generateTextShapRVariants = (text, options = {}) => {
   const normalized = normalizeText(text);
   if (!normalized) return [];
 
+  const profile = PROFILE_PRESETS[options.profile] || PROFILE_PRESETS.balanced;
   const words = splitWordsPreservingMarkdown(normalized);
   const resultMap = new Map();
-  const minLines = words.length <= 2 ? 1 : 2;
-  const maxLines = Math.min(options.maxLines || 6, Math.max(1, words.length));
-  const curves = [0.45, 0.6, 0.75];
-  const shifts = [0, -0.12, 0.12];
-  const biases = [-1, 0, 1];
+  const baseMinLines = words.length <= 2 ? 1 : profile.minLines;
+  const minLines = Math.min(Math.max(1, baseMinLines), Math.max(1, words.length));
+  const maxLines = Math.min(options.maxLines || profile.maxLines, Math.max(1, words.length));
+  const curves = profile.curves;
+  const shifts = profile.shifts;
+  const biases = profile.biases;
   const baseTokens = makeBaseTokens(words);
 
   for (let lineCount = minLines; lineCount <= maxLines; lineCount++) {
     curves.forEach((curve) => {
       shifts.forEach((shift) => {
-        biases.forEach((bias) => addCandidate(resultMap, baseTokens, lineCount, curve, shift, bias, 0));
+        biases.forEach((bias) => addCandidate(resultMap, baseTokens, lineCount, curve, shift, bias, 0, profile));
       });
     });
   }
 
   if (options.allowHyphenation !== false) {
     generateHyphenTokenSets(words).forEach((tokens) => {
-      const hyphenMaxLines = Math.min(options.maxLines || 6, Math.max(1, tokens.length));
+      const hyphenMaxLines = Math.min(options.maxLines || profile.maxLines, Math.max(1, tokens.length));
       for (let lineCount = Math.max(2, minLines); lineCount <= hyphenMaxLines; lineCount++) {
         curves.forEach((curve) => {
-          shifts.forEach((shift) => addCandidate(resultMap, tokens, lineCount, curve, shift, 0, 1));
+          shifts.forEach((shift) => addCandidate(resultMap, tokens, lineCount, curve, shift, 0, 1, profile));
         });
       }
     });
@@ -258,4 +316,4 @@ const generateTextShapRVariants = (text, options = {}) => {
     .map((variant, index) => ({ ...variant, id: `shape-${index + 1}` }));
 };
 
-export { generateTextShapRVariants, visibleLength };
+export { generateTextShapRVariants, visibleLength, visibleWidth };
