@@ -56,6 +56,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   });
   const inlineSourceKey = React.useRef("");
   const inlineSourcePending = React.useRef(false);
+  const inlineRefreshTimeouts = React.useRef([]);
   const inlineTextStyle = inlineLayerSource.style?.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {};
   const inlineStyleObject = getStyleObject(inlineTextStyle);
   const markdownEnabled = context.state.interpretMarkdown !== false;
@@ -97,6 +98,11 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const clearAllTipTimeout = React.useRef(null);
   const [clearAllTipShown, setClearAllTipShown] = React.useState(false);
 
+  const clearInlineRefreshTimeouts = React.useCallback(() => {
+    inlineRefreshTimeouts.current.forEach((timeout) => clearTimeout(timeout));
+    inlineRefreshTimeouts.current = [];
+  }, []);
+
   const refreshInlineLayerSource = React.useCallback((showLoading = false) => {
     if (inlineSourcePending.current) return;
     inlineSourcePending.current = true;
@@ -133,17 +139,26 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     if (!context.state.inlineTextShapR) return undefined;
     refreshInlineLayerSource();
     const refreshOnFocus = () => refreshInlineLayerSource();
+    const refreshAfterBlur = () => {
+      clearInlineRefreshTimeouts();
+      [180, 700, 1400].forEach((delay) => {
+        inlineRefreshTimeouts.current.push(setTimeout(() => refreshInlineLayerSource(), delay));
+      });
+    };
     const refreshOnVisibility = () => {
       if (!document.hidden) refreshInlineLayerSource();
     };
     window.addEventListener("focus", refreshOnFocus);
+    window.addEventListener("blur", refreshAfterBlur);
     document.addEventListener("visibilitychange", refreshOnVisibility);
     return () => {
       window.removeEventListener("focus", refreshOnFocus);
+      window.removeEventListener("blur", refreshAfterBlur);
       document.removeEventListener("visibilitychange", refreshOnVisibility);
+      clearInlineRefreshTimeouts();
       inlineSourcePending.current = false;
     };
-  }, [context.state.inlineTextShapR, refreshInlineLayerSource]);
+  }, [clearInlineRefreshTimeouts, context.state.inlineTextShapR, refreshInlineLayerSource]);
 
   React.useEffect(() => {
     setInlineVariantPage(0);
@@ -531,7 +546,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           </button>
         </div>
         {context.state.inlineTextShapR ? (
-          <div className="preview-textshapr hostBgdDark">
+          <div className="preview-textshapr hostBgdDark" onMouseEnter={() => refreshInlineLayerSource()}>
             <div className="preview-textshapr-head">
               <button type="button" className="preview-textshapr-open" onClick={openTextShapR} title={locale.textShapRTitle || "TextShapR"}>
                 <FiType size={13} />
