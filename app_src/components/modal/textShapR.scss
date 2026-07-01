@@ -278,6 +278,20 @@
   white-space: nowrap;
 }
 
+.textshapr-shape-badge {
+  align-items: center;
+  border: 1px solid rgba(#43a047, 0.55);
+  border-radius: 3px;
+  color: #43a047;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 9px;
+  line-height: 12px;
+  margin-left: 6px;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
 .textshapr-manual-fit-outer {
   display: block;
   max-width: 100%;

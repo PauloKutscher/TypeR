@@ -112,9 +112,24 @@ const TextShapRModal = React.memo(function TextShapRModal() {
     };
   });
 
+  // Auto mode adapts variants to the active selection outline when one exists
+  const [autoShape, setAutoShape] = React.useState(null);
+  React.useEffect(() => {
+    getSelectionShape((selectionShape) => {
+      if (selectionShape?.bounds) setAutoShape(selectionShape);
+    });
+  }, []);
+
   const variants = React.useMemo(
-    () => generateTextShapRVariants(sourceText, { limit: 10, allowHyphenation, profile }),
-    [sourceText, allowHyphenation, profile]
+    () => generateTextShapRVariants(sourceText, {
+      limit: 10,
+      allowHyphenation,
+      profile,
+      shapeProfile: autoShape,
+      width: autoShape?.bounds?.width,
+      height: autoShape?.bounds?.height,
+    }),
+    [sourceText, allowHyphenation, profile, autoShape]
   );
 
   React.useEffect(() => {
@@ -333,6 +348,14 @@ const TextShapRModal = React.memo(function TextShapRModal() {
                 />
                 <span>{locale.textShapRHyphenToggle || "Hyphenation"}</span>
               </label>
+              {autoShape ? (
+                <span
+                  className="textshapr-shape-badge"
+                  title={locale.textShapRShapeActive || "Shapes follow the current selection outline"}
+                >
+                  {locale.textShapRShapeBadge || "Selection"}
+                </span>
+              ) : null}
             </div>
             <div className="textshapr-grid">
               {variants.map((variant, index) => (

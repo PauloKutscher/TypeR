@@ -59,12 +59,22 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const inlineSourcePending = React.useRef(false);
   const inlineEventDebounce = React.useRef(null);
   const inlineLastRefreshAt = React.useRef(0);
+  const inlineShapePending = React.useRef(false);
+  const inlineShapeKey = React.useRef("");
+  const [inlineSelectionShape, setInlineSelectionShape] = React.useState(null);
   const inlineTextStyle = inlineLayerSource.style?.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {};
   const inlineStyleObject = getStyleObject(inlineTextStyle);
   const markdownEnabled = context.state.interpretMarkdown !== false;
   const inlineTextShapRVariants = React.useMemo(
-    () => generateTextShapRVariants(inlineLayerSource.text, { limit: 10, allowHyphenation: true, profile: "balanced" }),
-    [inlineLayerSource.text]
+    () => generateTextShapRVariants(inlineLayerSource.text, {
+      limit: 10,
+      allowHyphenation: true,
+      profile: "balanced",
+      shapeProfile: inlineSelectionShape?.profile || null,
+      width: inlineSelectionShape?.width,
+      height: inlineSelectionShape?.height,
+    }),
+    [inlineLayerSource.text, inlineSelectionShape]
   );
   const [inlineVariantPage, setInlineVariantPage] = React.useState(0);
   const inlinePageSize = 3;
@@ -133,9 +143,45 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     });
   }, []);
 
+  const refreshInlineSelectionShape = React.useCallback(() => {
+    if (inlineShapePending.current) return;
+    // Multi-bubble mode owns the selection monitor; sampling the outline
+    // would replace the user's selection mid-flow
+    if (context.state.multiBubbleMode) return;
+    inlineShapePending.current = true;
+    getCurrentSelection((selection) => {
+      if (!selection || !selection.width || !selection.height) {
+        inlineShapePending.current = false;
+        inlineShapeKey.current = "";
+        setInlineSelectionShape((current) => (current ? null : current));
+        return;
+      }
+      const boundsHash = getSelectionBoundsHash(selection);
+      if (boundsHash === inlineShapeKey.current) {
+        inlineShapePending.current = false;
+        return;
+      }
+      // The outline sampling is expensive, only run it when bounds changed
+      csInterface.evalScript(`getCurrentSelectionShape(${JSON.stringify({ samples: 21 })})`, (result) => {
+        inlineShapePending.current = false;
+        try {
+          const data = JSON.parse(result || "{}");
+          if (!data || data.error || !data.bounds) return;
+          inlineShapeKey.current = boundsHash;
+          setInlineSelectionShape({
+            profile: data,
+            width: data.bounds.width,
+            height: data.bounds.height,
+          });
+        } catch (error) {}
+      });
+    });
+  }, [context.state.multiBubbleMode]);
+
   React.useEffect(() => {
     if (!context.state.inlineTextShapR) return undefined;
     refreshInlineLayerSource();
+    refreshInlineSelectionShape();
 
     // Primary signal: Photoshop notifies the panel when a layer is selected
     // or edited. Debounced because 'setd' events arrive in bursts.
@@ -144,12 +190,16 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       inlineEventDebounce.current = setTimeout(() => {
         inlineEventDebounce.current = null;
         refreshInlineLayerSource();
+        refreshInlineSelectionShape();
       }, 120);
     });
 
-    const refreshOnFocus = () => refreshInlineLayerSource();
+    const refreshOnFocus = () => {
+      refreshInlineLayerSource();
+      refreshInlineSelectionShape();
+    };
     const refreshOnVisibility = () => {
-      if (!document.hidden) refreshInlineLayerSource();
+      if (!document.hidden) refreshOnFocus();
     };
     window.addEventListener("focus", refreshOnFocus);
     document.addEventListener("visibilitychange", refreshOnVisibility);
@@ -159,7 +209,10 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     const pollTimer = setInterval(() => {
       if (document.hidden) return;
       const idleDelay = hasReceivedPhotoshopEvents() ? 6000 : 1200;
-      if (Date.now() - inlineLastRefreshAt.current >= idleDelay) refreshInlineLayerSource();
+      if (Date.now() - inlineLastRefreshAt.current >= idleDelay) {
+        refreshInlineLayerSource();
+        refreshInlineSelectionShape();
+      }
     }, 1200);
 
     return () => {
@@ -172,8 +225,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         inlineEventDebounce.current = null;
       }
       inlineSourcePending.current = false;
+      inlineShapePending.current = false;
     };
-  }, [context.state.inlineTextShapR, refreshInlineLayerSource]);
+  }, [context.state.inlineTextShapR, refreshInlineLayerSource, refreshInlineSelectionShape]);
 
   React.useEffect(() => {
     setInlineVariantPage(0);
@@ -561,16 +615,22 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           </button>
         </div>
         {context.state.inlineTextShapR ? (
-          <div className="preview-textshapr hostBgdDark" onMouseEnter={() => refreshInlineLayerSource()}>
+          <div className="preview-textshapr hostBgdDark" onMouseEnter={() => { refreshInlineLayerSource(); refreshInlineSelectionShape(); }}>
             <div className="preview-textshapr-head">
               <button type="button" className="preview-textshapr-open" onClick={openTextShapR} title={locale.textShapRTitle || "TextShapR"}>
                 <FiType size={13} />
                 <span>{locale.textShapRTitle || "TextShapR"}</span>
               </button>
               <div className="preview-textshapr-pager">
+                {inlineSelectionShape ? (
+                  <span
+                    className="preview-textshapr-shape-dot"
+                    title={locale.textShapRShapeActive || "Shapes follow the current selection outline"}
+                  />
+                ) : null}
                 <button
                   type="button"
-                  onClick={() => refreshInlineLayerSource(true)}
+                  onClick={() => { refreshInlineLayerSource(true); refreshInlineSelectionShape(); }}
                   disabled={inlineLayerSource.loading}
                   title={locale.textShapRLayerRefresh || "Refresh selected layer"}
                 >

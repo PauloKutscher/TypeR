@@ -240,10 +240,10 @@ const rangeRespectsForcedBreaks = (tokens, from, to) => {
   return true;
 };
 
-const buildCandidate = (tokens, lineCount, curve, shift, bias, minWeight) => {
+const buildCandidate = (tokens, lineCount, curve, shift, bias, minWeight, targetsOverride) => {
   if (!tokens.length || lineCount < 1) return null;
   if (tokens.length < lineCount) return null;
-  const targets = buildTargets(tokens, lineCount, curve, shift, bias, minWeight);
+  const targets = targetsOverride || buildTargets(tokens, lineCount, curve, shift, bias, minWeight);
   const tokenCount = tokens.length;
   const dp = Array.from({ length: lineCount + 1 }, () => Array(tokenCount + 1).fill(Infinity));
   const prev = Array.from({ length: lineCount + 1 }, () => Array(tokenCount + 1).fill(-1));
@@ -296,15 +296,27 @@ const buildCandidate = (tokens, lineCount, curve, shift, bias, minWeight) => {
 const scoreCandidate = (lines, hyphenCount, profile) => {
   const lengths = lines.map((line) => lineLength(line));
   const lineCount = lines.length;
-  const weights = buildWeights(lineCount, profile.scoreCurve || 0.65, 0, profile.minWeight);
   const totalLength = lengths.reduce((sum, length) => sum + length, 0);
-  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0) || 1;
-  const targets = weights.map((weight) => (totalLength * weight) / weightTotal);
+  const shapeRows = profile.shapeRows && profile.shapeRows.length ? profile.shapeRows : null;
+  let targets;
+  if (shapeRows) {
+    // Targets follow the sampled bubble outline instead of a generic curve
+    const rowWeights = lengths.map((_, index) => (
+      Math.max(0.12, getProfileWidthAt(shapeRows, (index + 0.5) / lineCount) || 0)
+    ));
+    const rowTotal = rowWeights.reduce((sum, weight) => sum + weight, 0) || 1;
+    targets = rowWeights.map((weight) => (totalLength * weight) / rowTotal);
+  } else {
+    const weights = buildWeights(lineCount, profile.scoreCurve || 0.65, 0, profile.minWeight);
+    const weightTotal = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+    targets = weights.map((weight) => (totalLength * weight) / weightTotal);
+  }
   const maxLength = Math.max.apply(null, lengths);
   const minLength = Math.min.apply(null, lengths);
 
   const maxLineWidth = profile.maxLineWidth || 28;
-  let score = hyphenCount * 34 + Math.pow(Math.abs(lineCount - profile.lineTarget), 1.5) * 16;
+  const lineTargetWeight = profile.lineTargetWeight == null ? 16 : profile.lineTargetWeight;
+  let score = hyphenCount * 34 + Math.pow(Math.abs(lineCount - profile.lineTarget), 1.5) * lineTargetWeight;
   lengths.forEach((length, index) => {
     const target = targets[index] || 1;
     const relative = (length - target) / target;
@@ -319,6 +331,24 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
       score -= profile.punctuationBreakBonus || 0;
     }
   });
+
+  if (shapeRows && maxLength > 0 && lineCount > 1) {
+    // With a real outline the silhouette rules are replaced by outline
+    // following: each width step should match the outline's step
+    const smoothnessWeight = profile.smoothnessWeight == null ? 160 : profile.smoothnessWeight;
+    const minLineRatio = profile.minLineRatio == null ? 0.34 : profile.minLineRatio;
+    for (let index = 1; index < lengths.length; index++) {
+      const stepError = ((lengths[index] - lengths[index - 1]) - (targets[index] - targets[index - 1])) / maxLength;
+      score += stepError * stepError * smoothnessWeight;
+      score += Math.max(0, Math.abs(lengths[index] - lengths[index - 1]) / maxLength - 0.5) * 120;
+    }
+    const shapeMinRatio = minLineRatio * 0.8;
+    const minRatio = minLength / maxLength;
+    if (minRatio < shapeMinRatio) {
+      score += Math.pow(shapeMinRatio - minRatio, 2) * 200;
+    }
+    return score;
+  }
 
   if (maxLength > 0 && lineCount === 2) {
     const adjacentSlack = profile.adjacentSlack == null ? 0.24 : profile.adjacentSlack;
@@ -522,8 +552,8 @@ const estimateManualLineCount = (text, width = 320, height = 280) => {
   return clamp(Math.round(Math.sqrt(wordCount * aspect * 1.35)), 2, maxLines);
 };
 
-const addCandidate = (resultMap, tokens, lineCount, curve, shift, bias, hyphenCount, profile) => {
-  const lines = buildCandidate(tokens, lineCount, curve, shift, bias, profile.minWeight);
+const addCandidate = (resultMap, tokens, lineCount, curve, shift, bias, hyphenCount, profile, targetsOverride) => {
+  const lines = buildCandidate(tokens, lineCount, curve, shift, bias, profile.minWeight, targetsOverride);
   if (!lines) return;
   const text = serializeLines(lines);
   if (!text || resultMap.has(text)) return;
@@ -562,29 +592,61 @@ const generateTextShapRVariants = (text, options = {}) => {
   const profile = PROFILE_PRESETS[options.profile] || PROFILE_PRESETS.balanced;
   const words = splitWordsPreservingMarkdown(normalized);
   const resultMap = new Map();
+  const shapeRows = normalizeShapeRows(options.shapeProfile).filter((row) => row.width > 0);
+  let scoringProfile = profile;
+  let shapeTargetSettings = null;
+  if (shapeRows.length > 1) {
+    // A live Photoshop selection outlines the bubble: bias the line count to
+    // the bubble's aspect ratio and score candidates against its silhouette
+    const estimatedLines = estimateManualLineCount(normalized, options.width || 320, options.height || 280);
+    scoringProfile = {
+      ...profile,
+      shapeRows,
+      lineTarget: clamp(estimatedLines, 1, Math.max(profile.maxLines, estimatedLines)),
+      lineTargetWeight: 24,
+    };
+    shapeTargetSettings = {
+      shape: "selection",
+      shapeProfile: options.shapeProfile,
+      softness: 1,
+      floor: 0.14,
+    };
+  }
   const baseMinLines = words.length <= 2 ? 1 : profile.minLines;
   const minLines = Math.min(Math.max(1, baseMinLines), Math.max(1, words.length));
-  const maxLines = Math.min(options.maxLines || profile.maxLines, Math.max(1, words.length));
+  const profileMaxLines = shapeRows.length > 1 ? Math.max(profile.maxLines, Math.min(8, scoringProfile.lineTarget + 1)) : profile.maxLines;
+  const maxLines = Math.min(options.maxLines || profileMaxLines, Math.max(1, words.length));
   const curves = profile.curves;
   const shifts = profile.shifts;
   const biases = profile.biases;
   const baseTokens = makeBaseTokens(words);
 
+  const addShapeCandidates = (tokens, lineCount, hyphenCount) => {
+    if (!shapeTargetSettings) return;
+    const targets = buildManualTargets(tokens, lineCount, shapeTargetSettings);
+    [-1, 0, 1].forEach((bias) => {
+      const biasedTargets = bias === 0 ? targets : targets.map((target) => Math.max(1, target + bias));
+      addCandidate(resultMap, tokens, lineCount, 0, 0, 0, hyphenCount, scoringProfile, biasedTargets);
+    });
+  };
+
   for (let lineCount = minLines; lineCount <= maxLines; lineCount++) {
     curves.forEach((curve) => {
       shifts.forEach((shift) => {
-        biases.forEach((bias) => addCandidate(resultMap, baseTokens, lineCount, curve, shift, bias, 0, profile));
+        biases.forEach((bias) => addCandidate(resultMap, baseTokens, lineCount, curve, shift, bias, 0, scoringProfile));
       });
     });
+    addShapeCandidates(baseTokens, lineCount, 0);
   }
 
   if (options.allowHyphenation !== false) {
     generateHyphenTokenSets(words).forEach((tokens) => {
-      const hyphenMaxLines = Math.min(options.maxLines || profile.maxLines, Math.max(1, tokens.length));
+      const hyphenMaxLines = Math.min(options.maxLines || profileMaxLines, Math.max(1, tokens.length));
       for (let lineCount = Math.max(2, minLines); lineCount <= hyphenMaxLines; lineCount++) {
         curves.forEach((curve) => {
-          shifts.forEach((shift) => addCandidate(resultMap, tokens, lineCount, curve, shift, 0, 1, profile));
+          shifts.forEach((shift) => addCandidate(resultMap, tokens, lineCount, curve, shift, 0, 1, scoringProfile));
         });
+        addShapeCandidates(tokens, lineCount, 1);
       }
     });
   }

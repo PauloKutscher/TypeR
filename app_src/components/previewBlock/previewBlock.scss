@@ -321,6 +321,16 @@
   }
 }
 
+.preview-textshapr-shape-dot {
+  background: #43a047;
+  border-radius: 50%;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 6px;
+  margin-right: 2px;
+  width: 6px;
+}
+
 .preview-textshapr-list {
   display: grid;
   flex: 1 1 auto;
