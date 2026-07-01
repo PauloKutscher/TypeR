@@ -1,0 +1,139 @@
+.textshapr-modal-body {
+  overflow: auto;
+}
+
+.textshapr-grid {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 8px;
+}
+
+.textshapr-tile {
+  box-sizing: border-box;
+  border: 1px solid rgba(#fff, 0.12);
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  min-height: 76px;
+  overflow: hidden;
+  padding: 6px 6px 5px;
+  position: relative;
+  text-align: center;
+  transition: border-color 0.12s ease, background 0.12s ease, opacity 0.12s ease;
+  width: 100%;
+
+  &:hover {
+    border-color: rgba(#288edf, 0.85);
+    background: rgba(#288edf, 0.12);
+  }
+
+  &.is-applying {
+    opacity: 0.55;
+    pointer-events: none;
+  }
+}
+
+.light-theme .textshapr-tile {
+  border-color: rgba(#000, 0.12);
+
+  &:hover {
+    border-color: rgba(#1976d2, 0.65);
+    background: rgba(#1976d2, 0.08);
+  }
+}
+
+.textshapr-tile-rank {
+  font-size: 10px;
+  line-height: 10px;
+  opacity: 0.5;
+  position: absolute;
+  right: 5px;
+  top: 4px;
+}
+
+.textshapr-tile-text {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  font-size: 11px !important;
+  justify-content: center;
+  letter-spacing: 0;
+  line-height: 1.18;
+  min-height: 52px;
+  padding: 4px 8px 0;
+  word-break: break-word;
+}
+
+.textshapr-line {
+  display: block;
+  min-height: 1.05em;
+  white-space: pre-wrap;
+}
+
+.textshapr-hyphen {
+  align-self: center;
+  border: 1px solid rgba(#fff, 0.16);
+  border-radius: 3px;
+  font-size: 9px;
+  line-height: 11px;
+  margin-top: 3px;
+  opacity: 0.58;
+  padding: 0 4px;
+}
+
+.light-theme .textshapr-hyphen {
+  border-color: rgba(#000, 0.16);
+}
+
+.textshapr-empty {
+  font-size: 12px;
+  opacity: 0.7;
+  padding: 12px;
+  text-align: center;
+}
+
+.textshapr-footer {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+
+  > div {
+    line-height: 14px;
+    opacity: 0.7;
+  }
+
+  button {
+    align-items: center;
+    display: inline-flex;
+    flex: 0 0 auto;
+    gap: 4px;
+  }
+}
+
+@media (max-width: 390px) {
+  .textshapr-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-height: 560px) {
+  .textshapr-grid {
+    gap: 4px;
+    padding: 6px;
+  }
+
+  .textshapr-tile {
+    min-height: 62px;
+    padding: 4px 5px;
+  }
+
+  .textshapr-tile-text {
+    font-size: 10px !important;
+    min-height: 44px;
+  }
+}

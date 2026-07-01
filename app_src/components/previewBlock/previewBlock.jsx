@@ -1,7 +1,7 @@
 import "./previewBlock.scss";
 
 import React from "react";
-import { FiArrowRightCircle, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiX } from "react-icons/fi";
+import { FiArrowRightCircle, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiX, FiType } from "react-icons/fi";
 import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 
@@ -313,6 +313,11 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     if (context.state.textScale === 100) context.dispatch({ type: "setTextScale", scale: null });
   }, [context.state.textScale, context.dispatch]);
 
+  const openTextShapR = React.useCallback((event) => {
+    event.stopPropagation();
+    context.dispatch({ type: "setModal", modal: "textShapR" });
+  }, [context.dispatch]);
+
   const handleIncrementChange = React.useCallback((e) => {
     context.dispatch({ type: "setTextSizeIncrement", increment: e.target.value });
   }, [context.dispatch]);
@@ -404,8 +409,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                 <span>%</span>
               </div>
             </div>
-            <div className="preview-line-info-actions" title={locale.insertStyledText}>
-              <FiArrowRightCircle size={16} onClick={insertStyledText} />
+            <div className="preview-line-info-actions">
+              <FiType size={16} onClick={openTextShapR} title={locale.textShapRTitle || "TextShapR"} />
+              <FiArrowRightCircle size={16} onClick={insertStyledText} title={locale.insertStyledText} />
             </div>
           </div>
           <div className="preview-line-text" style={styleObject}>

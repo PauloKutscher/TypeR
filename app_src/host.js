@@ -118,6 +118,10 @@ function _clone(obj) {
   return result;
 }
 
+function _normalizeTextKey(text) {
+  return String(text || "").replace(/\r\n/g, "\r").replace(/\n/g, "\r");
+}
+
 function _getHostDefaultStyle() {
   return {
     layerText: {
@@ -747,7 +751,7 @@ function _applyRichTextRanges(textParams, textRuns, textLength) {
 
 function _createAndSetLayerText(data, width, height) {
   var style = _ensureStyle(data.style);
-  style.textProps.layerText.textKey = data.text.replace(/\n+/g, "");
+  style.textProps.layerText.textKey = _normalizeTextKey(data.text);
   style.textProps.layerText.textStyleRange[0].to = data.text.length;
   style.textProps.layerText.paragraphStyleRange[0].to = data.text.length;
   _applyRichTextRanges(style.textProps, data.richTextRuns, data.text.length);
@@ -908,7 +912,7 @@ function _setActiveLayerText() {
           oldTextParams.layerText.textStyleRange[0].textStyle.size != null) {
         newTextParams.layerText.textStyleRange[0].textStyle.size = oldTextParams.layerText.textStyleRange[0].textStyle.size;
       }
-      newTextParams.layerText.textKey = dataText.replace(/\n+/g, "");
+      newTextParams.layerText.textKey = _normalizeTextKey(dataText);
       newTextParams.layerText.textStyleRange[0].to = dataText.length;
       newTextParams.layerText.paragraphStyleRange[0].to = dataText.length;
       targetTextLength = dataText.length;
@@ -916,7 +920,7 @@ function _setActiveLayerText() {
     } else if (dataText) {
       newTextParams = {
         layerText: {
-          textKey: dataText.replace(/\n+/g, ""),
+          textKey: _normalizeTextKey(dataText),
         },
       };
       if (oldTextParams.layerText.textStyleRange && oldTextParams.layerText.textStyleRange[0]) {
@@ -1177,7 +1181,7 @@ function _changeActiveLayerTextSize() {
     } catch (e) {
       // Fall back to the older text replacement path if the fast path fails.
       var oldTextParams = jamText.getLayerText();
-      var text = oldTextParams.layerText.textKey.replace(/\n+/g, "");
+      var text = _normalizeTextKey(oldTextParams.layerText.textKey);
       if (!text) {
         state.result = "layer";
         return;
