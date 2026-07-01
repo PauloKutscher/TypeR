@@ -1,7 +1,7 @@
 import "./previewBlock.scss";
 
 import React from "react";
-import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiX, FiType } from "react-icons/fi";
+import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiRefreshCw, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiX, FiType } from "react-icons/fi";
 import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 
@@ -97,11 +97,11 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const clearAllTipTimeout = React.useRef(null);
   const [clearAllTipShown, setClearAllTipShown] = React.useState(false);
 
-  const refreshInlineLayerSource = React.useCallback(() => {
+  const refreshInlineLayerSource = React.useCallback((showLoading = false) => {
     if (inlineSourcePending.current) return;
     inlineSourcePending.current = true;
     setInlineLayerSource((current) => (
-      current.text || current.error ? current : { ...current, loading: true }
+      showLoading || (!current.text && !current.error) ? { ...current, loading: true, error: "" } : current
     ));
     getActiveTextLayerSource((source) => {
       inlineSourcePending.current = false;
@@ -132,9 +132,15 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   React.useEffect(() => {
     if (!context.state.inlineTextShapR) return undefined;
     refreshInlineLayerSource();
-    const interval = setInterval(refreshInlineLayerSource, 800);
+    const refreshOnFocus = () => refreshInlineLayerSource();
+    const refreshOnVisibility = () => {
+      if (!document.hidden) refreshInlineLayerSource();
+    };
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnVisibility);
     return () => {
-      clearInterval(interval);
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnVisibility);
       inlineSourcePending.current = false;
     };
   }, [context.state.inlineTextShapR, refreshInlineLayerSource]);
@@ -436,9 +442,11 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     const lineStyle = getScaledStyle(inlineLayerSource.style, context.state.textScale);
     setActiveLayerText(variant.text, lineStyle, context.state.direction, (ok) => {
       setApplyingTextShapRId(null);
-      if (ok && advance) context.dispatch({ type: "nextLine", add: true });
+      if (!ok) return;
+      refreshInlineLayerSource();
+      if (advance) context.dispatch({ type: "nextLine", add: true });
     });
-  }, [applyingTextShapRId, context, inlineLayerSource.style]);
+  }, [applyingTextShapRId, context, inlineLayerSource.style, refreshInlineLayerSource]);
 
   const handleIncrementChange = React.useCallback((e) => {
     context.dispatch({ type: "setTextSizeIncrement", increment: e.target.value });
@@ -530,6 +538,14 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                 <span>{locale.textShapRTitle || "TextShapR"}</span>
               </button>
               <div className="preview-textshapr-pager">
+                <button
+                  type="button"
+                  onClick={() => refreshInlineLayerSource(true)}
+                  disabled={inlineLayerSource.loading}
+                  title={locale.textShapRLayerRefresh || "Refresh selected layer"}
+                >
+                  <FiRefreshCw size={11} />
+                </button>
                 <button
                   type="button"
                   onClick={() => moveInlineTextShapRPage(-1)}
