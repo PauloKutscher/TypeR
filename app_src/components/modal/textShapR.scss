@@ -255,19 +255,39 @@
   align-items: center;
   display: flex;
   flex: 1 1 auto;
-  font-size: 11px !important;
   justify-content: center;
+  min-height: 52px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 4px 8px 0;
+}
+
+.textshapr-tile-fit {
+  display: inline-block;
+  flex: 0 0 auto;
+  font-size: 11px;
   letter-spacing: 0;
   line-height: 1.18;
-  min-height: 52px;
-  padding: 4px 8px 0;
-  word-break: break-word;
+  text-align: center;
+  transform-origin: center center;
 }
 
 .textshapr-line {
   display: block;
   min-height: 1.05em;
-  white-space: pre-wrap;
+  white-space: nowrap;
+}
+
+.textshapr-manual-fit-outer {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-align: center;
+}
+
+.textshapr-manual-fit {
+  display: inline-block;
+  transform-origin: center center;
 }
 
 .textshapr-hyphen {

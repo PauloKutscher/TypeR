@@ -258,6 +258,10 @@ function _convertPixelToPoint(value) {
   return (parseInt(value) / activeDocument.resolution) * 72;
 }
 
+function _convertPixelToPointExact(value) {
+  return (value / activeDocument.resolution) * 72;
+}
+
 function _createCurrent(target, id) {
   var reference = new ActionReference();
   if (id > 0) reference.putProperty(charID.Property, id);
@@ -1000,7 +1004,6 @@ function _setActiveLayerText() {
     if (dataStyle && dataStyle.stroke) {
       _setLayerStroke(dataStyle.stroke);
     }
-    var newBounds = _getCurrentTextLayerBounds();
     if (isPoint) {
       _changeToPointText();
     } else {
@@ -1011,14 +1014,44 @@ function _setActiveLayerText() {
       } else if (oldTextParams.layerText.textStyleRange && oldTextParams.layerText.textStyleRange[0] && oldTextParams.layerText.textStyleRange[0].textStyle.size != null) {
         textSize = oldTextParams.layerText.textStyleRange[0].textStyle.size;
       }
-      newTextParams.layerText.textShape[0].bounds.bottom = _convertPixelToPoint(newBounds.height + textSize + 2);
-      jamText.setLayerText({
-        layerText: {
-          textShape: newTextParams.layerText.textShape,
-        },
-      });
+      var boxShape = newTextParams.layerText.textShape && newTextParams.layerText.textShape[0];
+      var boxFitted = false;
+      if (boxShape && boxShape.bounds) {
+        // The retained box can be narrower than the new longest line, which
+        // makes Photoshop soft-wrap it and break the intended line shape.
+        // Measure the real text extent inside an oversized box, then shrink
+        // the box tightly around the text.
+        var boxTop = boxShape.bounds.top || 0;
+        var boxLeft = boxShape.bounds.left || 0;
+        try {
+          jamText.setLayerText({
+            layerText: {
+              textShape: [{
+                textType: "box",
+                orientation: "horizontal",
+                bounds: { top: boxTop, left: boxLeft, right: boxLeft + 30000, bottom: boxTop + 30000 },
+              }],
+            },
+          });
+          var textExtent = _getCurrentTextLayerBounds();
+          if (textExtent.width > 0 && textExtent.height > 0) {
+            var widthPadding = Math.max(2, textSize * 0.4);
+            boxShape.bounds.right = boxLeft + _convertPixelToPointExact(textExtent.width) + widthPadding;
+            boxShape.bounds.bottom = boxTop + _convertPixelToPointExact(textExtent.height) + textSize + 2;
+            jamText.setLayerText({ layerText: { textShape: [boxShape] } });
+            boxFitted = true;
+          }
+        } catch (fitError) {}
+      }
+      if (!boxFitted && boxShape) {
+        // Fallback: restore the retained box and only grow its height
+        jamText.setLayerText({ layerText: { textShape: newTextParams.layerText.textShape } });
+        var fallbackBounds = _getCurrentTextLayerBounds();
+        boxShape.bounds.bottom = _convertPixelToPoint(fallbackBounds.height + textSize + 2);
+        jamText.setLayerText({ layerText: { textShape: newTextParams.layerText.textShape } });
+      }
     }
-    newBounds = _getCurrentTextLayerBounds();
+    var newBounds = _getCurrentTextLayerBounds();
     if (!oldBounds.bottom) oldBounds = newBounds;
     var offsetX = oldBounds.xMid - newBounds.xMid;
     var offsetY = oldBounds.yMid - newBounds.yMid;

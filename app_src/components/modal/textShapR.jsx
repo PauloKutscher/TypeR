@@ -7,6 +7,7 @@ import { csInterface, locale, setActiveLayerText, getStyleObject, parseMarkdownR
 import { useContext } from "../../context";
 import { getScaledStyle } from "../../textLayerPayload";
 import { estimateManualLineCount, generateManualTextShapRVariant, generateTextShapRVariants } from "../../textShapR";
+import TextShapRFitPreview from "../textShapRFitPreview";
 
 const PROFILE_OPTIONS = [
   { id: "balanced", labelKey: "textShapRProfileBalanced", fallback: "Balanced" },
@@ -347,15 +348,18 @@ const TextShapRModal = React.memo(function TextShapRModal() {
                   title={locale.textShapRApply || "Apply this shape"}
                 >
                   <span className="textshapr-tile-rank">{index + 1}</span>
-                  <span className="textshapr-tile-text" style={styleObject}>
-                    <span style={{ fontFamily: styleObject.fontFamily || "Tahoma" }}>
-                      {variant.lines.map((variantLine, lineIndex) => (
-                        <span key={`${variant.id}-${lineIndex}`} className="textshapr-line">
-                          {renderMarkdownText(variantLine, markdownEnabled)}
-                        </span>
-                      ))}
-                    </span>
-                  </span>
+                  <TextShapRFitPreview
+                    outerClassName="textshapr-tile-text"
+                    innerClassName="textshapr-tile-fit"
+                    contentKey={`${variant.text}|${markdownEnabled}|${styleObject.fontFamily || ""}`}
+                    style={{ ...styleObject, fontFamily: styleObject.fontFamily || "Tahoma" }}
+                  >
+                    {variant.lines.map((variantLine, lineIndex) => (
+                      <span key={`${variant.id}-${lineIndex}`} className="textshapr-line">
+                        {renderMarkdownText(variantLine, markdownEnabled)}
+                      </span>
+                    ))}
+                  </TextShapRFitPreview>
                   {variant.hyphenCount > 0 && (
                     <span className="textshapr-hyphen">{locale.textShapRHyphenated || "hyphen"}</span>
                   )}
@@ -477,13 +481,18 @@ const ManualPreview = React.memo(function ManualPreview({ variant, settings, sty
           <div className="textshapr-manual-bubble" style={bubbleStyle} />
         )}
         <div className="textshapr-manual-text" style={styleObject}>
-          <span style={{ fontFamily: styleObject.fontFamily || "Tahoma" }}>
+          <TextShapRFitPreview
+            outerClassName="textshapr-manual-fit-outer"
+            innerClassName="textshapr-manual-fit"
+            contentKey={`${(variant?.lines || []).join("\n")}|${markdownEnabled}|${styleObject.fontFamily || ""}`}
+            style={{ fontFamily: styleObject.fontFamily || "Tahoma" }}
+          >
             {(variant?.lines || []).map((variantLine, lineIndex) => (
               <span key={`manual-${lineIndex}`} className="textshapr-line">
                 {renderMarkdownText(variantLine, markdownEnabled)}
               </span>
             ))}
-          </span>
+          </TextShapRFitPreview>
         </div>
       </div>
     </div>

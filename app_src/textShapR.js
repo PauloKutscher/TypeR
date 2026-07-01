@@ -12,9 +12,11 @@ const PROFILE_PRESETS = {
     biases: [-1, 0, 1],
     minWeight: 0.35,
     punctuationBreakBonus: 14,
-    adjacentSlack: 0.3,
-    smoothnessWeight: 170,
-    minLineRatio: 0.36,
+    adjacentSlack: 0.22,
+    smoothnessWeight: 210,
+    minLineRatio: 0.4,
+    scoreCurve: 0.65,
+    maxLineWidth: 26,
   },
   round: {
     minLines: 3,
@@ -25,9 +27,11 @@ const PROFILE_PRESETS = {
     biases: [-1, 0, 1],
     minWeight: 0.3,
     punctuationBreakBonus: 14,
-    adjacentSlack: 0.28,
-    smoothnessWeight: 190,
-    minLineRatio: 0.34,
+    adjacentSlack: 0.18,
+    smoothnessWeight: 240,
+    minLineRatio: 0.38,
+    scoreCurve: 0.8,
+    maxLineWidth: 22,
   },
   tall: {
     minLines: 4,
@@ -38,9 +42,11 @@ const PROFILE_PRESETS = {
     biases: [-1, 0],
     minWeight: 0.46,
     punctuationBreakBonus: 11,
-    adjacentSlack: 0.34,
-    smoothnessWeight: 120,
-    minLineRatio: 0.32,
+    adjacentSlack: 0.26,
+    smoothnessWeight: 160,
+    minLineRatio: 0.36,
+    scoreCurve: 0.5,
+    maxLineWidth: 18,
   },
   wide: {
     minLines: 2,
@@ -51,9 +57,11 @@ const PROFILE_PRESETS = {
     biases: [0, 1, 2],
     minWeight: 0.58,
     punctuationBreakBonus: 11,
-    adjacentSlack: 0.26,
-    smoothnessWeight: 190,
-    minLineRatio: 0.46,
+    adjacentSlack: 0.2,
+    smoothnessWeight: 220,
+    minLineRatio: 0.5,
+    scoreCurve: 0.4,
+    maxLineWidth: 34,
   },
 };
 
@@ -292,14 +300,18 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
   const totalLength = lengths.reduce((sum, length) => sum + length, 0);
   const weightTotal = weights.reduce((sum, weight) => sum + weight, 0) || 1;
   const targets = weights.map((weight) => (totalLength * weight) / weightTotal);
-  const centerIndex = Math.floor((lineCount - 1) / 2);
   const maxLength = Math.max.apply(null, lengths);
   const minLength = Math.min.apply(null, lengths);
-  const centerLength = lengths[centerIndex] || 0;
 
-  let score = hyphenCount * 34 + Math.abs(lineCount - profile.lineTarget) * 1.5;
+  const maxLineWidth = profile.maxLineWidth || 28;
+  let score = hyphenCount * 34 + Math.pow(Math.abs(lineCount - profile.lineTarget), 1.5) * 16;
   lengths.forEach((length, index) => {
-    score += Math.pow(length - targets[index], 2);
+    const target = targets[index] || 1;
+    const relative = (length - target) / target;
+    score += relative * relative * 120;
+    // Overlong lines break out of the bubble: penalize width past the profile cap
+    const widthExcess = Math.max(0, length - maxLineWidth) / maxLineWidth;
+    score += widthExcess * widthExcess * 320;
     if (length <= 1) score += 30;
     if (lineCount > 3 && visibleLength(lineText(lines[index])) <= 4) score += 8;
     if (/^[.,;:!?]+$/.test(serializeLines([lines[index]]))) score += 40;
@@ -307,21 +319,60 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
       score -= profile.punctuationBreakBonus || 0;
     }
   });
-  if (centerLength < maxLength) score += (maxLength - centerLength) * 5;
-  if (lineCount > 2 && lengths[0] > centerLength * 0.95) score += 16;
-  if (lineCount > 2 && lengths[lineCount - 1] > centerLength * 0.95) score += 16;
+
+  if (maxLength > 0 && lineCount === 2) {
+    const adjacentSlack = profile.adjacentSlack == null ? 0.24 : profile.adjacentSlack;
+    const smoothnessWeight = profile.smoothnessWeight == null ? 160 : profile.smoothnessWeight;
+    const difference = Math.abs(lengths[0] - lengths[1]) / maxLength;
+    const excess = Math.max(0, difference - adjacentSlack);
+    score += excess * excess * smoothnessWeight;
+  }
+
   if (maxLength > 0 && lineCount > 2) {
     const adjacentSlack = profile.adjacentSlack == null ? 0.3 : profile.adjacentSlack;
     const smoothnessWeight = profile.smoothnessWeight == null ? 160 : profile.smoothnessWeight;
     const minLineRatio = profile.minLineRatio == null ? 0.34 : profile.minLineRatio;
     const minRatio = minLength / maxLength;
+    const interiorLengths = lengths.slice(1, lineCount - 1);
+    const interiorMax = Math.max.apply(null, interiorLengths);
 
+    // The widest line must sit in the middle of the shape, not on an edge
+    const edgeMax = Math.max(lengths[0], lengths[lineCount - 1]);
+    if (edgeMax > interiorMax) {
+      score += Math.pow((edgeMax - interiorMax) / maxLength, 2) * 420 + 20;
+    }
+
+    // Edge lines should stay clearly below the interior peak (graded, not binary)
+    if (interiorMax > 0) {
+      [lengths[0], lengths[lineCount - 1]].forEach((edgeLength) => {
+        const edgeExcess = Math.max(0, edgeLength / interiorMax - 0.9);
+        score += edgeExcess * edgeExcess * 320;
+      });
+    }
+
+    // Bubble profile: lengths should rise toward the peak then fall after it;
+    // every dip before the peak or bump after it breaks the convex silhouette
+    const peakIndex = lengths.indexOf(maxLength);
+    for (let index = 1; index <= peakIndex; index++) {
+      const drop = lengths[index - 1] - lengths[index];
+      if (drop > 0) score += Math.pow(drop / maxLength, 2) * 300;
+    }
+    for (let index = peakIndex + 1; index < lineCount; index++) {
+      const rise = lengths[index] - lengths[index - 1];
+      if (rise > 0) score += Math.pow(rise / maxLength, 2) * 300;
+    }
+
+    // Neighbouring lines must keep close widths for a smooth outline
     for (let index = 1; index < lengths.length; index++) {
       const difference = Math.abs(lengths[index] - lengths[index - 1]) / maxLength;
       const excess = Math.max(0, difference - adjacentSlack);
       score += excess * excess * smoothnessWeight;
-      score += Math.max(0, difference - 0.5) * 140;
+      score += Math.max(0, difference - 0.45) * 160;
     }
+
+    // First and last lines may differ, but a lopsided pair reads badly
+    const edgeDifference = Math.abs(lengths[0] - lengths[lineCount - 1]) / maxLength;
+    score += Math.pow(Math.max(0, edgeDifference - 0.22), 2) * 240;
 
     if (minRatio < minLineRatio) {
       score += Math.pow(minLineRatio - minRatio, 2) * 260;
