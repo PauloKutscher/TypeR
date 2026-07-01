@@ -256,11 +256,6 @@
     border-bottom: 1px solid rgba(#000, 0.12);
   }
 
-  > span {
-    font-size: 10px;
-    line-height: 14px;
-    opacity: 0.5;
-  }
 }
 
 .preview-textshapr-open {
@@ -284,6 +279,45 @@
   &:hover {
     color: #fff;
     opacity: 1;
+  }
+}
+
+.preview-textshapr-pager {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+
+  button {
+    align-items: center;
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    height: 14px;
+    justify-content: center;
+    opacity: 0.58;
+    padding: 0;
+    width: 14px;
+
+    &:hover:not(:disabled) {
+      color: #fff;
+      opacity: 1;
+    }
+
+    &:disabled {
+      cursor: default;
+      opacity: 0.2;
+    }
+  }
+
+  span {
+    font-size: 10px;
+    line-height: 14px;
+    min-width: 22px;
+    opacity: 0.5;
+    text-align: center;
   }
 }
 

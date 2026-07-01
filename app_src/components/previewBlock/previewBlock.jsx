@@ -1,7 +1,7 @@
 import "./previewBlock.scss";
 
 import React from "react";
-import { FiArrowRightCircle, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiX, FiType } from "react-icons/fi";
+import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiX, FiType } from "react-icons/fi";
 import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 
@@ -60,8 +60,15 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const inlineStyleObject = getStyleObject(inlineTextStyle);
   const markdownEnabled = context.state.interpretMarkdown !== false;
   const inlineTextShapRVariants = React.useMemo(
-    () => generateTextShapRVariants(inlineLayerSource.text, { limit: 3, allowHyphenation: true, profile: "balanced" }),
+    () => generateTextShapRVariants(inlineLayerSource.text, { limit: 10, allowHyphenation: true, profile: "balanced" }),
     [inlineLayerSource.text]
+  );
+  const [inlineVariantPage, setInlineVariantPage] = React.useState(0);
+  const inlinePageSize = 3;
+  const inlinePageCount = Math.max(1, Math.ceil(inlineTextShapRVariants.length / inlinePageSize));
+  const visibleInlineVariants = inlineTextShapRVariants.slice(
+    inlineVariantPage * inlinePageSize,
+    inlineVariantPage * inlinePageSize + inlinePageSize
   );
   const [applyingTextShapRId, setApplyingTextShapRId] = React.useState(null);
   const renderMarkdownText = React.useCallback((text) => {
@@ -131,6 +138,14 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       inlineSourcePending.current = false;
     };
   }, [context.state.inlineTextShapR, refreshInlineLayerSource]);
+
+  React.useEffect(() => {
+    setInlineVariantPage(0);
+  }, [inlineLayerSource.key]);
+
+  React.useEffect(() => {
+    setInlineVariantPage((current) => Math.min(current, inlinePageCount - 1));
+  }, [inlinePageCount]);
 
   const showShiftTip = React.useCallback(() => {
     setShiftSelectionWarning(true);
@@ -408,6 +423,13 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     context.dispatch({ type: "setModal", modal: "textShapR" });
   }, [context.dispatch]);
 
+  const moveInlineTextShapRPage = React.useCallback((direction) => {
+    setInlineVariantPage((current) => {
+      if (inlinePageCount <= 1) return 0;
+      return (current + direction + inlinePageCount) % inlinePageCount;
+    });
+  }, [inlinePageCount]);
+
   const applyTextShapRVariant = React.useCallback((variant, advance = false) => {
     if (!variant || applyingTextShapRId) return;
     setApplyingTextShapRId(variant.id);
@@ -507,10 +529,28 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                 <FiType size={13} />
                 <span>{locale.textShapRTitle || "TextShapR"}</span>
               </button>
-              <span>{inlineLayerSource.loading ? (locale.textShapRLayerLoading || "Reading selected layer...") : (locale.textShapRSourceLayer || "Layer")}</span>
+              <div className="preview-textshapr-pager">
+                <button
+                  type="button"
+                  onClick={() => moveInlineTextShapRPage(-1)}
+                  disabled={inlinePageCount <= 1}
+                  title={locale.prevLine || "Previous"}
+                >
+                  <FiChevronLeft size={12} />
+                </button>
+                <span>{inlineLayerSource.loading ? (locale.textShapRLayerLoading || "Reading selected layer...") : `${inlineVariantPage + 1}/${inlinePageCount}`}</span>
+                <button
+                  type="button"
+                  onClick={() => moveInlineTextShapRPage(1)}
+                  disabled={inlinePageCount <= 1}
+                  title={locale.nextLine || "Next"}
+                >
+                  <FiChevronRight size={12} />
+                </button>
+              </div>
             </div>
             <div className="preview-textshapr-list">
-              {inlineTextShapRVariants.length ? inlineTextShapRVariants.map((variant, index) => (
+              {visibleInlineVariants.length ? visibleInlineVariants.map((variant, index) => (
                 <button
                   key={variant.id}
                   type="button"
@@ -518,7 +558,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                   onClick={(event) => applyTextShapRVariant(variant, event.shiftKey)}
                   title={locale.textShapRApply || "Apply this shape"}
                 >
-                  <span className="preview-textshapr-rank">{index + 1}</span>
+                  <span className="preview-textshapr-rank">{inlineVariantPage * inlinePageSize + index + 1}</span>
                   <span className="preview-textshapr-text" style={inlineStyleObject}>
                     <span style={{ fontFamily: inlineStyleObject.fontFamily || "Tahoma" }}>
                       {variant.lines.map((variantLine, lineIndex) => (
