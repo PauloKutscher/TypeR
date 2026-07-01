@@ -1,6 +1,7 @@
 const VOWELS = "aeiouyAEIOUY\u00e0\u00e2\u00e4\u00e9\u00e8\u00ea\u00eb\u00ee\u00ef\u00f4\u00f6\u00f9\u00fb\u00fc\u00c0\u00c2\u00c4\u00c9\u00c8\u00ca\u00cb\u00ce\u00cf\u00d4\u00d6\u00d9\u00db\u00dc";
 const MAX_VARIANTS = 10;
 const MARKDOWN_TOKENS = ["***", "**", "__", "*", "_"];
+const LINE_END_PUNCTUATION = /[.,;:!?…]$/;
 const PROFILE_PRESETS = {
   balanced: {
     minLines: 2,
@@ -10,6 +11,7 @@ const PROFILE_PRESETS = {
     shifts: [0, -0.12, 0.12],
     biases: [-1, 0, 1],
     minWeight: 0.35,
+    punctuationBreakBonus: 7,
   },
   round: {
     minLines: 3,
@@ -19,6 +21,7 @@ const PROFILE_PRESETS = {
     shifts: [0, -0.08, 0.08],
     biases: [-1, 0, 1],
     minWeight: 0.3,
+    punctuationBreakBonus: 7,
   },
   tall: {
     minLines: 4,
@@ -28,6 +31,7 @@ const PROFILE_PRESETS = {
     shifts: [0, -0.1, 0.1],
     biases: [-1, 0],
     minWeight: 0.46,
+    punctuationBreakBonus: 6,
   },
   wide: {
     minLines: 2,
@@ -37,6 +41,7 @@ const PROFILE_PRESETS = {
     shifts: [0, -0.08, 0.08],
     biases: [0, 1, 2],
     minWeight: 0.58,
+    punctuationBreakBonus: 6,
   },
 };
 
@@ -68,11 +73,20 @@ const visibleWidth = (text) => {
 
 const tokenLength = (token) => visibleWidth(token.text);
 
-const lineLength = (tokens) => visibleLength(tokens.map((token) => token.text).join(" "));
+const lineText = (tokens) => tokens.map((token) => token.text).join(" ").trim();
+
+const lineLength = (tokens) => visibleWidth(lineText(tokens));
 
 const isVowel = (char) => VOWELS.indexOf(char) !== -1;
 
 const hasMarkdownSyntax = (word) => /[*_\\]/.test(word);
+
+const endsWithBreakPunctuation = (text) => {
+  const clean = stripMarkdownForMeasure(text)
+    .replace(/[)"'’»\]]+$/g, "")
+    .trim();
+  return LINE_END_PUNCTUATION.test(clean);
+};
 
 const isEscaped = (text, index) => {
   let count = 0;
@@ -194,11 +208,23 @@ const buildCandidate = (tokens, lineCount, curve, shift, bias, minWeight) => {
       const nextToken = tokens[cursor];
       const currentLength = lineLength(line);
       const nextLength = lineLength(line.concat(nextToken));
+      const currentEndsWithPunctuation = line.length > 0 && endsWithBreakPunctuation(lineText(line));
+      const punctuationBreakIsGood =
+        currentEndsWithPunctuation &&
+        currentLength >= target * 0.62 &&
+        nextLength > target * 0.78 &&
+        remainingAfterTake >= needsForLater;
+      const punctuationBreakKeepsShape = Math.abs(currentLength - target) <= Math.abs(nextLength - target) + 4;
       const shouldTake =
         line.length === 0 ||
         remainingAfterTake < needsForLater ||
-        nextLength <= target ||
-        Math.abs(nextLength - target) <= Math.abs(currentLength - target);
+        (
+          !(punctuationBreakIsGood && punctuationBreakKeepsShape) &&
+          (
+            nextLength <= target ||
+            Math.abs(nextLength - target) <= Math.abs(currentLength - target)
+          )
+        );
 
       if (!shouldTake && remainingAfterTake >= needsForLater) break;
       line.push(nextToken);
@@ -234,6 +260,9 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
     score += Math.pow(length - targets[index], 2);
     if (length <= 1) score += 30;
     if (/^[.,;:!?]+$/.test(serializeLines([lines[index]]))) score += 40;
+    if (index < lineCount - 1 && endsWithBreakPunctuation(lineText(lines[index]))) {
+      score -= profile.punctuationBreakBonus || 0;
+    }
   });
   if (centerLength < maxLength) score += (maxLength - centerLength) * 5;
   if (lineCount > 2 && lengths[0] > centerLength * 0.95) score += 16;

@@ -64,4 +64,7 @@ const wide = generateTextShapRVariants(profileText, { profile: "wide", limit: 10
 assert.ok(tall[0].lines.length > wide[0].lines.length);
 assert.ok(visibleWidth("minimum") < visibleWidth("maximum"));
 
+const punctuated = generateTextShapRVariants("Mais attends, je voulais juste te parler de ce qui est arrive hier soir.", { limit: 10 });
+assert.ok(/attends,\n/.test(punctuated[0].text));
+
 console.log("TextShapR tests passed");
