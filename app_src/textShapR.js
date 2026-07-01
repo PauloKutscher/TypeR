@@ -295,12 +295,46 @@ const getManualShapeWeight = (position, shape, softness, floor) => {
   return Math.max(floor, Math.pow(Math.max(0, weight), softness));
 };
 
+const normalizeShapeRows = (shapeProfile) => {
+  const rows = Array.isArray(shapeProfile?.rows) ? shapeProfile.rows : [];
+  return rows
+    .map((row) => ({
+      y: clamp(Number(row.y), 0, 1),
+      left: clamp(Number(row.left), 0, 1),
+      right: clamp(Number(row.right), 0, 1),
+      width: clamp(Number(row.width), 0, 1),
+    }))
+    .filter((row) => Number.isFinite(row.y) && Number.isFinite(row.width))
+    .sort((a, b) => a.y - b.y);
+};
+
+const getProfileWidthAt = (rows, y) => {
+  if (!rows.length) return null;
+  if (y <= rows[0].y) return rows[0].width;
+  const last = rows[rows.length - 1];
+  if (y >= last.y) return last.width;
+  for (let index = 1; index < rows.length; index++) {
+    const next = rows[index];
+    if (y > next.y) continue;
+    const prev = rows[index - 1];
+    const span = next.y - prev.y || 1;
+    const ratio = (y - prev.y) / span;
+    return prev.width + (next.width - prev.width) * ratio;
+  }
+  return last.width;
+};
+
 const buildManualTargets = (tokens, lineCount, settings) => {
   const shape = settings.shape || "sine";
   const softness = settings.softness || 0.6;
   const floor = settings.floor == null ? 0.15 : settings.floor;
+  const profileRows = normalizeShapeRows(settings.shapeProfile);
   const weights = Array.from({ length: lineCount }, (_, index) => {
-    const position = lineCount <= 1 ? 0 : (2 * index + 1) / lineCount - 1;
+    const y = lineCount <= 1 ? 0.5 : (index + 0.5) / lineCount;
+    if (shape === "selection" && profileRows.length) {
+      return Math.max(floor, getProfileWidthAt(profileRows, y) || 0);
+    }
+    const position = 2 * y - 1;
     return getManualShapeWeight(position, shape, softness, floor);
   });
   const total = tokens.reduce((sum, token) => sum + tokenLength(token), 0) + Math.max(0, tokens.length - lineCount) * 0.45;
@@ -466,6 +500,7 @@ const generateManualTextShapRVariant = (text, options = {}) => {
     floor: options.floor == null ? 0.15 : options.floor,
     punctuationBonus: options.punctuationBonus == null ? 0.04 : options.punctuationBonus,
     edgeMin: options.edgeMin == null ? 3 : options.edgeMin,
+    shapeProfile: options.shapeProfile || null,
   };
   const targets = buildManualTargets(tokens, lineCount, settings);
   const split = splitTokensForManualTargets(tokens, targets, settings);
@@ -478,6 +513,7 @@ const generateManualTextShapRVariant = (text, options = {}) => {
       widths: [visibleWidth(normalized)],
       lineCount: 1,
       shape: settings.shape,
+      shapeProfile: settings.shapeProfile,
       width: options.width,
       height: options.height,
     };
@@ -492,6 +528,7 @@ const generateManualTextShapRVariant = (text, options = {}) => {
     widths: split.ranges.map(([from, to]) => sumTokenRange(tokens, from, to)),
     lineCount,
     shape: settings.shape,
+    shapeProfile: settings.shapeProfile,
     width: options.width,
     height: options.height,
     score: split.cost,

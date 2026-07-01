@@ -3,7 +3,7 @@ import "./textShapR.scss";
 import React from "react";
 import { FiArrowRightCircle, FiCheck, FiRefreshCw, FiX } from "react-icons/fi";
 
-import { locale, setActiveLayerText, getCurrentSelection, getStyleObject, parseMarkdownRuns } from "../../utils";
+import { csInterface, locale, setActiveLayerText, getStyleObject, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { getScaledStyle } from "../../textLayerPayload";
 import { estimateManualLineCount, generateManualTextShapRVariant, generateTextShapRVariants } from "../../textShapR";
@@ -16,12 +16,25 @@ const PROFILE_OPTIONS = [
 ];
 
 const MANUAL_SHAPES = [
+  { id: "selection", labelKey: "textShapRManualShapeSelection", fallback: "Selection" },
   { id: "sine", labelKey: "textShapRManualShapeSine", fallback: "Sine" },
   { id: "ellipse", labelKey: "textShapRManualShapeEllipse", fallback: "Ellipse" },
   { id: "diamond", labelKey: "textShapRManualShapeDiamond", fallback: "Diamond" },
 ];
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+const getSelectionShape = (callback) => {
+  const payload = JSON.stringify({ samples: 21 });
+  csInterface.evalScript(`getCurrentSelectionShape(${payload})`, (result) => {
+    try {
+      const data = JSON.parse(result || "{}");
+      callback(data && !data.error ? data : null);
+    } catch (error) {
+      callback(null);
+    }
+  });
+};
 
 const renderMarkdownText = (text, markdownEnabled) => {
   if (!markdownEnabled) return text;
@@ -56,9 +69,10 @@ const TextShapRModal = React.memo(function TextShapRModal() {
     const width = 320;
     const height = 280;
     return {
-      shape: "sine",
+      shape: "selection",
       width,
       height,
+      shapeProfile: null,
       softness: 0.6,
       floor: 0.15,
       lineCount: estimateManualLineCount(line.text, width, height),
@@ -119,20 +133,24 @@ const TextShapRModal = React.memo(function TextShapRModal() {
 
   const scanSelection = React.useCallback(() => {
     setManualStatus(locale.textShapRManualScanning || "Scanning selection...");
-    getCurrentSelection((selection) => {
-      if (!selection) {
+    getSelectionShape((selectionShape) => {
+      if (!selectionShape?.bounds) {
         setManualStatus(locale.textShapRManualNoSelection || "No active Photoshop selection.");
         return;
       }
+      const selection = selectionShape.bounds;
       const width = clamp(Math.round(selection.width || 320), 80, 1200);
       const height = clamp(Math.round(selection.height || 280), 80, 1200);
       setManualSettings((current) => ({
         ...current,
+        shape: "selection",
+        shapeProfile: selectionShape,
         width,
         height,
         lineCount: estimateManualLineCount(line.text, width, height),
       }));
-      setManualStatus((locale.textShapRManualSelectionLoaded || "Selection {width}x{height} loaded.")
+      const statusKey = selectionShape.fallback ? "textShapRManualSelectionBoundsLoaded" : "textShapRManualSelectionLoaded";
+      setManualStatus((locale[statusKey] || locale.textShapRManualSelectionLoaded || "Selection {width}x{height} loaded.")
         .replace("{width}", width)
         .replace("{height}", height));
     });
@@ -326,6 +344,18 @@ const ManualPreview = React.memo(function ManualPreview({ variant, settings, sty
   const scale = Math.min(1, 270 / width, 150 / height);
   const previewWidth = Math.round(width * scale);
   const previewHeight = Math.round(height * scale);
+  const shapeRows = Array.isArray(settings.shapeProfile?.rows) ? settings.shapeProfile.rows.filter((row) => row.width > 0) : [];
+  const selectionPoints = shapeRows.length
+    ? shapeRows
+      .map((row) => `${Math.round((row.left || 0) * previewWidth)},${Math.round((row.y || 0) * previewHeight)}`)
+      .concat(
+        shapeRows
+          .slice()
+          .reverse()
+          .map((row) => `${Math.round((row.right || 0) * previewWidth)},${Math.round((row.y || 0) * previewHeight)}`)
+      )
+      .join(" ")
+    : "";
   const bubbleStyle = {
     width: `${previewWidth}px`,
     height: `${previewHeight}px`,
@@ -339,7 +369,13 @@ const ManualPreview = React.memo(function ManualPreview({ variant, settings, sty
   return (
     <div className="textshapr-manual-preview">
       <div className="textshapr-manual-stage" style={{ width: previewWidth, height: previewHeight }}>
-        <div className="textshapr-manual-bubble" style={bubbleStyle} />
+        {settings.shape === "selection" && selectionPoints ? (
+          <svg className="textshapr-manual-selection" viewBox={`0 0 ${previewWidth} ${previewHeight}`} preserveAspectRatio="none">
+            <polygon points={selectionPoints} />
+          </svg>
+        ) : (
+          <div className="textshapr-manual-bubble" style={bubbleStyle} />
+        )}
         <div className="textshapr-manual-text" style={styleObject}>
           <span style={{ fontFamily: styleObject.fontFamily || "Tahoma" }}>
             {(variant?.lines || []).map((variantLine, lineIndex) => (

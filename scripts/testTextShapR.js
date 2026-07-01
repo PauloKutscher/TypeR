@@ -90,4 +90,23 @@ const manualTall = estimateManualLineCount(manualText, 220, 440);
 const manualWide = estimateManualLineCount(manualText, 440, 220);
 assert.ok(manualTall > manualWide);
 
+const selectionProfile = {
+  rows: [
+    { y: 0, left: 0.45, right: 0.55, width: 0.1 },
+    { y: 0.25, left: 0.18, right: 0.82, width: 0.64 },
+    { y: 0.5, left: 0, right: 1, width: 1 },
+    { y: 0.75, left: 0.28, right: 0.72, width: 0.44 },
+    { y: 1, left: 0.48, right: 0.52, width: 0.04 },
+  ],
+};
+const selectionManual = generateManualTextShapRVariant(manualText, {
+  width: 260,
+  height: 360,
+  shape: "selection",
+  shapeProfile: selectionProfile,
+  lineCount: 5,
+});
+assert.ok(selectionManual.targets[2] > selectionManual.targets[0]);
+assert.ok(selectionManual.targets[2] > selectionManual.targets[4]);
+
 console.log("TextShapR tests passed");

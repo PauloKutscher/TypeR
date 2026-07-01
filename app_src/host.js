@@ -1399,6 +1399,110 @@ function getCurrentSelection() {
   return jamJSON.stringify(selection);
 }
 
+function _buildBoundsShapeRows(bounds, sampleCount) {
+  var rows = [];
+  for (var i = 0; i < sampleCount; i++) {
+    var y = sampleCount <= 1 ? 0.5 : i / (sampleCount - 1);
+    rows.push({
+      y: y,
+      left: 0,
+      right: 1,
+      width: 1,
+    });
+  }
+  return {
+    bounds: bounds,
+    rows: rows,
+    fallback: true,
+  };
+}
+
+function getCurrentSelectionShape(data) {
+  if (!documents.length) {
+    return jamJSON.stringify({ error: "doc" });
+  }
+  var bounds = _getCurrentSelectionBounds();
+  if (!bounds) {
+    return jamJSON.stringify({ error: "noSelection" });
+  }
+
+  var sampleCount = data && data.samples ? parseInt(data.samples, 10) : 17;
+  if (isNaN(sampleCount)) sampleCount = 17;
+  if (sampleCount < 5) sampleCount = 5;
+  if (sampleCount > 31) sampleCount = 31;
+
+  var doc = app.activeDocument;
+  var tempChannel = _createTempSelectionChannel(doc);
+  if (!tempChannel) {
+    return jamJSON.stringify(_buildBoundsShapeRows(bounds, sampleCount));
+  }
+
+  var rows = [];
+  var oldUnits = app.preferences.rulerUnits;
+  var canIntersect = true;
+  try {
+    app.preferences.rulerUnits = Units.PIXELS;
+    for (var i = 0; i < sampleCount; i++) {
+      var yRatio = sampleCount <= 1 ? 0.5 : i / (sampleCount - 1);
+      var yMid = bounds.top + bounds.height * yRatio;
+      var sliceHeight = Math.max(1, Math.ceil(bounds.height / sampleCount));
+      var top = Math.max(bounds.top, Math.round(yMid - sliceHeight / 2));
+      var bottom = Math.min(bounds.bottom, Math.round(yMid + sliceHeight / 2));
+      if (bottom <= top) bottom = top + 1;
+
+      try {
+        doc.selection.select([
+          [bounds.left, top],
+          [bounds.right, top],
+          [bounds.right, bottom],
+          [bounds.left, bottom],
+        ], SelectionType.REPLACE, 0, false);
+        doc.selection.load(tempChannel, SelectionType.INTERSECT);
+      } catch (sliceError) {
+        canIntersect = false;
+        break;
+      }
+
+      var span = _getCurrentSelectionBounds();
+      if (span && span.width > 0) {
+        rows.push({
+          y: yRatio,
+          left: Math.max(0, Math.min(1, (span.left - bounds.left) / bounds.width)),
+          right: Math.max(0, Math.min(1, (span.right - bounds.left) / bounds.width)),
+          width: Math.max(0, Math.min(1, span.width / bounds.width)),
+        });
+      } else {
+        rows.push({
+          y: yRatio,
+          left: 0.5,
+          right: 0.5,
+          width: 0,
+        });
+      }
+    }
+  } catch (error) {
+    canIntersect = false;
+  } finally {
+    try {
+      doc.selection.load(tempChannel);
+    } catch (restoreError) {}
+    try {
+      tempChannel.remove();
+    } catch (removeError) {}
+    app.preferences.rulerUnits = oldUnits;
+  }
+
+  if (!canIntersect || !rows.length) {
+    return jamJSON.stringify(_buildBoundsShapeRows(bounds, sampleCount));
+  }
+
+  return jamJSON.stringify({
+    bounds: bounds,
+    rows: rows,
+    fallback: false,
+  });
+}
+
 function startSelectionMonitoring() {
   var monitor = _hostState.selectionMonitor;
   if (monitor.callback) {
