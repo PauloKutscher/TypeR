@@ -1450,24 +1450,19 @@ function _buildBoundsShapeRows(bounds, sampleCount) {
   };
 }
 
-function getCurrentSelectionShape(data) {
-  if (!documents.length) {
-    return jamJSON.stringify({ error: "doc" });
-  }
-  var bounds = _getCurrentSelectionBounds();
-  if (!bounds) {
-    return jamJSON.stringify({ error: "noSelection" });
-  }
-
-  var sampleCount = data && data.samples ? parseInt(data.samples, 10) : 17;
-  if (isNaN(sampleCount)) sampleCount = 17;
+function _normalizeShapeSampleCount(value, fallback) {
+  var sampleCount = value ? parseInt(value, 10) : fallback;
+  if (isNaN(sampleCount)) sampleCount = fallback;
   if (sampleCount < 5) sampleCount = 5;
   if (sampleCount > 31) sampleCount = 31;
+  return sampleCount;
+}
 
+function _sampleCurrentSelectionShape(bounds, sampleCount) {
   var doc = app.activeDocument;
   var tempChannel = _createTempSelectionChannel(doc);
   if (!tempChannel) {
-    return jamJSON.stringify(_buildBoundsShapeRows(bounds, sampleCount));
+    return _buildBoundsShapeRows(bounds, sampleCount);
   }
 
   var rows = [];
@@ -1526,14 +1521,79 @@ function getCurrentSelectionShape(data) {
   }
 
   if (!canIntersect || !rows.length) {
-    return jamJSON.stringify(_buildBoundsShapeRows(bounds, sampleCount));
+    return _buildBoundsShapeRows(bounds, sampleCount);
   }
 
-  return jamJSON.stringify({
+  return {
     bounds: bounds,
     rows: rows,
     fallback: false,
-  });
+  };
+}
+
+function getCurrentSelectionShape(data) {
+  if (!documents.length) {
+    return jamJSON.stringify({ error: "doc" });
+  }
+  var bounds = _getCurrentSelectionBounds();
+  if (!bounds) {
+    return jamJSON.stringify({ error: "noSelection" });
+  }
+  var sampleCount = _normalizeShapeSampleCount(data && data.samples, 17);
+  return jamJSON.stringify(_sampleCurrentSelectionShape(bounds, sampleCount));
+}
+
+function getActiveLayerBubbleShape(data) {
+  if (!documents.length) {
+    return jamJSON.stringify({ error: "doc" });
+  }
+  if (!_layerIsTextLayer()) {
+    return jamJSON.stringify({ error: "layer" });
+  }
+  if (_getCurrentSelectionBounds()) {
+    return jamJSON.stringify({ error: "hasSelection" });
+  }
+
+  var tolerance = data && data.tolerance ? parseInt(data.tolerance, 10) : 20;
+  if (isNaN(tolerance)) tolerance = 20;
+  var sampleCount = _normalizeShapeSampleCount(data && data.samples, 21);
+
+  var result = null;
+  try {
+    var textBounds = _getCurrentTextLayerBounds();
+    _createMagicWandSelection(tolerance);
+    var bounds = _getCurrentSelectionBounds();
+    if (!bounds || bounds.width * bounds.height < 200) {
+      _deselect();
+      return jamJSON.stringify({ error: "noBubble" });
+    }
+    // A wand escaping the bubble (open outline, plain page background) grabs
+    // a huge area: reject implausible bubbles instead of shaping to the page
+    if (textBounds && textBounds.width > 0 && textBounds.height > 0) {
+      var areaRatio = (bounds.width * bounds.height) / (textBounds.width * textBounds.height);
+      if (areaRatio > 60) {
+        _deselect();
+        return jamJSON.stringify({ error: "noBubble" });
+      }
+    }
+    // Close the text holes and smooth the outline before sampling
+    var smoothAmount = Math.max(4, Math.round(_getTextLayerSize() / 2));
+    _modifySelectionBounds(smoothAmount);
+    var expanded = _getCurrentSelectionBounds();
+    var contractAmount = _clampAdjustAmount(expanded, -smoothAmount);
+    if (contractAmount !== 0) _modifySelectionBounds(contractAmount);
+    bounds = _getCurrentSelectionBounds() || bounds;
+    result = _sampleCurrentSelectionShape(bounds, sampleCount);
+  } catch (bubbleError) {
+    result = null;
+  }
+  try {
+    _deselect();
+  } catch (deselectError) {}
+  if (!result) {
+    return jamJSON.stringify({ error: "shape" });
+  }
+  return jamJSON.stringify(result);
 }
 
 function startSelectionMonitoring() {

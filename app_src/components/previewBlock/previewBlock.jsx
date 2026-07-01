@@ -4,6 +4,7 @@ import React from "react";
 import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiRefreshCw, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiX, FiType } from "react-icons/fi";
 import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
+import { FaMagic } from "react-icons/fa";
 
 import { csInterface, locale, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
@@ -143,40 +144,78 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     });
   }, []);
 
-  const refreshInlineSelectionShape = React.useCallback(() => {
+  const bubbleAware = context.state.textShapRBubbleAware === true;
+
+  const refreshInlineSelectionShape = React.useCallback((force = false) => {
     if (inlineShapePending.current) return;
     // Multi-bubble mode owns the selection monitor; sampling the outline
     // would replace the user's selection mid-flow
     if (context.state.multiBubbleMode) return;
+    if (force) inlineShapeKey.current = "";
     inlineShapePending.current = true;
     getCurrentSelection((selection) => {
-      if (!selection || !selection.width || !selection.height) {
+      if (selection && selection.width && selection.height) {
+        // A manual selection always wins over the automatic bubble detection
+        const boundsHash = `selection:${getSelectionBoundsHash(selection)}`;
+        if (boundsHash === inlineShapeKey.current) {
+          inlineShapePending.current = false;
+          return;
+        }
+        // The outline sampling is expensive, only run it when bounds changed
+        csInterface.evalScript(`getCurrentSelectionShape(${JSON.stringify({ samples: 21 })})`, (result) => {
+          inlineShapePending.current = false;
+          try {
+            const data = JSON.parse(result || "{}");
+            if (!data || data.error || !data.bounds) return;
+            inlineShapeKey.current = boundsHash;
+            setInlineSelectionShape({
+              profile: data,
+              width: data.bounds.width,
+              height: data.bounds.height,
+              source: "selection",
+            });
+          } catch (error) {}
+        });
+        return;
+      }
+
+      if (!bubbleAware || !inlineSourceKey.current) {
         inlineShapePending.current = false;
         inlineShapeKey.current = "";
         setInlineSelectionShape((current) => (current ? null : current));
         return;
       }
-      const boundsHash = getSelectionBoundsHash(selection);
-      if (boundsHash === inlineShapeKey.current) {
+
+      // Bubble-aware mode: magic-wand the bubble around the active text layer
+      // (same detection as align-without-selection). Cached per layer so the
+      // wand only fires when the layer changes.
+      const bubbleKey = `bubble:${inlineSourceKey.current}`;
+      if (bubbleKey === inlineShapeKey.current) {
         inlineShapePending.current = false;
         return;
       }
-      // The outline sampling is expensive, only run it when bounds changed
-      csInterface.evalScript(`getCurrentSelectionShape(${JSON.stringify({ samples: 21 })})`, (result) => {
+      csInterface.evalScript(`getActiveLayerBubbleShape(${JSON.stringify({ samples: 21, tolerance: 20 })})`, (result) => {
         inlineShapePending.current = false;
         try {
           const data = JSON.parse(result || "{}");
-          if (!data || data.error || !data.bounds) return;
-          inlineShapeKey.current = boundsHash;
+          if (data && data.error === "hasSelection") return;
+          // Cache failures too: retrying the wand on every poll would spam
+          // the document with temporary selections
+          inlineShapeKey.current = bubbleKey;
+          if (!data || data.error || !data.bounds) {
+            setInlineSelectionShape((current) => (current ? null : current));
+            return;
+          }
           setInlineSelectionShape({
             profile: data,
             width: data.bounds.width,
             height: data.bounds.height,
+            source: "bubble",
           });
         } catch (error) {}
       });
     });
-  }, [context.state.multiBubbleMode]);
+  }, [context.state.multiBubbleMode, bubbleAware]);
 
   React.useEffect(() => {
     if (!context.state.inlineTextShapR) return undefined;
@@ -232,6 +271,16 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   React.useEffect(() => {
     setInlineVariantPage(0);
   }, [inlineLayerSource.key]);
+
+  // Re-detect the bubble when the active layer changes or the mode toggles
+  React.useEffect(() => {
+    if (!context.state.inlineTextShapR) return;
+    refreshInlineSelectionShape();
+  }, [context.state.inlineTextShapR, inlineLayerSource.key, bubbleAware, refreshInlineSelectionShape]);
+
+  const toggleBubbleAware = React.useCallback(() => {
+    context.dispatch({ type: "setTextShapRBubbleAware", value: !bubbleAware });
+  }, [context, bubbleAware]);
 
   React.useEffect(() => {
     setInlineVariantPage((current) => Math.min(current, inlinePageCount - 1));
@@ -624,13 +673,23 @@ const PreviewBlock = React.memo(function PreviewBlock() {
               <div className="preview-textshapr-pager">
                 {inlineSelectionShape ? (
                   <span
-                    className="preview-textshapr-shape-dot"
-                    title={locale.textShapRShapeActive || "Shapes follow the current selection outline"}
+                    className={"preview-textshapr-shape-dot" + (inlineSelectionShape.source === "bubble" ? " is-bubble" : "")}
+                    title={inlineSelectionShape.source === "bubble"
+                      ? (locale.textShapRBubbleActive || "Shapes follow the detected bubble outline")
+                      : (locale.textShapRShapeActive || "Shapes follow the current selection outline")}
                   />
                 ) : null}
                 <button
                   type="button"
-                  onClick={() => { refreshInlineLayerSource(true); refreshInlineSelectionShape(); }}
+                  className={"preview-textshapr-bubble-toggle" + (bubbleAware ? " is-active" : "")}
+                  onClick={toggleBubbleAware}
+                  title={locale.textShapRBubbleToggle || "Bubble-aware: auto-detect the bubble around the text"}
+                >
+                  <FaMagic size={10} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { refreshInlineLayerSource(true); refreshInlineSelectionShape(true); }}
                   disabled={inlineLayerSource.loading}
                   title={locale.textShapRLayerRefresh || "Refresh selected layer"}
                 >

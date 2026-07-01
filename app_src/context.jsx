@@ -34,6 +34,7 @@ const storeFields = [
   "showTips",
   "showQuickStyleSize",
   "inlineTextShapR",
+  "textShapRBubbleAware",
   "internalPadding",
   "interpretMarkdown",
   "styleSizeStep",
@@ -147,6 +148,7 @@ const initialState = {
   showTips: storage.data?.showTips !== false,
   showQuickStyleSize: storage.data?.showQuickStyleSize !== false,
   inlineTextShapR: storage.data?.inlineTextShapR === true,
+  textShapRBubbleAware: storage.data?.textShapRBubbleAware === true,
   modalType: null,
   modalData: {},
   images: [],
@@ -639,6 +641,11 @@ const reducer = (state, action) => {
 
     case "setInlineTextShapR": {
       newState.inlineTextShapR = !!action.value;
+      break;
+    }
+
+    case "setTextShapRBubbleAware": {
+      newState.textShapRBubbleAware = !!action.value;
       break;
     }
 

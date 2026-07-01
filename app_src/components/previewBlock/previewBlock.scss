@@ -329,6 +329,17 @@
   height: 6px;
   margin-right: 2px;
   width: 6px;
+
+  &.is-bubble {
+    background: #b17fe0;
+  }
+}
+
+.preview-textshapr-bubble-toggle {
+  &.is-active {
+    color: #b17fe0 !important;
+    opacity: 1 !important;
+  }
 }
 
 .preview-textshapr-list {
