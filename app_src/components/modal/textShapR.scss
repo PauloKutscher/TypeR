@@ -56,6 +56,70 @@
   padding: 7px 8px;
 }
 
+.textshapr-source-bar {
+  align-items: center;
+  box-sizing: border-box;
+  display: flex;
+  gap: 6px;
+  min-height: 32px;
+  padding: 5px 8px;
+}
+
+.textshapr-source-tabs {
+  display: inline-flex;
+  flex: 0 0 auto;
+
+  button {
+    background: rgba(#000, 0.16);
+    border: 1px solid rgba(#fff, 0.1);
+    color: inherit;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 20px;
+    min-width: 54px;
+    padding: 0 7px;
+
+    &:first-child {
+      border-radius: 4px 0 0 4px;
+    }
+
+    &:last-child {
+      border-radius: 0 4px 4px 0;
+      margin-left: -1px;
+    }
+
+    &.is-active {
+      background: rgba(#288edf, 0.28);
+      border-color: rgba(#288edf, 0.72);
+      color: #fff;
+      position: relative;
+      z-index: 1;
+    }
+  }
+}
+
+.light-theme .textshapr-source-tabs button {
+  background: rgba(#000, 0.04);
+  border-color: rgba(#000, 0.12);
+
+  &.is-active {
+    background: rgba(#1976d2, 0.14);
+    border-color: rgba(#1976d2, 0.5);
+    color: #111;
+  }
+}
+
+.textshapr-source-status {
+  flex: 1 1 auto;
+  font-size: 10px;
+  line-height: 12px;
+  min-width: 0;
+  opacity: 0.68;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .textshapr-profile-tabs {
   display: grid;
   flex: 1 1 auto;
@@ -433,6 +497,15 @@
     align-items: stretch;
     flex-direction: column;
     gap: 5px;
+  }
+
+  .textshapr-source-bar {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .textshapr-source-status {
+    flex-basis: 100%;
   }
 
   .textshapr-grid {

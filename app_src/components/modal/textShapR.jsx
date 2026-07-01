@@ -36,6 +36,29 @@ const getSelectionShape = (callback) => {
   });
 };
 
+const normalizeLayerText = (text) => String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+
+const getActiveTextLayerSource = (callback) => {
+  csInterface.evalScript("getActiveLayerText()", (result) => {
+    try {
+      const data = JSON.parse(result || "{}");
+      if (!data?.textProps?.layerText) {
+        callback(null);
+        return;
+      }
+      callback({
+        text: normalizeLayerText(data.textProps.layerText.textKey),
+        style: {
+          textProps: data.textProps,
+          stroke: data.stroke || null,
+        },
+      });
+    } catch (error) {
+      callback(null);
+    }
+  });
+};
+
 const renderMarkdownText = (text, markdownEnabled) => {
   if (!markdownEnabled) return text;
   const parsed = parseMarkdownRuns(text || "");
@@ -55,16 +78,25 @@ const renderMarkdownText = (text, markdownEnabled) => {
 const TextShapRModal = React.memo(function TextShapRModal() {
   const context = useContext();
   const line = context.state.currentLine || { text: "" };
-  const style = context.state.currentStyle || {};
-  const textStyle = style.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {};
-  const styleObject = getStyleObject(textStyle);
+  const textBlockStyle = context.state.currentStyle || {};
   const markdownEnabled = context.state.interpretMarkdown !== false;
   const [applyingId, setApplyingId] = React.useState(null);
   const [profile, setProfile] = React.useState("balanced");
   const [allowHyphenation, setAllowHyphenation] = React.useState(true);
   const [selectedId, setSelectedId] = React.useState(null);
+  const [textSource, setTextSource] = React.useState("textblock");
+  const [layerSource, setLayerSource] = React.useState({
+    text: "",
+    style: null,
+    loading: false,
+    error: "",
+  });
   const [mode, setMode] = React.useState("auto");
   const [manualStatus, setManualStatus] = React.useState("");
+  const sourceText = textSource === "layer" ? layerSource.text : line.text;
+  const sourceStyle = textSource === "layer" && layerSource.style ? layerSource.style : textBlockStyle;
+  const textStyle = sourceStyle.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {};
+  const styleObject = getStyleObject(textStyle);
   const [manualSettings, setManualSettings] = React.useState(() => {
     const width = 320;
     const height = 280;
@@ -80,8 +112,8 @@ const TextShapRModal = React.memo(function TextShapRModal() {
   });
 
   const variants = React.useMemo(
-    () => generateTextShapRVariants(line.text, { limit: 10, allowHyphenation, profile }),
-    [line.text, allowHyphenation, profile]
+    () => generateTextShapRVariants(sourceText, { limit: 10, allowHyphenation, profile }),
+    [sourceText, allowHyphenation, profile]
   );
 
   React.useEffect(() => {
@@ -97,23 +129,55 @@ const TextShapRModal = React.memo(function TextShapRModal() {
 
   const selectedVariant = variants.find((variant) => variant.id === selectedId) || variants[0] || null;
   const manualVariant = React.useMemo(
-    () => generateManualTextShapRVariant(line.text, manualSettings),
-    [line.text, manualSettings]
+    () => generateManualTextShapRVariant(sourceText, manualSettings),
+    [sourceText, manualSettings]
   );
 
   React.useEffect(() => {
     setManualSettings((current) => ({
       ...current,
-      lineCount: clamp(current.lineCount || estimateManualLineCount(line.text, current.width, current.height), 1, 8),
+      lineCount: clamp(current.lineCount || estimateManualLineCount(sourceText, current.width, current.height), 1, 8),
     }));
-  }, [line.text]);
+  }, [sourceText]);
+
+  const refreshLayerSource = React.useCallback(() => {
+    setLayerSource((current) => ({ ...current, loading: true, error: "" }));
+    getActiveTextLayerSource((source) => {
+      if (!source?.text) {
+        setLayerSource({
+          text: "",
+          style: null,
+          loading: false,
+          error: locale.textShapRLayerNoText || "Select a Photoshop text layer first.",
+        });
+        return;
+      }
+      setLayerSource({
+        text: source.text,
+        style: source.style,
+        loading: false,
+        error: "",
+      });
+      setManualSettings((current) => ({
+        ...current,
+        lineCount: estimateManualLineCount(source.text, current.width, current.height),
+      }));
+    });
+  }, []);
+
+  const setSourceMode = React.useCallback((source) => {
+    setTextSource(source);
+    if (source === "layer") {
+      refreshLayerSource();
+    }
+  }, [refreshLayerSource]);
 
   const applyVariant = React.useCallback(
     (variant, advance = false) => {
       if (!variant || applyingId) return;
       setSelectedId(variant.id);
       setApplyingId(variant.id);
-      const lineStyle = getScaledStyle(context.state.currentStyle, context.state.textScale);
+      const lineStyle = getScaledStyle(sourceStyle, context.state.textScale);
       setActiveLayerText(variant.text, lineStyle, context.state.direction, (ok) => {
         setApplyingId(null);
         if (!ok) return;
@@ -124,7 +188,7 @@ const TextShapRModal = React.memo(function TextShapRModal() {
         }
       });
     },
-    [applyingId, context]
+    [applyingId, context, sourceStyle]
   );
 
   const updateManualSetting = React.useCallback((field, value) => {
@@ -147,20 +211,26 @@ const TextShapRModal = React.memo(function TextShapRModal() {
         shapeProfile: selectionShape,
         width,
         height,
-        lineCount: estimateManualLineCount(line.text, width, height),
+        lineCount: estimateManualLineCount(sourceText, width, height),
       }));
       const statusKey = selectionShape.fallback ? "textShapRManualSelectionBoundsLoaded" : "textShapRManualSelectionLoaded";
       setManualStatus((locale[statusKey] || locale.textShapRManualSelectionLoaded || "Selection {width}x{height} loaded.")
         .replace("{width}", width)
         .replace("{height}", height));
     });
-  }, [line.text]);
+  }, [sourceText]);
 
   React.useEffect(() => {
     if (mode === "manual" && !manualStatus) {
       scanSelection();
     }
   }, [manualStatus, mode, scanSelection]);
+
+  const sourceStatus = textSource === "layer"
+    ? layerSource.loading
+      ? (locale.textShapRLayerLoading || "Reading selected layer...")
+      : layerSource.error || (layerSource.text ? (locale.textShapRLayerLoaded || "Selected layer loaded.") : "")
+    : "";
 
   React.useEffect(() => {
     const handleKeyDown = (event) => {
@@ -209,6 +279,36 @@ const TextShapRModal = React.memo(function TextShapRModal() {
         </button>
       </div>
       <div className="app-modal-body textshapr-modal-body">
+        <div className="textshapr-source-bar hostBrdBotContrast">
+          <div className="textshapr-source-tabs" role="tablist">
+            <button
+              type="button"
+              className={textSource === "textblock" ? "is-active" : ""}
+              onClick={() => setSourceMode("textblock")}
+            >
+              {locale.textShapRSourceTextBlock || "Block"}
+            </button>
+            <button
+              type="button"
+              className={textSource === "layer" ? "is-active" : ""}
+              onClick={() => setSourceMode("layer")}
+            >
+              {locale.textShapRSourceLayer || "Layer"}
+            </button>
+          </div>
+          {textSource === "layer" && (
+            <button
+              className="topcoat-icon-button"
+              type="button"
+              onClick={refreshLayerSource}
+              disabled={layerSource.loading}
+              title={locale.textShapRLayerRefresh || "Refresh selected layer"}
+            >
+              <FiRefreshCw size={13} />
+            </button>
+          )}
+          {sourceStatus && <div className="textshapr-source-status">{sourceStatus}</div>}
+        </div>
         {mode === "auto" ? (
           <React.Fragment>
             <div className="textshapr-controls hostBrdBotContrast">
