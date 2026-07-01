@@ -169,10 +169,11 @@
   caret-color: #000;
   border: none;
   resize: none;
+  min-height: 100%;
   width: 100%;
   z-index: 4;
   &.m-focused {
-    -webkit-text-fill-color: currentColor;
+    -webkit-text-fill-color: #000;
   }
 }
 .text-area-overlay {

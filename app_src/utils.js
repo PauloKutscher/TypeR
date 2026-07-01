@@ -949,8 +949,11 @@ const resizeTextArea = (defer = false) => {
   }
   const textArea = document.querySelector(".text-area");
   const textLines = document.querySelector(".text-lines");
+  const textBlock = document.querySelector(".text-block");
   if (textArea && textLines) {
-    textArea.style.height = textLines.offsetHeight + "px";
+    const lineHeight = textLines.offsetHeight || 0;
+    const blockHeight = textBlock ? textBlock.clientHeight : 0;
+    textArea.style.height = Math.max(lineHeight, blockHeight) + "px";
   }
 };
 
