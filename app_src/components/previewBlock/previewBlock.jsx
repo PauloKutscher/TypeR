@@ -5,10 +5,41 @@ import { FiArrowRightCircle, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown
 import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 
-import { locale, setActiveLayerText, getSelectionBoundsHash, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
+import { csInterface, locale, setActiveLayerText, getSelectionBoundsHash, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { buildStoredSelectionPayload, getScaledStyle } from "../../textLayerPayload";
 import { generateTextShapRVariants } from "../../textShapR";
+
+const normalizeLayerText = (text) => String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+
+const getLayerSourceKey = (source) => JSON.stringify({
+  text: source.text,
+  textStyleRange: source.style?.textProps?.layerText?.textStyleRange || null,
+  paragraphStyleRange: source.style?.textProps?.layerText?.paragraphStyleRange || null,
+  stroke: source.style?.stroke || null,
+});
+
+const getActiveTextLayerSource = (callback) => {
+  csInterface.evalScript("getActiveLayerText()", (result) => {
+    try {
+      const data = JSON.parse(result || "{}");
+      if (!data?.textProps?.layerText) {
+        callback(null);
+        return;
+      }
+      const source = {
+        text: normalizeLayerText(data.textProps.layerText.textKey),
+        style: {
+          textProps: data.textProps,
+          stroke: data.stroke || null,
+        },
+      };
+      callback({ ...source, key: getLayerSourceKey(source) });
+    } catch (error) {
+      callback(null);
+    }
+  });
+};
 
 const PreviewBlock = React.memo(function PreviewBlock() {
   const context = useContext();
@@ -16,10 +47,21 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const line = context.state.currentLine || { text: "" };
   const textStyle = style.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {};
   const styleObject = getStyleObject(textStyle);
+  const [inlineLayerSource, setInlineLayerSource] = React.useState({
+    text: "",
+    style: null,
+    key: "",
+    loading: false,
+    error: "",
+  });
+  const inlineSourceKey = React.useRef("");
+  const inlineSourcePending = React.useRef(false);
+  const inlineTextStyle = inlineLayerSource.style?.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {};
+  const inlineStyleObject = getStyleObject(inlineTextStyle);
   const markdownEnabled = context.state.interpretMarkdown !== false;
   const inlineTextShapRVariants = React.useMemo(
-    () => generateTextShapRVariants(line.text, { limit: 3, allowHyphenation: true, profile: "balanced" }),
-    [line.text]
+    () => generateTextShapRVariants(inlineLayerSource.text, { limit: 3, allowHyphenation: true, profile: "balanced" }),
+    [inlineLayerSource.text]
   );
   const [applyingTextShapRId, setApplyingTextShapRId] = React.useState(null);
   const renderMarkdownText = React.useCallback((text) => {
@@ -47,6 +89,48 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const [showClearAllTip, setShowClearAllTip] = React.useState(false);
   const clearAllTipTimeout = React.useRef(null);
   const [clearAllTipShown, setClearAllTipShown] = React.useState(false);
+
+  const refreshInlineLayerSource = React.useCallback(() => {
+    if (inlineSourcePending.current) return;
+    inlineSourcePending.current = true;
+    setInlineLayerSource((current) => (
+      current.text || current.error ? current : { ...current, loading: true }
+    ));
+    getActiveTextLayerSource((source) => {
+      inlineSourcePending.current = false;
+      if (!source?.text) {
+        inlineSourceKey.current = "";
+        setInlineLayerSource((current) => {
+          const error = locale.textShapRLayerNoText || "Select a Photoshop text layer first.";
+          if (!current.text && current.error === error && !current.loading) return current;
+          return { text: "", style: null, key: "", loading: false, error };
+        });
+        return;
+      }
+      if (source.key === inlineSourceKey.current) {
+        setInlineLayerSource((current) => (current.loading || current.error ? { ...current, loading: false, error: "" } : current));
+        return;
+      }
+      inlineSourceKey.current = source.key;
+      setInlineLayerSource({
+        text: source.text,
+        style: source.style,
+        key: source.key,
+        loading: false,
+        error: "",
+      });
+    });
+  }, []);
+
+  React.useEffect(() => {
+    if (!context.state.inlineTextShapR) return undefined;
+    refreshInlineLayerSource();
+    const interval = setInterval(refreshInlineLayerSource, 800);
+    return () => {
+      clearInterval(interval);
+      inlineSourcePending.current = false;
+    };
+  }, [context.state.inlineTextShapR, refreshInlineLayerSource]);
 
   const showShiftTip = React.useCallback(() => {
     setShiftSelectionWarning(true);
@@ -327,12 +411,12 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const applyTextShapRVariant = React.useCallback((variant, advance = false) => {
     if (!variant || applyingTextShapRId) return;
     setApplyingTextShapRId(variant.id);
-    const lineStyle = getScaledStyle(context.state.currentStyle, context.state.textScale);
+    const lineStyle = getScaledStyle(inlineLayerSource.style, context.state.textScale);
     setActiveLayerText(variant.text, lineStyle, context.state.direction, (ok) => {
       setApplyingTextShapRId(null);
       if (ok && advance) context.dispatch({ type: "nextLine", add: true });
     });
-  }, [applyingTextShapRId, context]);
+  }, [applyingTextShapRId, context, inlineLayerSource.style]);
 
   const handleIncrementChange = React.useCallback((e) => {
     context.dispatch({ type: "setTextSizeIncrement", increment: e.target.value });
@@ -423,7 +507,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                 <FiType size={13} />
                 <span>{locale.textShapRTitle || "TextShapR"}</span>
               </button>
-              <span>{locale.previewLine}: {line.index || "—"}</span>
+              <span>{inlineLayerSource.loading ? (locale.textShapRLayerLoading || "Reading selected layer...") : (locale.textShapRSourceLayer || "Layer")}</span>
             </div>
             <div className="preview-textshapr-list">
               {inlineTextShapRVariants.length ? inlineTextShapRVariants.map((variant, index) => (
@@ -435,8 +519,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                   title={locale.textShapRApply || "Apply this shape"}
                 >
                   <span className="preview-textshapr-rank">{index + 1}</span>
-                  <span className="preview-textshapr-text" style={styleObject}>
-                    <span style={{ fontFamily: styleObject.fontFamily || "Tahoma" }}>
+                  <span className="preview-textshapr-text" style={inlineStyleObject}>
+                    <span style={{ fontFamily: inlineStyleObject.fontFamily || "Tahoma" }}>
                       {variant.lines.map((variantLine, lineIndex) => (
                         <span key={`${variant.id}-${lineIndex}`} className="preview-textshapr-line">
                           {renderMarkdownText(variantLine)}
@@ -446,7 +530,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                   </span>
                 </button>
               )) : (
-                <div className="preview-textshapr-empty">{locale.textShapREmpty || "No text available for TextShapR."}</div>
+                <div className="preview-textshapr-empty">{inlineLayerSource.error || locale.textShapREmpty || "No text available for TextShapR."}</div>
               )}
             </div>
           </div>
