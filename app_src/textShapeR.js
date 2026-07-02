@@ -1,5 +1,5 @@
 const VOWELS = "aeiouyAEIOUY\u00e0\u00e2\u00e4\u00e9\u00e8\u00ea\u00eb\u00ee\u00ef\u00f4\u00f6\u00f9\u00fb\u00fc\u00c0\u00c2\u00c4\u00c9\u00c8\u00ca\u00cb\u00ce\u00cf\u00d4\u00d6\u00d9\u00db\u00dc";
-const MAX_VARIANTS = 10;
+const MAX_VARIANTS = 12;
 const MARKDOWN_TOKENS = ["***", "**", "__", "*", "_"];
 const LINE_END_PUNCTUATION = /[.,;:!?…]$/;
 const PROFILE_PRESETS = {
@@ -7,8 +7,8 @@ const PROFILE_PRESETS = {
     minLines: 2,
     maxLines: 6,
     lineTarget: 4,
-    curves: [0.45, 0.6, 0.75],
-    shifts: [0, -0.12, 0.12],
+    curves: [0.35, 0.45, 0.6, 0.75],
+    shifts: [0, -0.12, 0.12, -0.2, 0.2],
     biases: [-1, 0, 1],
     minWeight: 0.35,
     punctuationBreakBonus: 14,
@@ -22,8 +22,8 @@ const PROFILE_PRESETS = {
     minLines: 3,
     maxLines: 5,
     lineTarget: 4,
-    curves: [0.65, 0.8, 0.95],
-    shifts: [0, -0.08, 0.08],
+    curves: [0.55, 0.65, 0.8, 0.95],
+    shifts: [0, -0.08, 0.08, -0.16, 0.16],
     biases: [-1, 0, 1],
     minWeight: 0.3,
     punctuationBreakBonus: 14,
@@ -37,9 +37,9 @@ const PROFILE_PRESETS = {
     minLines: 4,
     maxLines: 7,
     lineTarget: 5,
-    curves: [0.3, 0.42, 0.55],
-    shifts: [0, -0.1, 0.1],
-    biases: [-1, 0],
+    curves: [0.24, 0.3, 0.42, 0.55],
+    shifts: [0, -0.1, 0.1, -0.18, 0.18],
+    biases: [-1, 0, 1],
     minWeight: 0.46,
     punctuationBreakBonus: 11,
     adjacentSlack: 0.26,
@@ -52,9 +52,9 @@ const PROFILE_PRESETS = {
     minLines: 2,
     maxLines: 4,
     lineTarget: 3,
-    curves: [0.22, 0.34, 0.46],
-    shifts: [0, -0.08, 0.08],
-    biases: [0, 1, 2],
+    curves: [0.18, 0.22, 0.34, 0.46],
+    shifts: [0, -0.08, 0.08, -0.16, 0.16],
+    biases: [-1, 0, 1, 2],
     minWeight: 0.58,
     punctuationBreakBonus: 11,
     adjacentSlack: 0.2,
@@ -552,8 +552,8 @@ const estimateManualLineCount = (text, width = 320, height = 280) => {
   return clamp(Math.round(Math.sqrt(wordCount * aspect * 1.35)), 2, maxLines);
 };
 
-const addCandidate = (resultMap, tokens, lineCount, curve, shift, bias, hyphenCount, profile, targetsOverride) => {
-  const lines = buildCandidate(tokens, lineCount, curve, shift, bias, profile.minWeight, targetsOverride);
+const addCandidate = (resultMap, tokens, lineCount, curve, shift, bias, hyphenCount, profile, targetsOverride, minWeightOverride) => {
+  const lines = buildCandidate(tokens, lineCount, curve, shift, bias, minWeightOverride == null ? profile.minWeight : minWeightOverride, targetsOverride);
   if (!lines) return;
   const text = serializeLines(lines);
   if (!text || resultMap.has(text)) return;
@@ -593,8 +593,24 @@ const generateTextShapeRVariants = (text, options = {}) => {
   const words = splitWordsPreservingMarkdown(normalized);
   const resultMap = new Map();
   const shapeRows = normalizeShapeRows(options.shapeProfile).filter((row) => row.width > 0);
+  const aspect = options.width > 0 && options.height > 0
+    ? clamp(options.height / options.width, 0.25, 3)
+    : null;
+  const isTallBubble = aspect != null && aspect >= 1.15;
+  const isWideBubble = aspect != null && aspect <= 0.85;
+  // Tall bubbles want narrower lines, wide ones can afford longer lines
+  const aspectStretch = aspect == null ? 1 : clamp(Math.sqrt(aspect), 0.7, 1.45);
   let scoringProfile = profile;
   let shapeTargetSettings = null;
+  if (aspect != null && shapeRows.length <= 1) {
+    // Aspect known but no usable outline: still lean the scoring toward it
+    scoringProfile = {
+      ...profile,
+      lineTarget: clamp(Math.round(profile.lineTarget * aspectStretch), 1, 8),
+      maxLineWidth: clamp((profile.maxLineWidth || 28) / aspectStretch, 12, 40),
+      lineTargetWeight: 12,
+    };
+  }
   if (shapeRows.length > 1) {
     // A live Photoshop selection outlines the bubble: bias the line count to
     // the bubble's aspect ratio and score candidates against its silhouette
@@ -603,7 +619,9 @@ const generateTextShapeRVariants = (text, options = {}) => {
       ...profile,
       shapeRows,
       lineTarget: clamp(estimatedLines, 1, Math.max(profile.maxLines, estimatedLines)),
-      lineTargetWeight: 24,
+      // Soft enough that shapes one line taller/shorter still reach the list
+      lineTargetWeight: 18,
+      maxLineWidth: clamp((profile.maxLineWidth || 28) / aspectStretch, 12, 40),
     };
     shapeTargetSettings = {
       shape: "selection",
@@ -613,12 +631,22 @@ const generateTextShapeRVariants = (text, options = {}) => {
     };
   }
   const baseMinLines = words.length <= 2 ? 1 : profile.minLines;
-  const minLines = Math.min(Math.max(1, baseMinLines), Math.max(1, words.length));
+  let minLines = Math.min(Math.max(1, baseMinLines), Math.max(1, words.length));
   const profileMaxLines = shapeRows.length > 1 ? Math.max(profile.maxLines, Math.min(8, scoringProfile.lineTarget + 1)) : profile.maxLines;
-  const maxLines = Math.min(options.maxLines || profileMaxLines, Math.max(1, words.length));
-  const curves = profile.curves;
-  const shifts = profile.shifts;
-  const biases = profile.biases;
+  let maxLines = Math.min(options.maxLines || profileMaxLines, Math.max(1, words.length));
+  // Stretch the explored line range toward the bubble ratio so a tall bubble
+  // also gets taller suggestions and a wide bubble also gets shorter ones
+  if (isTallBubble) {
+    maxLines = Math.min(Math.max(1, words.length), Math.min(8, maxLines + (aspect >= 1.6 ? 2 : 1)));
+  }
+  if (isWideBubble) {
+    minLines = Math.max(1, minLines - 1);
+  }
+  // Always generate with the requested profile; when the bubble ratio leans
+  // tall or wide, also generate with that preset's params for extra variety
+  const generationParams = [profile];
+  if (isTallBubble && profile !== PROFILE_PRESETS.tall) generationParams.push(PROFILE_PRESETS.tall);
+  if (isWideBubble && profile !== PROFILE_PRESETS.wide) generationParams.push(PROFILE_PRESETS.wide);
   const baseTokens = makeBaseTokens(words);
 
   const addShapeCandidates = (tokens, lineCount, hyphenCount) => {
@@ -631,9 +659,11 @@ const generateTextShapeRVariants = (text, options = {}) => {
   };
 
   for (let lineCount = minLines; lineCount <= maxLines; lineCount++) {
-    curves.forEach((curve) => {
-      shifts.forEach((shift) => {
-        biases.forEach((bias) => addCandidate(resultMap, baseTokens, lineCount, curve, shift, bias, 0, scoringProfile));
+    generationParams.forEach((params) => {
+      params.curves.forEach((curve) => {
+        params.shifts.forEach((shift) => {
+          params.biases.forEach((bias) => addCandidate(resultMap, baseTokens, lineCount, curve, shift, bias, 0, scoringProfile, null, params.minWeight));
+        });
       });
     });
     addShapeCandidates(baseTokens, lineCount, 0);
@@ -641,19 +671,44 @@ const generateTextShapeRVariants = (text, options = {}) => {
 
   if (options.allowHyphenation !== false) {
     generateHyphenTokenSets(words).forEach((tokens) => {
-      const hyphenMaxLines = Math.min(options.maxLines || profileMaxLines, Math.max(1, tokens.length));
+      const hyphenMaxLines = Math.min(options.maxLines || maxLines, Math.max(1, tokens.length));
       for (let lineCount = Math.max(2, minLines); lineCount <= hyphenMaxLines; lineCount++) {
-        curves.forEach((curve) => {
-          shifts.forEach((shift) => addCandidate(resultMap, tokens, lineCount, curve, shift, 0, 1, scoringProfile));
+        generationParams.forEach((params) => {
+          params.curves.forEach((curve) => {
+            params.shifts.forEach((shift) => addCandidate(resultMap, tokens, lineCount, curve, shift, 0, 1, scoringProfile, null, params.minWeight));
+          });
         });
         addShapeCandidates(tokens, lineCount, 1);
       }
     });
   }
 
-  return Array.from(resultMap.values())
+  const limit = options.limit || MAX_VARIANTS;
+  const sorted = Array.from(resultMap.values())
+    .sort((a, b) => a.score - b.score || a.text.localeCompare(b.text));
+
+  // Guarantee line-count diversity: the best candidate of each line count is
+  // kept first so taller and shorter alternatives always reach the list,
+  // then the remaining slots are filled by raw score
+  const picked = [];
+  const pickedTexts = new Set();
+  const seenLineCounts = new Set();
+  sorted.forEach((variant) => {
+    if (picked.length >= limit) return;
+    const count = variant.lines.length;
+    if (seenLineCounts.has(count)) return;
+    seenLineCounts.add(count);
+    picked.push(variant);
+    pickedTexts.add(variant.text);
+  });
+  sorted.forEach((variant) => {
+    if (picked.length >= limit || pickedTexts.has(variant.text)) return;
+    picked.push(variant);
+    pickedTexts.add(variant.text);
+  });
+
+  return picked
     .sort((a, b) => a.score - b.score || a.text.localeCompare(b.text))
-    .slice(0, options.limit || MAX_VARIANTS)
     .map((variant, index) => ({ ...variant, id: `shape-${index + 1}` }));
 };
 

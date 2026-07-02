@@ -122,7 +122,7 @@ const TextShapeRModal = React.memo(function TextShapeRModal() {
 
   const variants = React.useMemo(
     () => generateTextShapeRVariants(sourceText, {
-      limit: 10,
+      limit: 12,
       allowHyphenation,
       profile,
       shapeProfile: autoShape,

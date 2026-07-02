@@ -74,7 +74,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const markdownEnabled = context.state.interpretMarkdown !== false;
   const inlineTextShapeRVariants = React.useMemo(
     () => generateTextShapeRVariants(inlineLayerSource.text, {
-      limit: 10,
+      limit: 12,
       allowHyphenation: true,
       profile: "balanced",
       shapeProfile: inlineSelectionShape?.profile || null,
