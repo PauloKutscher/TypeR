@@ -27,11 +27,12 @@ const buildStoredSelectionPayload = ({
   let nextFallbackIndex = currentLineIndex;
 
   const resolveStyleForLine = (targetLine, selection) => {
-    if (targetLine?.style) return targetLine.style;
     if (selection?.styleId) {
       const storedStyle = styles.find((style) => style.id === selection.styleId);
       if (storedStyle) return storedStyle;
     }
+    if (targetLine?.usedStyle) return targetLine.usedStyle;
+    if (targetLine?.style) return targetLine.style;
     return currentStyle;
   };
 

@@ -102,6 +102,16 @@ assert.strictEqual(payload.styles[2].id, "current");
 assert.strictEqual(payload.styles[0].textProps.layerText.textStyleRange[0].textStyle.size, 36);
 assert.strictEqual(storedStyle.textProps.layerText.textStyleRange[0].textStyle.size, 16);
 
+const manualStyle = makeStyle("manual", 14, 18);
+const prefixedStyle = makeStyle("prefixed", 22, 26);
+const manualPayload = buildStoredSelectionPayload({
+  storedSelections: [{ lineIndex: 0, styleId: "manual" }],
+  lines: [{ text: "prefixed line", ignore: false, style: prefixedStyle }],
+  styles: [manualStyle],
+  currentStyle,
+});
+assert.strictEqual(manualPayload.styles[0].id, "manual");
+
 const sparsePayload = buildStoredSelectionPayload({
   storedSelections: [
     { lineIndex: 0 },

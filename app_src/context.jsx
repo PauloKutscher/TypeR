@@ -14,6 +14,7 @@ const storeFields = [
   "textSizeIncrement",
   "currentLineIndex",
   "currentStyleId",
+  "usedLineStyles",
   "pastePointText",
   "ignoreLinePrefixes",
   "ignoreTags",
@@ -44,7 +45,7 @@ const storeFields = [
 ];
 
 // Fields that belong to each tab (text script + PSD sync)
-const tabFields = ["text", "images", "currentLineIndex", "lastOpenedImagePath"];
+const tabFields = ["text", "images", "currentLineIndex", "lastOpenedImagePath", "usedLineStyles"];
 
 const createTab = (name, data = {}) => ({
   id: Math.random().toString(36).substr(2, 8),
@@ -53,6 +54,7 @@ const createTab = (name, data = {}) => ({
   images: data.images || [],
   currentLineIndex: data.currentLineIndex || 0,
   lastOpenedImagePath: data.lastOpenedImagePath || null,
+  usedLineStyles: data.usedLineStyles || {},
 });
 
 const loadTabIntoState = (state, tab) => {
@@ -61,6 +63,7 @@ const loadTabIntoState = (state, tab) => {
   state.images = tab.images || [];
   state.currentLineIndex = tab.currentLineIndex || 0;
   state.lastOpenedImagePath = tab.lastOpenedImagePath || null;
+  state.usedLineStyles = tab.usedLineStyles || {};
   // Stored selections are bound to the previously opened PSD
   state.storedSelections = [];
 };
@@ -160,6 +163,7 @@ const initialState = {
   currentLineIndex: 0,
   currentStyle: null,
   currentStyleId: null,
+  usedLineStyles: {},
   pastePointText: false,
   ignoreLinePrefixes: ["##"],
   ignoreTags: [],
@@ -292,7 +296,20 @@ const reducer = (state, action) => {
     }
 
     case "nextLine": {
-      if (!state.text || (action.add && newState.currentLine.last)) break;
+      if (!state.text) break;
+      if (action.add && typeof state.currentLineIndex === "number" && state.currentStyleId) {
+        const currentLine = state.lines[state.currentLineIndex];
+        if (currentLine && !currentLine.ignore) {
+          newState.usedLineStyles = {
+            ...(state.usedLineStyles || {}),
+            [state.currentLineIndex]: {
+              rawText: currentLine.rawText,
+              styleId: state.currentStyleId,
+            },
+          };
+        }
+      }
+      if (action.add && newState.currentLine.last) break;
       let newIndex = state.currentLineIndex;
       for (let i = newIndex + 1; i < state.lines.length; i++) {
         if (!state.lines[i].ignore) {
@@ -754,6 +771,16 @@ const reducer = (state, action) => {
         };
         if (typeof action.lineIndex === "number") {
           selectionWithStyle.lineIndex = action.lineIndex;
+          const line = state.lines[action.lineIndex];
+          if (line && !line.ignore && state.currentStyleId) {
+            newState.usedLineStyles = {
+              ...(newState.usedLineStyles || state.usedLineStyles || {}),
+              [action.lineIndex]: {
+                rawText: line.rawText,
+                styleId: state.currentStyleId,
+              },
+            };
+          }
         }
         newState.storedSelections = [...state.storedSelections, selectionWithStyle];
       }
@@ -837,12 +864,13 @@ const reducer = (state, action) => {
   const imagesChanged = newState.images !== state.images;
   const lineIndexChanged = newState.currentLineIndex !== state.currentLineIndex;
   const styleIdChanged = newState.currentStyleId !== state.currentStyleId;
+  const usedLineStylesChanged = newState.usedLineStyles !== state.usedLineStyles;
   const resetLineCounterOnPageChanged = newState.resetLineCounterOnPage !== state.resetLineCounterOnPage;
 
   const needsStyleProcessing = !state.initiated || stylesChanged || foldersChanged;
   const needsLineProcessing = needsStyleProcessing || textChanged ||
     ignoreLinePrefixesChanged || ignoreTagsChanged || currentFolderTagPriorityChanged ||
-    imagesChanged || styleIdChanged || resetLineCounterOnPageChanged;
+    imagesChanged || styleIdChanged || usedLineStylesChanged || resetLineCounterOnPageChanged;
 
   // Phase 1: Style/folder validation and sorting (only when styles or folders changed)
   if (needsStyleProcessing) {
@@ -939,6 +967,12 @@ const reducer = (state, action) => {
     const rawLines = newState.text ? newState.text.split("\n") : [];
     let lastTextLine = null;
     let previousStyle = null;
+    const usedLineStyles = newState.usedLineStyles || {};
+    const getUsedStyle = (rawIndex, rawText) => {
+      const usedLineStyle = usedLineStyles[rawIndex];
+      if (!usedLineStyle || usedLineStyle.rawText !== rawText) return null;
+      return newState.styles.find((style) => style.id === usedLineStyle.styleId) || null;
+    };
     const nextLines = rawLines.map((rawText, rawIndex) => {
       const ignorePrefix = newState.ignoreLinePrefixes.find((pr) => rawText.startsWith(pr)) || "";
       const hasStylePrefix = (
@@ -958,6 +992,7 @@ const reducer = (state, action) => {
         stylePrefix = hasStylePrefix.prefix;
         style = hasStylePrefix.style;
       }
+      const usedStyle = getUsedStyle(rawIndex, rawText);
 
       let text = rawText.replace(ignorePrefix, "").replace(stylePrefix, "");
       if (ignoreTagsRegex) {
@@ -976,10 +1011,10 @@ const reducer = (state, action) => {
       });
       linesCounter = lineNumberState.linesCounter;
       const index = lineNumberState.index;
-      const line = { rawText, rawIndex, ignorePrefix, stylePrefix, style, ignore, index, text };
+      const line = { rawText, rawIndex, ignorePrefix, stylePrefix, style, usedStyle, ignore, index, text };
       if (!line.ignore) lastTextLine = line;
-      if (!line.ignore && line.style) {
-        previousStyle = line.style;
+      if (!line.ignore && (line.usedStyle || line.style)) {
+        previousStyle = line.usedStyle || line.style;
       }
       return line;
     });
@@ -996,6 +1031,7 @@ const reducer = (state, action) => {
         prev.ignorePrefix === line.ignorePrefix &&
         prev.stylePrefix === line.stylePrefix &&
         prev.style === line.style &&
+        prev.usedStyle === line.usedStyle &&
         prev.ignore === line.ignore &&
         prev.index === line.index &&
         prev.text === line.text &&
@@ -1023,8 +1059,8 @@ const reducer = (state, action) => {
       newState.currentLineIndex = newIndex;
     }
     if (thenSelectStyle) {
-      if (newState.currentLine?.style) {
-        newState.currentStyleId = newState.currentLine.style.id;
+      if (newState.currentLine?.usedStyle || newState.currentLine?.style) {
+        newState.currentStyleId = (newState.currentLine.usedStyle || newState.currentLine.style).id;
       } else if (newState.defaultStyleId) {
         newState.currentStyleId = newState.defaultStyleId;
       }
@@ -1102,7 +1138,7 @@ const reducer = (state, action) => {
       if (
         newState[field] !== state[field] &&
         (field === "text" || field === "currentLineIndex" || field === "currentStyleId" || field === "textScale" ||
-          field === "styles" || field === "storedSelections" || field === "tabs")
+          field === "styles" || field === "usedLineStyles" || field === "storedSelections" || field === "tabs")
       ) {
         shouldDebounceStorage = true;
       }
