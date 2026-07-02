@@ -779,16 +779,49 @@ function _createAndSetLayerText(data, width, height) {
       },
     },
   ];
-  jamEngine.jsonPlay("make", {
-    target: ["<reference>", [["textLayer", ["<class>", null]]]],
-    using: jamText.toLayerTextObject(style.textProps),
-  });
+  // Bake the direction into the make call: the legacy post-make
+  // _applyTextDirection pass costs a full extra layer-text read plus a
+  // second complete relayout
+  var directionBaked = false;
+  if (data.direction && style.textProps.layerText.paragraphStyleRange) {
+    var psDirection = data.direction === "rtl" ? "dirRightToLeft" : "dirLeftToRight";
+    var paragraphRanges = style.textProps.layerText.paragraphStyleRange;
+    for (var p = 0; p < paragraphRanges.length; p++) {
+      var paragraphRange = paragraphRanges[p] || {};
+      var bakedStyle = paragraphRange.paragraphStyle || {};
+      bakedStyle.directionType = psDirection;
+      bakedStyle.textComposerEngine = "textOptycaComposer";
+      paragraphRange.paragraphStyle = bakedStyle;
+      paragraphRanges[p] = paragraphRange;
+    }
+    directionBaked = true;
+  }
+  try {
+    jamEngine.jsonPlay("make", {
+      target: ["<reference>", [["textLayer", ["<class>", null]]]],
+      using: jamText.toLayerTextObject(style.textProps),
+    });
+  } catch (makeError) {
+    if (!directionBaked) throw makeError;
+    // Some Photoshop versions reject directionType/textComposerEngine in a
+    // make: strip them, retry, then use the legacy post-make pass
+    for (var q = 0; q < style.textProps.layerText.paragraphStyleRange.length; q++) {
+      var retryStyle = style.textProps.layerText.paragraphStyleRange[q].paragraphStyle || {};
+      delete retryStyle.directionType;
+      delete retryStyle.textComposerEngine;
+    }
+    jamEngine.jsonPlay("make", {
+      target: ["<reference>", [["textLayer", ["<class>", null]]]],
+      using: jamText.toLayerTextObject(style.textProps),
+    });
+    directionBaked = false;
+  }
   _applyMiddleEast(style.textProps.layerText.textStyleRange[0].textStyle);
   if (style.stroke) {
     _setLayerStroke(style.stroke);
   }
-  // Apply text direction if specified
-  if (data.direction) {
+  // Apply text direction if it could not be baked into the make call
+  if (data.direction && !directionBaked) {
     _applyTextDirection(data.direction, data.text.length);
   }
 }
@@ -996,10 +1029,57 @@ function _setActiveLayerText() {
       newTextParams.layerText.textShape = [retainedShape];
     }
     newTextParams.typeUnit = oldTextParams.typeUnit;
-    jamText.setLayerText(newTextParams);
+
     var userDirection = payload.direction;
     if (userDirection === "") userDirection = null;
-    _applyTextDirection(userDirection, targetTextLength);
+    // Bake the direction into the ranges of the main set call: the legacy
+    // post-set _applyTextDirection pass costs a full extra layer-text read
+    // plus a second complete relayout on every apply
+    var directionBaked = false;
+    if (userDirection && newTextParams.layerText.paragraphStyleRange) {
+      var psDirection = userDirection === "rtl" ? "dirRightToLeft" : "dirLeftToRight";
+      var paragraphRanges = newTextParams.layerText.paragraphStyleRange;
+      for (var p = 0; p < paragraphRanges.length; p++) {
+        var paragraphRange = paragraphRanges[p] || {};
+        var bakedStyle = paragraphRange.paragraphStyle || {};
+        bakedStyle.directionType = psDirection;
+        bakedStyle.textComposerEngine = "textOptycaComposer";
+        paragraphRange.paragraphStyle = bakedStyle;
+        paragraphRanges[p] = paragraphRange;
+      }
+      directionBaked = true;
+    }
+
+    // Non-point layers are measured in an oversized box right after the text
+    // lands; putting that box in the same set call skips one relayout with
+    // the stale retained bounds in between
+    var boxShapeRef = newTextParams.layerText.textShape && newTextParams.layerText.textShape[0];
+    var measureBoxBounds = null;
+    if (!isPoint && boxShapeRef && boxShapeRef.bounds) {
+      measureBoxBounds = {
+        top: boxShapeRef.bounds.top || 0,
+        left: boxShapeRef.bounds.left || 0,
+        right: boxShapeRef.bounds.right,
+        bottom: boxShapeRef.bounds.bottom,
+      };
+      boxShapeRef.bounds.right = measureBoxBounds.left + 30000;
+      boxShapeRef.bounds.bottom = measureBoxBounds.top + 30000;
+    }
+
+    try {
+      jamText.setLayerText(newTextParams);
+    } catch (setError) {
+      if (!directionBaked) throw setError;
+      // Some Photoshop versions reject directionType/textComposerEngine in a
+      // plain set: strip them, retry, then use the legacy post-set pass
+      for (var q = 0; q < newTextParams.layerText.paragraphStyleRange.length; q++) {
+        var retryStyle = newTextParams.layerText.paragraphStyleRange[q].paragraphStyle || {};
+        delete retryStyle.directionType;
+        delete retryStyle.textComposerEngine;
+      }
+      jamText.setLayerText(newTextParams);
+      _applyTextDirection(userDirection, targetTextLength);
+    }
     _applyMiddleEast(newTextParams.layerText.textStyleRange[0].textStyle);
     if (dataStyle && dataStyle.stroke) {
       _setLayerStroke(dataStyle.stroke);
@@ -1016,28 +1096,17 @@ function _setActiveLayerText() {
       }
       var boxShape = newTextParams.layerText.textShape && newTextParams.layerText.textShape[0];
       var boxFitted = false;
-      if (boxShape && boxShape.bounds) {
+      if (boxShape && boxShape.bounds && measureBoxBounds) {
         // The retained box can be narrower than the new longest line, which
         // makes Photoshop soft-wrap it and break the intended line shape.
-        // Measure the real text extent inside an oversized box, then shrink
-        // the box tightly around the text.
-        var boxTop = boxShape.bounds.top || 0;
-        var boxLeft = boxShape.bounds.left || 0;
+        // The layer already sits in the oversized measuring box from the main
+        // set call: read the real text extent and shrink the box around it.
         try {
-          jamText.setLayerText({
-            layerText: {
-              textShape: [{
-                textType: "box",
-                orientation: "horizontal",
-                bounds: { top: boxTop, left: boxLeft, right: boxLeft + 30000, bottom: boxTop + 30000 },
-              }],
-            },
-          });
           var textExtent = _getCurrentTextLayerBounds();
           if (textExtent.width > 0 && textExtent.height > 0) {
             var widthPadding = Math.max(2, textSize * 0.4);
-            boxShape.bounds.right = boxLeft + _convertPixelToPointExact(textExtent.width) + widthPadding;
-            boxShape.bounds.bottom = boxTop + _convertPixelToPointExact(textExtent.height) + textSize + 2;
+            boxShape.bounds.right = measureBoxBounds.left + _convertPixelToPointExact(textExtent.width) + widthPadding;
+            boxShape.bounds.bottom = measureBoxBounds.top + _convertPixelToPointExact(textExtent.height) + textSize + 2;
             jamText.setLayerText({ layerText: { textShape: [boxShape] } });
             boxFitted = true;
           }
@@ -1045,6 +1114,10 @@ function _setActiveLayerText() {
       }
       if (!boxFitted && boxShape) {
         // Fallback: restore the retained box and only grow its height
+        if (measureBoxBounds) {
+          boxShape.bounds.right = measureBoxBounds.right;
+          boxShape.bounds.bottom = measureBoxBounds.bottom;
+        }
         jamText.setLayerText({ layerText: { textShape: newTextParams.layerText.textShape } });
         var fallbackBounds = _getCurrentTextLayerBounds();
         boxShape.bounds.bottom = _convertPixelToPoint(fallbackBounds.height + textSize + 2);
@@ -1055,7 +1128,7 @@ function _setActiveLayerText() {
     if (!oldBounds.bottom) oldBounds = newBounds;
     var offsetX = oldBounds.xMid - newBounds.xMid;
     var offsetY = oldBounds.yMid - newBounds.yMid;
-    _moveLayer(offsetX, offsetY);
+    if (offsetX || offsetY) _moveLayer(offsetX, offsetY);
   });
 
   state.result = "";

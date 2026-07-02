@@ -90,6 +90,17 @@ const hasAbruptJump = (variant) => {
 assert.ok(!/^CLYDE,\nJE PEUX UTILISER/.test(clyde[0].text));
 assert.ok(clyde.slice(0, 5).every((variant) => variant.lines.length <= 2 || !hasAbruptJump(variant)));
 
+// French spacing before "!" / "?" must never allow punctuation to start a
+// line or an opening quote to end one
+const frenchPunctuation = generateTextShapeRVariants("salut ! comment ça va aujourd'hui mes amis ?", { limit: 12 });
+assert.ok(frenchPunctuation.length > 0);
+frenchPunctuation.forEach((variant) => {
+  variant.lines.forEach((line) => {
+    assert.ok(!/^[!?;:.,…»›)\]}]/.test(line.trim()), `line starts with punctuation: "${line}" in\n${variant.text}`);
+    assert.ok(!/[«‹¿¡(\[{]$/.test(line.trim()), `line ends with opening punctuation: "${line}" in\n${variant.text}`);
+  });
+});
+
 const frenchHyphenation = generateTextShapeRVariants("utiliser", { limit: 10 });
 assert.ok(frenchHyphenation.some((variant) => /uti-\nliser/i.test(variant.text)));
 assert.ok(frenchHyphenation.every((variant) => !/util-\niser/i.test(variant.text)));

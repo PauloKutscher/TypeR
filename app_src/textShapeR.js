@@ -195,10 +195,37 @@ const getSyllableSplitPenalty = (body, index) => {
   return 10;
 };
 
+// Tokens made purely of closing punctuation (French "salut !" splits into
+// two words) must never start a line: glue them to the previous word.
+// Opening punctuation ("«", "¿") must never end a line: glue to the next.
+const CLOSING_PUNCTUATION_ONLY = /^[!?;:.,…»›)\]}]+$/;
+const OPENING_PUNCTUATION_ONLY = /^[«‹¿¡(\[{]+$/;
+
+const mergePunctuationWords = (words) => {
+  const closed = [];
+  words.forEach((word) => {
+    if (closed.length && CLOSING_PUNCTUATION_ONLY.test(stripMarkdownForMeasure(word))) {
+      closed[closed.length - 1] += ` ${word}`;
+      return;
+    }
+    closed.push(word);
+  });
+  const merged = [];
+  for (let index = 0; index < closed.length; index++) {
+    let word = closed[index];
+    while (index + 1 < closed.length && OPENING_PUNCTUATION_ONLY.test(stripMarkdownForMeasure(word))) {
+      index++;
+      word += ` ${closed[index]}`;
+    }
+    merged.push(word);
+  }
+  return merged;
+};
+
 const getHyphenSplits = (word) => {
   const { body, punctuation } = splitTrailingPunctuation(word);
   if (!body || body.length < 8) return [];
-  if (hasMarkdownSyntax(body) || /[-'’]/.test(body)) return [];
+  if (hasMarkdownSyntax(body) || /[-'’\s]/.test(body)) return [];
 
   const positions = [];
   for (let index = 3; index <= body.length - 3; index++) {
@@ -566,7 +593,7 @@ const splitTokensForManualTargets = (tokens, targets, settings) => {
 const estimateManualLineCount = (text, width = 320, height = 280) => {
   const normalized = normalizeText(text);
   if (!normalized) return 1;
-  const wordCount = splitWordsPreservingMarkdown(normalized).length;
+  const wordCount = mergePunctuationWords(splitWordsPreservingMarkdown(normalized)).length;
   if (wordCount <= 2) return 1;
   const aspect = clamp((height || 1) / Math.max(1, width || 1), 0.35, 2.4);
   const maxLines = Math.min(8, Math.max(1, wordCount));
@@ -611,7 +638,7 @@ const generateTextShapeRVariants = (text, options = {}) => {
   if (!normalized) return [];
 
   const profile = PROFILE_PRESETS[options.profile] || PROFILE_PRESETS.balanced;
-  const words = splitWordsPreservingMarkdown(normalized);
+  const words = mergePunctuationWords(splitWordsPreservingMarkdown(normalized));
   const resultMap = new Map();
   const shapeRows = normalizeShapeRows(options.shapeProfile).filter((row) => row.width > 0);
   const aspect = options.width > 0 && options.height > 0
@@ -739,7 +766,7 @@ const generateTextShapeRVariants = (text, options = {}) => {
 const generateManualTextShapeRVariant = (text, options = {}) => {
   const normalized = normalizeText(text);
   if (!normalized) return null;
-  const words = splitWordsPreservingMarkdown(normalized);
+  const words = mergePunctuationWords(splitWordsPreservingMarkdown(normalized));
   if (!words.length) return null;
   const tokens = makeBaseTokens(words);
   const maxLines = Math.min(options.maxLines || 8, tokens.length);

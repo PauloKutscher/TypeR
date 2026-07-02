@@ -6,7 +6,7 @@ import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
 
-import { csInterface, locale, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
+import { csInterface, locale, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { buildStoredSelectionPayload, getScaledStyle } from "../../textLayerPayload";
 import { generateTextShapeRVariants } from "../../textShapeR";
@@ -65,6 +65,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const inlineLastRefreshAt = React.useRef(0);
   const inlineShapePending = React.useRef(false);
   const inlineShapeKey = React.useRef("");
+  const inlineShapeSettle = React.useRef({ hash: "", timer: null });
   const [inlineSelectionShape, setInlineSelectionShape] = React.useState(null);
   const batchOrderRef = React.useRef([]);
   const batchPending = React.useRef(false);
@@ -159,6 +160,14 @@ const PreviewBlock = React.memo(function PreviewBlock() {
 
   const bubbleAware = context.state.textShapeRBubbleAware === true;
 
+  const clearInlineShapeSettle = React.useCallback(() => {
+    if (inlineShapeSettle.current.timer) {
+      clearTimeout(inlineShapeSettle.current.timer);
+      inlineShapeSettle.current.timer = null;
+    }
+    inlineShapeSettle.current.hash = "";
+  }, []);
+
   const refreshInlineSelectionShape = React.useCallback((force = false) => {
     if (inlineShapePending.current) return;
     if (force) inlineShapeKey.current = "";
@@ -171,7 +180,21 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           inlineShapePending.current = false;
           return;
         }
-        // The outline sampling is expensive, only run it when bounds changed
+        // The outline sampling runs 21 selection ops on Photoshop's main
+        // thread: firing it on every bounds change would freeze the canvas
+        // mid-drag. Wait until two consecutive reads agree (the user let go
+        // of the mouse) before paying for it.
+        if (!force && boundsHash !== inlineShapeSettle.current.hash) {
+          inlineShapeSettle.current.hash = boundsHash;
+          if (inlineShapeSettle.current.timer) clearTimeout(inlineShapeSettle.current.timer);
+          inlineShapeSettle.current.timer = setTimeout(() => {
+            inlineShapeSettle.current.timer = null;
+            refreshInlineSelectionShape();
+          }, 350);
+          inlineShapePending.current = false;
+          return;
+        }
+        clearInlineShapeSettle();
         csInterface.evalScript(`getCurrentSelectionShape(${JSON.stringify({ samples: 21 })})`, (result) => {
           inlineShapePending.current = false;
           try {
@@ -188,6 +211,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         });
         return;
       }
+
+      // No manual selection anymore: forget any pending settle re-check
+      clearInlineShapeSettle();
 
       // While several layers are selected (batch being lined up) the wand
       // would fire on an ambiguous target and churn the document: hold off
@@ -228,7 +254,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         } catch (error) {}
       });
     });
-  }, [bubbleAware]);
+  }, [bubbleAware, clearInlineShapeSettle]);
 
   // Batch mode: the user multi-selects text layers, then chains shapes one
   // layer at a time. Photoshop only reports stacking order, so the click
@@ -315,10 +341,12 @@ const PreviewBlock = React.memo(function PreviewBlock() {
 
     // Primary signal: Photoshop notifies the panel when a layer is selected
     // or edited. Debounced because 'setd' events arrive in bursts.
-    const unsubscribePhotoshopEvents = addPhotoshopEventListener(() => {
-      // The batch diff runs on every event, undebounced: collapsing quick
-      // successive layer clicks would lose the order the user picked them in
-      refreshBatchSelection();
+    const unsubscribePhotoshopEvents = addPhotoshopEventListener((event) => {
+      // The batch diff runs on every layer-select event, undebounced:
+      // collapsing quick successive layer clicks would lose the order the
+      // user picked them in. 'setd' bursts (selection drags, text edits)
+      // never change which layers are targeted, so skip the diff for them.
+      if (isPhotoshopSelectEvent(event)) refreshBatchSelection();
       if (inlineEventDebounce.current) clearTimeout(inlineEventDebounce.current);
       inlineEventDebounce.current = setTimeout(() => {
         inlineEventDebounce.current = null;
@@ -360,10 +388,11 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         clearTimeout(inlineEventDebounce.current);
         inlineEventDebounce.current = null;
       }
+      clearInlineShapeSettle();
       inlineSourcePending.current = false;
       inlineShapePending.current = false;
     };
-  }, [context.state.inlineTextShapeR, refreshInlineLayerSource, refreshInlineSelectionShape, refreshBatchSelection]);
+  }, [context.state.inlineTextShapeR, refreshInlineLayerSource, refreshInlineSelectionShape, refreshBatchSelection, clearInlineShapeSettle]);
 
   React.useEffect(() => {
     setInlineVariantPage(0);

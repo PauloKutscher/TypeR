@@ -887,6 +887,16 @@ const addPhotoshopEventListener = (callback) => {
 
 const hasReceivedPhotoshopEvents = () => photoshopEventsReceived;
 
+// True when the CEP event payload is a layer-select ('slct') notification.
+// Selection marquee edits only fire 'setd', so callers can skip work that is
+// exclusively about which layers are targeted. Defaults to true when the
+// payload is missing or unreadable so no layer click is ever dropped.
+const isPhotoshopSelectEvent = (event) => {
+  const data = event && event.data;
+  if (typeof data !== "string" || !data) return true;
+  return data.indexOf(String(PS_EVENT_SELECT)) !== -1;
+};
+
 const getSelectionBoundsHash = (selection) => {
   if (!selection) return null;
   return `${selection.xMid}_${selection.yMid}_${selection.width}_${selection.height}`;
@@ -1140,4 +1150,4 @@ const openFile = (path, autoClose = false) => {
   );
 };
 
-export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, getActiveLayerText, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
+export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, getActiveLayerText, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
