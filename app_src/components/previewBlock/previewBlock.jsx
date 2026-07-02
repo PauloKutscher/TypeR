@@ -6,7 +6,7 @@ import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
 
-import { csInterface, locale, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
+import { csInterface, locale, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { buildStoredSelectionPayload, getScaledStyle } from "../../textLayerPayload";
 import { generateTextShapRVariants } from "../../textShapR";
@@ -246,7 +246,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     // Fallback polling for hosts where the event bridge stays silent; slows
     // down to a keep-alive once real Photoshop events are flowing.
     const pollTimer = setInterval(() => {
-      if (document.hidden) return;
+      // Never queue refresh work behind a running paste/align action
+      if (document.hidden || isHostActionPending()) return;
       const idleDelay = hasReceivedPhotoshopEvents() ? 6000 : 1200;
       if (Date.now() - inlineLastRefreshAt.current >= idleDelay) {
         refreshInlineLayerSource();
@@ -359,7 +360,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   };
 
   const checkForSelectionChange = React.useCallback(() => {
-    if (!context.state.multiBubbleMode || context.state.modalType || selectionCheckPending.current) return;
+    if (!context.state.multiBubbleMode || context.state.modalType || selectionCheckPending.current || isHostActionPending()) return;
     selectionCheckPending.current = true;
 
     getSelectionChanged((selection) => {

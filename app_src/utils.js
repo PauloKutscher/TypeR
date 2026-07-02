@@ -90,6 +90,38 @@ const getOSType = () => {
 
 const getExtendScriptString = (value) => JSON.stringify(String(value || ""));
 
+// evalScript can return non-JSON strings like "EvalScript error." — a bare
+// JSON.parse throw would skip the callback and leave pending flags stuck
+const safeJsonParse = (raw, fallback = {}) => {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) || fallback;
+  } catch (e) {
+    return fallback;
+  }
+};
+
+// Tracks in-flight Photoshop actions so low-priority polling (hotkeys, inline
+// TextShapR) can back off instead of contending in the ExtendScript queue
+let hostActionsPending = 0;
+const isHostActionPending = () => hostActionsPending > 0;
+const trackHostAction = (callback) => {
+  hostActionsPending++;
+  let settled = false;
+  const release = () => {
+    if (settled) return false;
+    settled = true;
+    hostActionsPending--;
+    return true;
+  };
+  // Safety net: never let a lost CEP callback disable polling forever
+  const failsafe = setTimeout(release, 15000);
+  return (...args) => {
+    if (release()) clearTimeout(failsafe);
+    return callback(...args);
+  };
+};
+
 const downloadAndInstallUpdate = async (downloadUrl, onProgress, onComplete, onError) => {
   try {
     const osType = getOSType();
@@ -533,7 +565,7 @@ const getUserFonts = () => {
 };
 if (!userFonts) {
   csInterface.evalScript("getUserFonts()", (data) => {
-    const dataObj = JSON.parse(data || "{}");
+    const dataObj = safeJsonParse(data);
     const fonts = dataObj.fonts || [];
     userFonts = fonts;
   });
@@ -541,7 +573,7 @@ if (!userFonts) {
 
 const getActiveLayerText = (callback) => {
   csInterface.evalScript("getActiveLayerText()", (data) => {
-    const dataObj = JSON.parse(data || "{}");
+    const dataObj = safeJsonParse(data);
     if (!data || !dataObj.textProps) nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
     else callback(dataObj);
   });
@@ -798,15 +830,15 @@ const setActiveLayerText = (text, style, direction, callback = () => {}) => {
     direction,
     richTextRuns: parsed.richTextRuns,
   });
-  csInterface.evalScript("setActiveLayerText(" + data + ")", (error) => {
+  csInterface.evalScript("setActiveLayerText(" + data + ")", trackHostAction((error) => {
     if (error) nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
     callback(!error);
-  });
+  }));
 };
 
 const getCurrentSelection = (callback = () => {}) => {
   csInterface.evalScript("getCurrentSelection()", (result) => {
-    const data = JSON.parse(result || "{}");
+    const data = safeJsonParse(result);
     if (data.error) {
       callback(null);
     } else {
@@ -870,10 +902,8 @@ const stopSelectionMonitoring = () => {
 
 const getSelectionChanged = (callback = () => {}) => {
   csInterface.evalScript("getSelectionChanged()", (result) => {
-    const data = JSON.parse(result || "{}");
-    if (data.noChange) {
-      callback(null);
-    } else if (data.error) {
+    const data = safeJsonParse(result);
+    if (data.noChange || data.error || typeof data.width !== "number") {
       callback(null);
     } else {
       callback(data);
@@ -907,11 +937,11 @@ const createTextLayerInSelection = (text, style, pointText, padding, direction, 
     direction,
     richTextRuns: parsed.richTextRuns,
   });
-  csInterface.evalScript("createTextLayerInSelection(" + data + ", " + !!pointText + ")", (error) => {
+  csInterface.evalScript("createTextLayerInSelection(" + data + ", " + !!pointText + ")", trackHostAction((error) => {
     if (error === "smallSelection") nativeAlert(locale.errorSmallSelection, locale.errorTitle, true);
     else if (error) nativeAlert(locale.errorNoSelection, locale.errorTitle, true);
     callback(!error);
-  });
+  }));
 };
 
 const createTextLayersInStoredSelections = (texts, styles, selections, pointText, padding, direction, callback = () => {}) => {
@@ -946,31 +976,31 @@ const createTextLayersInStoredSelections = (texts, styles, selections, pointText
     padding: padding || 0,
     direction,
   });
-  csInterface.evalScript("createTextLayersInStoredSelections(" + data + ", " + !!pointText + ")", (error) => {
+  csInterface.evalScript("createTextLayersInStoredSelections(" + data + ", " + !!pointText + ")", trackHostAction((error) => {
     if (error === "smallSelection") nativeAlert(locale.errorSmallSelection, locale.errorTitle, true);
     else if (error === "noSelection") nativeAlert(locale.errorNoSelection, locale.errorTitle, true);
     else if (error === "invalidSelection") nativeAlert(locale.errorNoSelection, locale.errorTitle, true);
     else if (error && error.indexOf("scriptError:") === 0) nativeAlert(error.replace("scriptError: ", ""), locale.errorTitle, true);
     else if (error) nativeAlert("Error: " + error, locale.errorTitle, true);
     callback(!error);
-  });
+  }));
 };
 
 const alignTextLayerToSelection = (resizeTextBox = false, padding = 0, callback = () => {}) => {
   const data = JSON.stringify({ resizeTextBox: !!resizeTextBox, padding: padding || 0 });
-  csInterface.evalScript("alignTextLayerToSelection(" + data + ")", (error) => {
+  csInterface.evalScript("alignTextLayerToSelection(" + data + ")", trackHostAction((error) => {
     if (error === "smallSelection") nativeAlert(locale.errorSmallSelection, locale.errorTitle, true);
     else if (error === "noSelection") nativeAlert(locale.errorNoSelection, locale.errorTitle, true);
     else if (error) nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
     callback(!error);
-  });
+  }));
 };
 
 const changeActiveLayerTextSize = (val, callback = () => {}) => {
-  csInterface.evalScript("changeActiveLayerTextSize(" + val + ")", (error) => {
+  csInterface.evalScript("changeActiveLayerTextSize(" + val + ")", trackHostAction((error) => {
     if (error) nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
     callback(!error);
-  });
+  }));
 };
 
 const getHotkeyPressed = (callback) => {
@@ -994,7 +1024,7 @@ const resizeTextArea = (defer = false) => {
   }
 };
 
-const scrollToLine = (lineIndex, delay = 300) => {
+const scrollToLine = (lineIndex, delay = 100) => {
   lineIndex = lineIndex < 5 ? 0 : lineIndex - 5;
   setTimeout(() => {
     const line = document.querySelectorAll(".text-line")[lineIndex];
@@ -1110,4 +1140,4 @@ const openFile = (path, autoClose = false) => {
   );
 };
 
-export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, getActiveLayerText, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
+export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, getActiveLayerText, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };

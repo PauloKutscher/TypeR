@@ -11,7 +11,7 @@ import { useContext } from "../../context";
 const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // Extracted memoized line component to avoid re-rendering every line on each render
-const LineItem = React.memo(function LineItem({ line, direction, isCurrent, images, dispatch, renderHighlightedText, lineNum }) {
+const LineItem = React.memo(function LineItem({ line, direction, isCurrent, dispatch, renderHighlightedText, lineNum }) {
   const className = "text-line" +
     (line.ignore ? " m-empty" : "") +
     (isCurrent ? " m-current" : "") +
@@ -62,7 +62,6 @@ LineItem.propTypes = {
   line: PropTypes.object.isRequired,
   direction: PropTypes.string.isRequired,
   isCurrent: PropTypes.bool.isRequired,
-  images: PropTypes.array.isRequired,
   dispatch: PropTypes.func.isRequired,
   renderHighlightedText: PropTypes.func.isRequired,
   lineNum: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
@@ -252,6 +251,13 @@ const TextBlock = React.memo(function TextBlock() {
     (e) => context.dispatch({ type: "setText", text: e.target.value }),
     [context.dispatch]
   );
+
+  // Parsing the whole script for the overlay is costly; only redo it when the
+  // text itself changes, not on every unrelated context update
+  const overlayContent = React.useMemo(
+    () => renderMarkdownOverlay(context.state.text || ""),
+    [renderMarkdownOverlay, context.state.text]
+  );
   const handleFocus = React.useCallback(() => setFocused(true), []);
   const handleBlur = React.useCallback(() => setFocused(false), []);
 
@@ -264,7 +270,6 @@ const TextBlock = React.memo(function TextBlock() {
             line={line}
             direction={direction}
             isCurrent={context.state.currentLineIndex === line.rawIndex}
-            images={context.state.images}
             dispatch={context.dispatch}
             renderHighlightedText={renderHighlightedText}
             lineNum={lineNum}
@@ -272,7 +277,7 @@ const TextBlock = React.memo(function TextBlock() {
         ))}
       </div>
       <div className={"text-area-overlay" + (focused ? " m-hidden" : "")} dir={direction}>
-        {renderMarkdownOverlay(context.state.text || "")}
+        {overlayContent}
       </div>
       <textarea
         ref={textAreaRef}

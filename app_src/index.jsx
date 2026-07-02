@@ -21,10 +21,9 @@ const App = React.memo(function App() {
   );
 });
 
-// Remplace createRoot(...).render(...) par ReactDOM.render :
+// No StrictMode: the context reducer has side effects (storage writes,
+// confirm dialogs) that must not be double-invoked in development builds
 ReactDOM.render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
+  <App />,
   document.getElementById('app')
 );

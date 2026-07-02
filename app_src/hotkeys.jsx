@@ -1,6 +1,6 @@
 import React from "react";
 
-import { csInterface, setActiveLayerText, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, getHotkeyPressed, changeActiveLayerTextSize } from "./utils";
+import { csInterface, setActiveLayerText, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, getHotkeyPressed, changeActiveLayerTextSize, isHostActionPending } from "./utils";
 import { useContext } from "./context";
 import { buildStoredSelectionPayload, getScaledStyle } from "./textLayerPayload";
 
@@ -114,7 +114,9 @@ const HotkeysListner = React.memo(function HotkeysListner() {
     };
 
     const interval = setInterval(() => {
-      if (contextRef.current.state.modalType || isFormFieldActive() || hotkeyPollPendingRef.current) return;
+      // Back off while a paste/align/apply runs: polling would queue behind it
+      // in the ExtendScript engine and delay the action's completion
+      if (contextRef.current.state.modalType || isFormFieldActive() || hotkeyPollPendingRef.current || isHostActionPending() || document.hidden) return;
       hotkeyPollPendingRef.current = true;
       getHotkeyPressed((state) => {
         hotkeyPollPendingRef.current = false;

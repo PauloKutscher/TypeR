@@ -837,7 +837,7 @@ const reducer = (state, action) => {
     const rawLines = newState.text ? newState.text.split("\n") : [];
     let lastTextLine = null;
     let previousStyle = null;
-    newState.lines = rawLines.map((rawText, rawIndex) => {
+    const nextLines = rawLines.map((rawText, rawIndex) => {
       const ignorePrefix = newState.ignoreLinePrefixes.find((pr) => rawText.startsWith(pr)) || "";
       const hasStylePrefix = (
         newState.currentFolderTagPriority !== false
@@ -878,6 +878,28 @@ const reducer = (state, action) => {
       if (!line.ignore) lastTextLine = line;
       if (!line.ignore && line.style) {
         previousStyle = line.style;
+      }
+      return line;
+    });
+    // Reuse previous line objects when nothing changed so memoized line
+    // components skip re-rendering (e.g. selecting a style rebuilds lines
+    // but most of them are identical)
+    const prevLines = state.lines || [];
+    newState.lines = nextLines.map((line) => {
+      const prev = prevLines[line.rawIndex];
+      if (
+        prev &&
+        prev.rawIndex === line.rawIndex &&
+        prev.rawText === line.rawText &&
+        prev.ignorePrefix === line.ignorePrefix &&
+        prev.stylePrefix === line.stylePrefix &&
+        prev.style === line.style &&
+        prev.ignore === line.ignore &&
+        prev.index === line.index &&
+        prev.text === line.text &&
+        prev.last === line.last
+      ) {
+        return prev;
       }
       return line;
     });
@@ -954,7 +976,8 @@ const reducer = (state, action) => {
       }
       if (
         newState[field] !== state[field] &&
-        (field === "text" || field === "currentLineIndex" || field === "currentStyleId" || field === "textScale")
+        (field === "text" || field === "currentLineIndex" || field === "currentStyleId" || field === "textScale" ||
+          field === "styles" || field === "storedSelections")
       ) {
         shouldDebounceStorage = true;
       }
