@@ -1,7 +1,7 @@
 import "./previewBlock.scss";
 
 import React from "react";
-import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiRefreshCw, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiX, FiType } from "react-icons/fi";
+import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiChevronsRight, FiPlay, FiRefreshCw, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiX, FiType } from "react-icons/fi";
 import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
@@ -63,6 +63,12 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const inlineShapePending = React.useRef(false);
   const inlineShapeKey = React.useRef("");
   const [inlineSelectionShape, setInlineSelectionShape] = React.useState(null);
+  const batchOrderRef = React.useRef([]);
+  const batchPending = React.useRef(false);
+  const batchRunRef = React.useRef(null);
+  const [batchSelection, setBatchSelection] = React.useState([]);
+  const [batchRun, setBatchRun] = React.useState(null);
+  batchRunRef.current = batchRun;
   const inlineTextStyle = inlineLayerSource.style?.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {};
   const inlineStyleObject = getStyleObject(inlineTextStyle);
   const markdownEnabled = context.state.interpretMarkdown !== false;
@@ -214,10 +220,71 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     });
   }, [bubbleAware]);
 
+  // Batch mode: the user multi-selects text layers, then chains shapes one
+  // layer at a time. Photoshop only reports stacking order, so the click
+  // order is reconstructed by diffing the selection on every select event.
+  const refreshBatchSelection = React.useCallback(() => {
+    if (batchPending.current) return;
+    // While a batch runs the panel drives the layer selection itself
+    if (batchRunRef.current) return;
+    batchPending.current = true;
+    csInterface.evalScript("getSelectedTextLayers()", (result) => {
+      batchPending.current = false;
+      let ids = [];
+      try {
+        const data = JSON.parse(result || "{}");
+        ids = (data.layers || []).map((layer) => layer.id).filter((id) => typeof id === "number");
+      } catch (error) {
+        return;
+      }
+      const kept = batchOrderRef.current.filter((id) => ids.indexOf(id) !== -1);
+      const added = ids.filter((id) => kept.indexOf(id) === -1);
+      const nextOrder = kept.concat(added);
+      batchOrderRef.current = nextOrder;
+      setBatchSelection((current) => (
+        current.length === nextOrder.length && current.every((id, index) => id === nextOrder[index])
+          ? current
+          : nextOrder
+      ));
+    });
+  }, []);
+
+  const goToBatchLayer = React.useCallback((layerId) => {
+    csInterface.evalScript(`selectLayerById(${JSON.stringify(layerId)})`, () => {
+      refreshInlineLayerSource(true);
+      refreshInlineSelectionShape(true);
+    });
+  }, [refreshInlineLayerSource, refreshInlineSelectionShape]);
+
+  const startTextShapeRBatch = React.useCallback(() => {
+    const queue = batchOrderRef.current;
+    if (queue.length < 2) return;
+    setBatchRun({ queue: [...queue], index: 0 });
+    goToBatchLayer(queue[0]);
+  }, [goToBatchLayer]);
+
+  const stopTextShapeRBatch = React.useCallback(() => {
+    setBatchRun(null);
+    refreshBatchSelection();
+  }, [refreshBatchSelection]);
+
+  const advanceTextShapeRBatch = React.useCallback(() => {
+    const current = batchRunRef.current;
+    if (!current) return;
+    const nextIndex = current.index + 1;
+    if (nextIndex >= current.queue.length) {
+      setBatchRun(null);
+      return;
+    }
+    setBatchRun({ ...current, index: nextIndex });
+    goToBatchLayer(current.queue[nextIndex]);
+  }, [goToBatchLayer]);
+
   React.useEffect(() => {
     if (!context.state.inlineTextShapeR) return undefined;
     refreshInlineLayerSource();
     refreshInlineSelectionShape();
+    refreshBatchSelection();
 
     // Primary signal: Photoshop notifies the panel when a layer is selected
     // or edited. Debounced because 'setd' events arrive in bursts.
@@ -227,12 +294,14 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         inlineEventDebounce.current = null;
         refreshInlineLayerSource();
         refreshInlineSelectionShape();
+        refreshBatchSelection();
       }, 120);
     });
 
     const refreshOnFocus = () => {
       refreshInlineLayerSource();
       refreshInlineSelectionShape();
+      refreshBatchSelection();
     };
     const refreshOnVisibility = () => {
       if (!document.hidden) refreshOnFocus();
@@ -249,6 +318,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       if (Date.now() - inlineLastRefreshAt.current >= idleDelay) {
         refreshInlineLayerSource();
         refreshInlineSelectionShape();
+        refreshBatchSelection();
       }
     }, 1200);
 
@@ -264,7 +334,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       inlineSourcePending.current = false;
       inlineShapePending.current = false;
     };
-  }, [context.state.inlineTextShapeR, refreshInlineLayerSource, refreshInlineSelectionShape]);
+  }, [context.state.inlineTextShapeR, refreshInlineLayerSource, refreshInlineSelectionShape, refreshBatchSelection]);
 
   React.useEffect(() => {
     setInlineVariantPage(0);
@@ -577,10 +647,15 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     setActiveLayerText(variant.text, lineStyle, context.state.direction, (ok) => {
       setApplyingTextShapeRId(null);
       if (!ok) return;
+      // In batch mode a picked shape moves on to the next queued layer
+      if (batchRunRef.current) {
+        advanceTextShapeRBatch();
+        return;
+      }
       refreshInlineLayerSource();
       if (advance) context.dispatch({ type: "nextLine", add: true });
     });
-  }, [applyingTextShapeRId, context, inlineLayerSource.style, refreshInlineLayerSource]);
+  }, [applyingTextShapeRId, context, inlineLayerSource.style, refreshInlineLayerSource, advanceTextShapeRBatch]);
 
   const handleIncrementChange = React.useCallback((e) => {
     context.dispatch({ type: "setTextSizeIncrement", increment: e.target.value });
@@ -672,6 +747,43 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                 <span>{locale.textShapeRTitle || "TextShapeR"}</span>
               </button>
               <div className="preview-textshaper-pager">
+                {batchRun ? (
+                  <span className="preview-textshaper-batch-run">
+                    <span
+                      className="preview-textshaper-batch-progress"
+                      title={(locale.textShapeRBatchProgress || "Batch: shaping layer {current} of {total}")
+                        .replace("{current}", batchRun.index + 1)
+                        .replace("{total}", batchRun.queue.length)}
+                    >
+                      {batchRun.index + 1}/{batchRun.queue.length}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={advanceTextShapeRBatch}
+                      title={locale.textShapeRBatchSkip || "Skip this layer and go to the next one"}
+                    >
+                      <FiChevronsRight size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={stopTextShapeRBatch}
+                      title={locale.textShapeRBatchStop || "Stop the batch"}
+                    >
+                      <FiX size={12} />
+                    </button>
+                  </span>
+                ) : batchSelection.length >= 2 ? (
+                  <button
+                    type="button"
+                    className="preview-textshaper-batch-start"
+                    onClick={startTextShapeRBatch}
+                    title={(locale.textShapeRBatchStart || "Chain shapes over the {count} selected text layers, in the order you picked them")
+                      .replace("{count}", batchSelection.length)}
+                  >
+                    <FiPlay size={10} />
+                    <span>{batchSelection.length}</span>
+                  </button>
+                ) : null}
                 {inlineSelectionShape ? (
                   <span
                     className={"preview-textshaper-shape-dot" + (inlineSelectionShape.source === "bubble" ? " is-bubble" : "")}

@@ -1,5 +1,5 @@
 import React from "react";
-import { FiX, FiSettings, FiEye, FiToggleLeft, FiDatabase } from "react-icons/fi";
+import { FiX, FiSettings, FiEye, FiToggleLeft, FiDatabase, FiAlertTriangle } from "react-icons/fi";
 import { MdSave } from "react-icons/md";
 import { FaKeyboard, FaFileExport, FaFileImport } from "react-icons/fa";
 
@@ -64,6 +64,7 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [multiTabEnabled, setMultiTabEnabled] = React.useState(
     context.state.multiTabEnabled !== false
   );
+  const [multiTabConfirmOpen, setMultiTabConfirmOpen] = React.useState(false);
   const [edited, setEdited] = React.useState(false);
 
   // States manager
@@ -200,6 +201,29 @@ const SettingsModal = React.memo(function SettingsModal() {
 
   const save = (e) => {
     e.preventDefault();
+    // Disabling multi-tab with several open tabs needs an in-app confirmation
+    if (
+      !multiTabEnabled &&
+      context.state.multiTabEnabled !== false &&
+      (context.state.tabs || []).length > 1
+    ) {
+      setMultiTabConfirmOpen(true);
+      return;
+    }
+    applySave();
+  };
+
+  const confirmDisableMultiTab = () => {
+    setMultiTabConfirmOpen(false);
+    applySave();
+  };
+
+  const cancelDisableMultiTab = () => {
+    setMultiTabEnabled(true);
+    setMultiTabConfirmOpen(false);
+  };
+
+  const applySave = () => {
     if (pastePointText !== context.state.pastePointText) {
       context.dispatch({
         type: "setPastePointText",
@@ -328,18 +352,7 @@ const SettingsModal = React.memo(function SettingsModal() {
       });
     }
     if (multiTabEnabled !== (context.state.multiTabEnabled !== false)) {
-      const openTabs = context.state.tabs || [];
-      if (!multiTabEnabled && openTabs.length > 1) {
-        const message = (locale.settingsMultiTabDisableConfirm || 'Disable multi-tab? All tabs other than "{name}" will be lost.')
-          .replace("{name}", openTabs[0].name);
-        if (confirm(message)) {
-          context.dispatch({ type: "setMultiTabEnabled", value: false });
-        } else {
-          setMultiTabEnabled(true);
-        }
-      } else {
-        context.dispatch({ type: "setMultiTabEnabled", value: multiTabEnabled });
-      }
+      context.dispatch({ type: "setMultiTabEnabled", value: multiTabEnabled });
     }
     const shortcut = {};
     document.querySelectorAll("input[id^=shortcut_]").forEach((input) => {
@@ -1041,6 +1054,30 @@ const SettingsModal = React.memo(function SettingsModal() {
             </div>
           </form>
         </div>
+        {multiTabConfirmOpen && (
+          <div className="settings-confirm-overlay" onClick={cancelDisableMultiTab}>
+            <div className="settings-confirm-dialog hostBgdLight" onClick={(e) => e.stopPropagation()}>
+              <div className="settings-confirm-icon">
+                <FiAlertTriangle size={26} />
+              </div>
+              <div className="settings-confirm-title">
+                {locale.settingsMultiTabDisableTitle || "Disable multi-tab?"}
+              </div>
+              <div className="settings-confirm-text">
+                {(locale.settingsMultiTabDisableConfirm || 'All tabs other than "{name}" will be lost.')
+                  .replace("{name}", (context.state.tabs || [])[0]?.name || "")}
+              </div>
+              <div className="settings-confirm-actions">
+                <button type="button" className="topcoat-button--large" onClick={cancelDisableMultiTab}>
+                  {locale.cancel || "Cancel"}
+                </button>
+                <button type="button" className="topcoat-button--large--cta settings-confirm-danger" onClick={confirmDisableMultiTab}>
+                  {locale.settingsMultiTabDisableAction || "Disable"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </React.Fragment>
   );

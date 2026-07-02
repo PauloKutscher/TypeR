@@ -321,6 +321,39 @@
   }
 }
 
+.preview-textshaper-batch-start {
+  align-items: center;
+  background: none;
+  border: 1px solid rgba(#288edf, 0.6);
+  border-radius: 3px;
+  color: #288edf;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 9px;
+  gap: 2px;
+  height: 14px;
+  line-height: 12px;
+  padding: 0 4px;
+
+  &:hover {
+    background: rgba(#288edf, 0.14);
+  }
+}
+
+.preview-textshaper-batch-run {
+  align-items: center;
+  display: inline-flex;
+  gap: 2px;
+
+  .preview-textshaper-batch-progress {
+    color: #288edf;
+    font-size: 9px;
+    line-height: 14px;
+    min-width: auto;
+    opacity: 1;
+  }
+}
+
 .preview-textshaper-shape-dot {
   background: #43a047;
   border-radius: 50%;

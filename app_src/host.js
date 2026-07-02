@@ -1596,6 +1596,66 @@ function getActiveLayerBubbleShape(data) {
   return jamJSON.stringify(result);
 }
 
+function getSelectedTextLayers() {
+  if (!documents.length) {
+    return jamJSON.stringify({ error: "doc" });
+  }
+  var layers = [];
+  var targetLayers = stringIDToTypeID("targetLayers");
+  var layerIdProp = stringIDToTypeID("layerID");
+  var nameProp = stringIDToTypeID("name");
+  var indexes = [];
+  var reference = new ActionReference();
+  reference.putProperty(charID.Property, targetLayers);
+  reference.putEnumerated(charID.Document, charID.Ordinal, charID.Target);
+  var doc = executeActionGet(reference);
+  if (doc.hasKey(targetLayers)) {
+    var list = doc.getList(targetLayers);
+    var backgroundRef = new ActionReference();
+    backgroundRef.putProperty(charID.Property, charID.Background);
+    backgroundRef.putEnumerated(charID.Layer, charID.Ordinal, charID.Back);
+    var offset = executeActionGet(backgroundRef).getBoolean(charID.Background) ? 0 : 1;
+    for (var i = 0; i < list.count; i++) {
+      indexes.push(list.getReference(i).getIndex() + offset);
+    }
+  } else {
+    indexes.push(-1);
+  }
+  for (var j = 0; j < indexes.length; j++) {
+    try {
+      var layerRef = new ActionReference();
+      if (indexes[j] === -1) {
+        layerRef.putEnumerated(charID.Layer, charID.Ordinal, charID.Target);
+      } else {
+        layerRef.putIndex(charID.Layer, indexes[j]);
+      }
+      var descriptor = executeActionGet(layerRef);
+      if (!descriptor.hasKey(charID.Text)) continue;
+      layers.push({
+        id: descriptor.getInteger(layerIdProp),
+        name: descriptor.getString(nameProp),
+      });
+    } catch (layerError) {}
+  }
+  return jamJSON.stringify({ layers: layers });
+}
+
+function selectLayerById(id) {
+  try {
+    var layerId = parseInt(id, 10);
+    if (isNaN(layerId)) return "error";
+    var descriptor = new ActionDescriptor();
+    var reference = new ActionReference();
+    reference.putIdentifier(charID.Layer, layerId);
+    descriptor.putReference(charID.Null, reference);
+    descriptor.putBoolean(stringIDToTypeID("makeVisible"), false);
+    executeAction(charID.Select, descriptor, DialogModes.NO);
+    return "";
+  } catch (selectError) {
+    return "error";
+  }
+}
+
 function startSelectionMonitoring() {
   var monitor = _hostState.selectionMonitor;
   if (monitor.callback) {

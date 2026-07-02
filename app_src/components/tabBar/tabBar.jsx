@@ -1,7 +1,7 @@
 import "./tabBar.scss";
 
 import React from "react";
-import { FiPlus, FiX } from "react-icons/fi";
+import { FiPlus, FiX, FiAlertTriangle } from "react-icons/fi";
 
 import { locale } from "../../utils";
 import { useContext } from "../../context";
@@ -44,13 +44,21 @@ const TabBar = React.memo(function TabBar() {
     }
   };
 
+  const [closingTab, setClosingTab] = React.useState(null);
+
   const closeTab = (e, tab) => {
     e.stopPropagation();
     const hasContent = (tab.text || "").trim() || (tab.images || []).length;
-    if (hasContent && !confirm(locale.tabCloseConfirm || "Close this tab? Its text and PSD sync will be lost.")) {
+    if (hasContent) {
+      setClosingTab(tab);
       return;
     }
     context.dispatch({ type: "deleteTab", id: tab.id });
+  };
+
+  const confirmCloseTab = () => {
+    if (closingTab) context.dispatch({ type: "deleteTab", id: closingTab.id });
+    setClosingTab(null);
   };
 
   const addTab = () => context.dispatch({ type: "addTab" });
@@ -96,6 +104,29 @@ const TabBar = React.memo(function TabBar() {
           <FiPlus size={12} />
         </button>
       </div>
+      {closingTab && (
+        <div className="settings-confirm-overlay" onClick={() => setClosingTab(null)}>
+          <div className="settings-confirm-dialog hostBgdLight" onClick={(e) => e.stopPropagation()}>
+            <div className="settings-confirm-icon">
+              <FiAlertTriangle size={26} />
+            </div>
+            <div className="settings-confirm-title">
+              {(locale.tabCloseConfirmTitle || 'Close "{name}"?').replace("{name}", closingTab.name)}
+            </div>
+            <div className="settings-confirm-text">
+              {locale.tabCloseConfirm || "Its text and PSD sync will be lost."}
+            </div>
+            <div className="settings-confirm-actions">
+              <button type="button" className="topcoat-button--large" onClick={() => setClosingTab(null)}>
+                {locale.cancel || "Cancel"}
+              </button>
+              <button type="button" className="topcoat-button--large--cta settings-confirm-danger" onClick={confirmCloseTab}>
+                {locale.tabClose || "Close tab"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
