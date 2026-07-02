@@ -495,6 +495,36 @@ const reducer = (state, action) => {
       break;
     }
 
+    case "moveStyleToFolder": {
+      const styleId = action.id;
+      if (!styleId) break;
+      const folderId = action.folderId === undefined || action.folderId === "" || action.folderId === "__unsorted__" ? null : action.folderId;
+      if (folderId && !state.folders.find((folder) => folder.id === folderId)) break;
+      const movedStyle = state.styles.find((style) => style.id === styleId);
+      if (!movedStyle) break;
+
+      const styles = state.styles
+        .filter((style) => style.id !== styleId)
+        .map((style) => ({ ...style }))
+        .concat({ ...movedStyle, folder: folderId });
+      const orderIds = action.order || [];
+      if (!orderIds.length) {
+        newState.styles = styles;
+        break;
+      }
+      const orderMap = new Map(orderIds.map((id, index) => [id, index]));
+      const targetStyles = styles
+        .filter((style) => (style.folder || null) === folderId)
+        .sort((a, b) => {
+          const aOrder = orderMap.has(a.id) ? orderMap.get(a.id) : Number.MAX_SAFE_INTEGER;
+          const bOrder = orderMap.has(b.id) ? orderMap.get(b.id) : Number.MAX_SAFE_INTEGER;
+          return aOrder - bOrder;
+        });
+
+      newState.styles = styles.filter((style) => (style.folder || null) !== folderId).concat(targetStyles);
+      break;
+    }
+
     case "saveStyle": {
       const stylePayload = { ...action.data };
       if (typeof stylePayload.prefixes === "string") {

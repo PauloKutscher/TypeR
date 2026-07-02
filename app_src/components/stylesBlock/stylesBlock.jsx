@@ -53,6 +53,22 @@ const StylesBlock = React.memo(function StylesBlock() {
   );
 });
 
+const styleDragMime = "application/x-typer-style-id";
+let currentDraggingStyleId = null;
+
+const hasStyleDragData = (event) => {
+  return Array.from(event.dataTransfer.types || []).includes(styleDragMime);
+};
+
+const getDraggedStyleId = (event) => {
+  return currentDraggingStyleId || event.dataTransfer.getData(styleDragMime) || event.dataTransfer.getData("text/plain");
+};
+
+const getStyleDropPosition = (event) => {
+  const rect = event.currentTarget.getBoundingClientRect();
+  return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+};
+
 const FolderTree = React.memo(function FolderTree({ folders, parentId, depth, stylesByFolder }) {
   const context = useContext();
   if (!folders || !folders.length) return null;
@@ -79,19 +95,94 @@ FolderTree.propTypes = {
 
 const FolderItem = React.memo(function FolderItem(props) {
   const context = useContext();
+  const [dropActive, setDropActive] = React.useState(false);
+  const [styleDropTarget, setStyleDropTarget] = React.useState(null);
   const openFolder = React.useCallback((e) => {
     e.stopPropagation();
     context.dispatch({ type: "setModal", modal: "editFolder", data: props.data });
   }, [context.dispatch, props.data]);
 
-  const sortFolderStyles = React.useCallback((folderStyles) => {
-    let styles = props.data.id ? context.state.styles.filter((s) => s.folder !== props.data.id) : context.state.styles.filter((s) => !!s.folder);
-    styles = styles.concat(folderStyles);
-    context.dispatch({ type: "setStyles", data: styles });
-  }, [context.dispatch, context.state.styles, props.data.id]);
+  const handleDragOver = React.useCallback((e) => {
+    if (!hasStyleDragData(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    setDropActive(true);
+  }, []);
+
+  const handleDragLeave = React.useCallback((e) => {
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    setDropActive(false);
+  }, []);
+
+  const handleStyleDrop = React.useCallback((e) => {
+    if (!hasStyleDragData(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDropActive(false);
+    setStyleDropTarget(null);
+    const styleId = getDraggedStyleId(e);
+    if (!styleId) return;
+    context.dispatch({ type: "moveStyleToFolder", id: styleId, folderId: props.data.id || null });
+  }, [context.dispatch, props.data.id]);
 
   const styles = props.stylesByFolder.get(props.data.id || "__unsorted__") || [];
   const childFolders = props.data.children || [];
+
+  const getStyleOrder = React.useCallback(
+    (draggedStyleId, targetStyleId, position) => {
+      const order = styles.map((style) => style.id).filter((id) => id !== draggedStyleId);
+      const targetIndex = order.indexOf(targetStyleId);
+      if (targetIndex === -1) return order.concat(draggedStyleId);
+      order.splice(position === "before" ? targetIndex : targetIndex + 1, 0, draggedStyleId);
+      return order;
+    },
+    [styles]
+  );
+
+  const handleStyleItemDragOver = React.useCallback((e, targetStyleId) => {
+    if (!hasStyleDragData(e)) return;
+    const draggedStyleId = getDraggedStyleId(e);
+    if (!draggedStyleId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    setDropActive(true);
+    if (draggedStyleId === targetStyleId) {
+      setStyleDropTarget(null);
+      return;
+    }
+    setStyleDropTarget({ id: targetStyleId, position: getStyleDropPosition(e) });
+  }, []);
+
+  const handleStyleItemDrop = React.useCallback(
+    (e, targetStyleId) => {
+      if (!hasStyleDragData(e)) return;
+      const draggedStyleId = getDraggedStyleId(e);
+      if (!draggedStyleId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (draggedStyleId === targetStyleId) {
+        setDropActive(false);
+        setStyleDropTarget(null);
+        return;
+      }
+      const position = getStyleDropPosition(e);
+      setDropActive(false);
+      setStyleDropTarget(null);
+      context.dispatch({
+        type: "moveStyleToFolder",
+        id: draggedStyleId,
+        folderId: props.data.id || null,
+        order: getStyleOrder(draggedStyleId, targetStyleId, position),
+      });
+    },
+    [context.dispatch, getStyleOrder, props.data.id]
+  );
+
+  const clearStyleDropTarget = React.useCallback(() => {
+    setStyleDropTarget(null);
+  }, []);
 
   const exportFolder = React.useCallback((e) => {
     e.stopPropagation();
@@ -128,7 +219,12 @@ const FolderItem = React.memo(function FolderItem(props) {
   const isOpen = props.data.id ? context.state.openFolders.includes(props.data.id) : context.state.openFolders.includes("unsorted");
   const hasActive = context.state.currentStyleId ? !!styles.find((s) => s.id === context.state.currentStyleId) : false;
   return (
-    <div className={"folder-item hostBrdContrast" + (isOpen ? " m-open" : "") + (props.depth ? " m-nested" : "")}>
+    <div
+      className={"folder-item hostBrdContrast" + (isOpen ? " m-open" : "") + (props.depth ? " m-nested" : "") + (dropActive ? " m-drop-active" : "")}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleStyleDrop}
+    >
       <div className="folder-header" style={{ paddingLeft: props.depth ? props.depth * 12 + 4 : 4 }} onClick={toggleFolder}>
         <div className="folder-marker">{isOpen ? <FiChevronUp size={18} /> : <FiChevronDown size={18} />}</div>
         <div className="folder-title">
@@ -164,21 +260,24 @@ const FolderItem = React.memo(function FolderItem(props) {
             </div>
           )}
           <div className={"folder-styles hostBrdTopContrast" + (childFolders.length && props.data.id ? " m-with-subfolders" : "")}>
-            {styles.length ? (
-              <ReactSortable className="styles-list" list={styles} setList={sortFolderStyles}>
-                {styles.map((style) => (
-                  <StyleItem
-                    key={style.id}
-                    active={context.state.currentStyleId === style.id}
-                    style={style}
-                  />
-                ))}
-              </ReactSortable>
-            ) : (
-              <div className="folder-styles-empty">
-                <span>{locale.noStylesInFolder}</span>
-              </div>
-            )}
+            <div className={"styles-list" + (!styles.length ? " m-empty" : "")}>
+              {styles.map((style) => (
+                <StyleItem
+                  key={style.id}
+                  active={context.state.currentStyleId === style.id}
+                  dropPosition={styleDropTarget?.id === style.id ? styleDropTarget.position : null}
+                  onDragOverStyle={handleStyleItemDragOver}
+                  onDropStyle={handleStyleItemDrop}
+                  onDragLeaveStyle={clearStyleDropTarget}
+                  style={style}
+                />
+              ))}
+              {!styles.length && (
+                <div className="folder-styles-empty">
+                  <span>{locale.noStylesInFolder}</span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -306,8 +405,62 @@ const StyleItem = React.memo(function StyleItem(props) {
   const resetQuickSize = () => {
     setQuickSizeOverride(null);
   };
+  const startDrag = React.useCallback((e) => {
+    currentDraggingStyleId = props.style.id;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData(styleDragMime, props.style.id);
+    e.dataTransfer.setData("text/plain", props.style.id);
+    const preview = document.createElement("div");
+    preview.className = "style-drag-preview";
+    const color = document.createElement("span");
+    color.className = "style-drag-preview-color";
+    color.style.background = rgbToHex(textStyle.color);
+    const name = document.createElement("span");
+    name.textContent = props.style.name;
+    preview.appendChild(color);
+    preview.appendChild(name);
+    document.body.appendChild(preview);
+    e.dataTransfer.setDragImage(preview, 12, 14);
+    window.setTimeout(() => {
+      if (preview.parentNode) preview.parentNode.removeChild(preview);
+    }, 0);
+  }, [props.style.id, props.style.name, textStyle.color]);
+
+  const endDrag = React.useCallback(() => {
+    currentDraggingStyleId = null;
+  }, []);
+
+  const dragOverStyle = React.useCallback(
+    (e) => {
+      props.onDragOverStyle(e, props.style.id);
+    },
+    [props.onDragOverStyle, props.style.id]
+  );
+
+  const dropStyle = React.useCallback(
+    (e) => {
+      props.onDropStyle(e, props.style.id);
+    },
+    [props.onDropStyle, props.style.id]
+  );
+
   return (
-    <div id={props.style.id} className={"style-item hostBgdLight" + (props.active ? " m-current" : "") + (props.style.prefixesDisabled ? " m-disabled" : "")} onClick={selectStyle}>
+    <div
+      id={props.style.id}
+      className={
+        "style-item hostBgdLight" +
+        (props.active ? " m-current" : "") +
+        (props.style.prefixesDisabled ? " m-disabled" : "") +
+        (props.dropPosition ? " m-drop-" + props.dropPosition : "")
+      }
+      draggable
+      onDragStart={startDrag}
+      onDragEnd={endDrag}
+      onDragOver={dragOverStyle}
+      onDragLeave={props.onDragLeaveStyle}
+      onDrop={dropStyle}
+      onClick={selectStyle}
+    >
       <div className="style-marker">
         <div className="style-color" style={{ background: rgbToHex(textStyle.color) }} title={locale.styleTextColor + ": " + rgbToHex(textStyle.color)}></div>
         {!!prefixes.length && (
@@ -381,6 +534,10 @@ const StyleItem = React.memo(function StyleItem(props) {
 StyleItem.propTypes = {
   style: PropTypes.object.isRequired,
   active: PropTypes.bool,
+  dropPosition: PropTypes.oneOf(["before", "after"]),
+  onDragOverStyle: PropTypes.func.isRequired,
+  onDropStyle: PropTypes.func.isRequired,
+  onDragLeaveStyle: PropTypes.func.isRequired,
 };
 
 export default StylesBlock;
