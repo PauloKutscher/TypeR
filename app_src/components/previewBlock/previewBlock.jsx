@@ -9,8 +9,8 @@ import { FaMagic } from "react-icons/fa";
 import { csInterface, locale, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { buildStoredSelectionPayload, getScaledStyle } from "../../textLayerPayload";
-import { generateTextShapRVariants } from "../../textShapR";
-import TextShapRFitPreview from "../textShapRFitPreview";
+import { generateTextShapeRVariants } from "../../textShapeR";
+import TextShapeRFitPreview from "../textShapeRFitPreview";
 
 const normalizeLayerText = (text) => String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
 
@@ -66,8 +66,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const inlineTextStyle = inlineLayerSource.style?.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {};
   const inlineStyleObject = getStyleObject(inlineTextStyle);
   const markdownEnabled = context.state.interpretMarkdown !== false;
-  const inlineTextShapRVariants = React.useMemo(
-    () => generateTextShapRVariants(inlineLayerSource.text, {
+  const inlineTextShapeRVariants = React.useMemo(
+    () => generateTextShapeRVariants(inlineLayerSource.text, {
       limit: 10,
       allowHyphenation: true,
       profile: "balanced",
@@ -79,12 +79,12 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   );
   const [inlineVariantPage, setInlineVariantPage] = React.useState(0);
   const inlinePageSize = 3;
-  const inlinePageCount = Math.max(1, Math.ceil(inlineTextShapRVariants.length / inlinePageSize));
-  const visibleInlineVariants = inlineTextShapRVariants.slice(
+  const inlinePageCount = Math.max(1, Math.ceil(inlineTextShapeRVariants.length / inlinePageSize));
+  const visibleInlineVariants = inlineTextShapeRVariants.slice(
     inlineVariantPage * inlinePageSize,
     inlineVariantPage * inlinePageSize + inlinePageSize
   );
-  const [applyingTextShapRId, setApplyingTextShapRId] = React.useState(null);
+  const [applyingTextShapeRId, setApplyingTextShapeRId] = React.useState(null);
   const renderMarkdownText = React.useCallback((text) => {
     if (!markdownEnabled) return text;
     const parsed = parseMarkdownRuns(text || "");
@@ -123,7 +123,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       if (!source?.text) {
         inlineSourceKey.current = "";
         setInlineLayerSource((current) => {
-          const error = locale.textShapRLayerNoText || "Select a Photoshop text layer first.";
+          const error = locale.textShapeRLayerNoText || "Select a Photoshop text layer first.";
           if (!current.text && current.error === error && !current.loading) return current;
           return { text: "", style: null, key: "", loading: false, error };
         });
@@ -144,13 +144,10 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     });
   }, []);
 
-  const bubbleAware = context.state.textShapRBubbleAware === true;
+  const bubbleAware = context.state.textShapeRBubbleAware === true;
 
   const refreshInlineSelectionShape = React.useCallback((force = false) => {
     if (inlineShapePending.current) return;
-    // Multi-bubble mode owns the selection monitor; sampling the outline
-    // would replace the user's selection mid-flow
-    if (context.state.multiBubbleMode) return;
     if (force) inlineShapeKey.current = "";
     inlineShapePending.current = true;
     getCurrentSelection((selection) => {
@@ -215,10 +212,10 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         } catch (error) {}
       });
     });
-  }, [context.state.multiBubbleMode, bubbleAware]);
+  }, [bubbleAware]);
 
   React.useEffect(() => {
-    if (!context.state.inlineTextShapR) return undefined;
+    if (!context.state.inlineTextShapeR) return undefined;
     refreshInlineLayerSource();
     refreshInlineSelectionShape();
 
@@ -267,7 +264,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       inlineSourcePending.current = false;
       inlineShapePending.current = false;
     };
-  }, [context.state.inlineTextShapR, refreshInlineLayerSource, refreshInlineSelectionShape]);
+  }, [context.state.inlineTextShapeR, refreshInlineLayerSource, refreshInlineSelectionShape]);
 
   React.useEffect(() => {
     setInlineVariantPage(0);
@@ -275,16 +272,16 @@ const PreviewBlock = React.memo(function PreviewBlock() {
 
   // Re-detect the bubble when the active layer changes or the mode toggles
   React.useEffect(() => {
-    if (!context.state.inlineTextShapR) return;
+    if (!context.state.inlineTextShapeR) return;
     refreshInlineSelectionShape();
-  }, [context.state.inlineTextShapR, inlineLayerSource.key, bubbleAware, refreshInlineSelectionShape]);
+  }, [context.state.inlineTextShapeR, inlineLayerSource.key, bubbleAware, refreshInlineSelectionShape]);
 
   const toggleBubbleAware = React.useCallback(() => {
-    context.dispatch({ type: "setTextShapRBubbleAware", value: !bubbleAware });
+    context.dispatch({ type: "setTextShapeRBubbleAware", value: !bubbleAware });
   }, [context, bubbleAware]);
   const bubbleAwareTitle = bubbleAware
-    ? (locale.textShapRBubbleToggleOn || "Bubble-aware is on: when there is no active selection, TextShapR detects the bubble around the selected text layer and shapes suggestions to it. Click to turn it off.")
-    : (locale.textShapRBubbleToggleOff || "Bubble-aware is off: TextShapR only follows a manual Photoshop selection. Click to auto-detect the bubble around the selected text layer.");
+    ? (locale.textShapeRBubbleToggleOn || "Bubble-aware is on: when there is no active selection, TextShapeR detects the bubble around the selected text layer and shapes suggestions to it. Click to turn it off.")
+    : (locale.textShapeRBubbleToggleOff || "Bubble-aware is off: TextShapeR only follows a manual Photoshop selection. Click to auto-detect the bubble around the selected text layer.");
 
   React.useEffect(() => {
     setInlineVariantPage((current) => Math.min(current, inlinePageCount - 1));
@@ -561,29 +558,29 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     if (context.state.textScale === 100) context.dispatch({ type: "setTextScale", scale: null });
   }, [context.state.textScale, context.dispatch]);
 
-  const openTextShapR = React.useCallback((event) => {
+  const openTextShapeR = React.useCallback((event) => {
     event.stopPropagation();
-    context.dispatch({ type: "setModal", modal: "textShapR" });
+    context.dispatch({ type: "setModal", modal: "textShapeR" });
   }, [context.dispatch]);
 
-  const moveInlineTextShapRPage = React.useCallback((direction) => {
+  const moveInlineTextShapeRPage = React.useCallback((direction) => {
     setInlineVariantPage((current) => {
       if (inlinePageCount <= 1) return 0;
       return (current + direction + inlinePageCount) % inlinePageCount;
     });
   }, [inlinePageCount]);
 
-  const applyTextShapRVariant = React.useCallback((variant, advance = false) => {
-    if (!variant || applyingTextShapRId) return;
-    setApplyingTextShapRId(variant.id);
+  const applyTextShapeRVariant = React.useCallback((variant, advance = false) => {
+    if (!variant || applyingTextShapeRId) return;
+    setApplyingTextShapeRId(variant.id);
     const lineStyle = getScaledStyle(inlineLayerSource.style, context.state.textScale);
     setActiveLayerText(variant.text, lineStyle, context.state.direction, (ok) => {
-      setApplyingTextShapRId(null);
+      setApplyingTextShapeRId(null);
       if (!ok) return;
       refreshInlineLayerSource();
       if (advance) context.dispatch({ type: "nextLine", add: true });
     });
-  }, [applyingTextShapRId, context, inlineLayerSource.style, refreshInlineLayerSource]);
+  }, [applyingTextShapeRId, context, inlineLayerSource.style, refreshInlineLayerSource]);
 
   const handleIncrementChange = React.useCallback((e) => {
     context.dispatch({ type: "setTextSizeIncrement", increment: e.target.value });
@@ -667,25 +664,25 @@ const PreviewBlock = React.memo(function PreviewBlock() {
             <FiArrowDown size={18} />
           </button>
         </div>
-        {context.state.inlineTextShapR ? (
-          <div className="preview-textshapr hostBgdDark" onMouseEnter={() => { refreshInlineLayerSource(); refreshInlineSelectionShape(); }}>
-            <div className="preview-textshapr-head">
-              <button type="button" className="preview-textshapr-open" onClick={openTextShapR} title={locale.textShapROpenFull || "Open the full TextShapR panel"}>
+        {context.state.inlineTextShapeR ? (
+          <div className="preview-textshaper hostBgdDark" onMouseEnter={() => { refreshInlineLayerSource(); refreshInlineSelectionShape(); }}>
+            <div className="preview-textshaper-head">
+              <button type="button" className="preview-textshaper-open" onClick={openTextShapeR} title={locale.textShapeROpenFull || "Open the full TextShapeR panel"}>
                 <FiType size={13} />
-                <span>{locale.textShapRTitle || "TextShapR"}</span>
+                <span>{locale.textShapeRTitle || "TextShapeR"}</span>
               </button>
-              <div className="preview-textshapr-pager">
+              <div className="preview-textshaper-pager">
                 {inlineSelectionShape ? (
                   <span
-                    className={"preview-textshapr-shape-dot" + (inlineSelectionShape.source === "bubble" ? " is-bubble" : "")}
+                    className={"preview-textshaper-shape-dot" + (inlineSelectionShape.source === "bubble" ? " is-bubble" : "")}
                     title={inlineSelectionShape.source === "bubble"
-                      ? (locale.textShapRBubbleActive || "Shapes follow the detected bubble outline")
-                      : (locale.textShapRShapeActive || "Shapes follow the current selection outline")}
+                      ? (locale.textShapeRBubbleActive || "Shapes follow the detected bubble outline")
+                      : (locale.textShapeRShapeActive || "Shapes follow the current selection outline")}
                   />
                 ) : null}
                 <button
                   type="button"
-                  className={"preview-textshapr-bubble-toggle" + (bubbleAware ? " is-active" : "")}
+                  className={"preview-textshaper-bubble-toggle" + (bubbleAware ? " is-active" : "")}
                   onClick={toggleBubbleAware}
                   title={bubbleAwareTitle}
                 >
@@ -695,54 +692,54 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                   type="button"
                   onClick={() => { refreshInlineLayerSource(true); refreshInlineSelectionShape(true); }}
                   disabled={inlineLayerSource.loading}
-                  title={locale.textShapRLayerRefreshHint || "Refresh the selected Photoshop text layer, its style, and the bubble/selection shape"}
+                  title={locale.textShapeRLayerRefreshHint || "Refresh the selected Photoshop text layer, its style, and the bubble/selection shape"}
                 >
                   <FiRefreshCw size={11} />
                 </button>
                 <button
                   type="button"
-                  onClick={() => moveInlineTextShapRPage(-1)}
+                  onClick={() => moveInlineTextShapeRPage(-1)}
                   disabled={inlinePageCount <= 1}
-                  title={locale.textShapRPreviousSuggestions || "Show previous TextShapR suggestions"}
+                  title={locale.textShapeRPreviousSuggestions || "Show previous TextShapeR suggestions"}
                 >
                   <FiChevronLeft size={12} />
                 </button>
-                <span>{inlineLayerSource.loading ? (locale.textShapRLayerLoading || "Reading selected layer...") : `${inlineVariantPage + 1}/${inlinePageCount}`}</span>
+                <span>{inlineLayerSource.loading ? (locale.textShapeRLayerLoading || "Reading selected layer...") : `${inlineVariantPage + 1}/${inlinePageCount}`}</span>
                 <button
                   type="button"
-                  onClick={() => moveInlineTextShapRPage(1)}
+                  onClick={() => moveInlineTextShapeRPage(1)}
                   disabled={inlinePageCount <= 1}
-                  title={locale.textShapRNextSuggestions || "Show next TextShapR suggestions"}
+                  title={locale.textShapeRNextSuggestions || "Show next TextShapeR suggestions"}
                 >
                   <FiChevronRight size={12} />
                 </button>
               </div>
             </div>
-            <div className="preview-textshapr-list">
+            <div className="preview-textshaper-list">
               {visibleInlineVariants.length ? visibleInlineVariants.map((variant, index) => (
                 <button
                   key={variant.id}
                   type="button"
-                  className={"preview-textshapr-choice" + (applyingTextShapRId === variant.id ? " is-applying" : "")}
-                  onClick={(event) => applyTextShapRVariant(variant, event.shiftKey)}
-                  title={locale.textShapRInlineApplyHint || "Apply this text shape to the selected Photoshop text layer. Shift-click also moves to the next line."}
+                  className={"preview-textshaper-choice" + (applyingTextShapeRId === variant.id ? " is-applying" : "")}
+                  onClick={(event) => applyTextShapeRVariant(variant, event.shiftKey)}
+                  title={locale.textShapeRInlineApplyHint || "Apply this text shape to the selected Photoshop text layer. Shift-click also moves to the next line."}
                 >
-                  <span className="preview-textshapr-rank">{inlineVariantPage * inlinePageSize + index + 1}</span>
-                  <TextShapRFitPreview
-                    outerClassName="preview-textshapr-text"
-                    innerClassName="preview-textshapr-fit"
+                  <span className="preview-textshaper-rank">{inlineVariantPage * inlinePageSize + index + 1}</span>
+                  <TextShapeRFitPreview
+                    outerClassName="preview-textshaper-text"
+                    innerClassName="preview-textshaper-fit"
                     contentKey={`${variant.text}|${markdownEnabled}|${inlineStyleObject.fontFamily || ""}`}
                     style={{ ...inlineStyleObject, fontFamily: inlineStyleObject.fontFamily || "Tahoma" }}
                   >
                     {variant.lines.map((variantLine, lineIndex) => (
-                      <span key={`${variant.id}-${lineIndex}`} className="preview-textshapr-line">
+                      <span key={`${variant.id}-${lineIndex}`} className="preview-textshaper-line">
                         {renderMarkdownText(variantLine)}
                       </span>
                     ))}
-                  </TextShapRFitPreview>
+                  </TextShapeRFitPreview>
                 </button>
               )) : (
-                <div className="preview-textshapr-empty">{inlineLayerSource.error || locale.textShapREmpty || "No text available for TextShapR."}</div>
+                <div className="preview-textshaper-empty">{inlineLayerSource.error || locale.textShapeREmpty || "No text available for TextShapeR."}</div>
               )}
             </div>
           </div>
@@ -757,7 +754,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                 </div>
               </div>
               <div className="preview-line-info-actions">
-                <FiType size={16} onClick={openTextShapR} title={locale.textShapRTitle || "TextShapR"} />
+                <FiType size={16} onClick={openTextShapeR} title={locale.textShapeRTitle || "TextShapeR"} />
                 <FiArrowRightCircle size={16} onClick={insertStyledText} title={locale.insertStyledText} />
               </div>
             </div>

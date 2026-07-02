@@ -1,8 +1,8 @@
 import React from "react";
 
-// Scales a TextShapR variant preview down so the whole shape stays visible
+// Scales a TextShapeR variant preview down so the whole shape stays visible
 // inside its card instead of being clipped by overflow
-const TextShapRFitPreview = ({ outerClassName, innerClassName, contentKey, style, children }) => {
+const TextShapeRFitPreview = ({ outerClassName, innerClassName, contentKey, style, children }) => {
   const outerRef = React.useRef(null);
   const innerRef = React.useRef(null);
   const [scale, setScale] = React.useState(1);
@@ -45,4 +45,4 @@ const TextShapRFitPreview = ({ outerClassName, innerClassName, contentKey, style
   );
 };
 
-export default TextShapRFitPreview;
+export default TextShapeRFitPreview;

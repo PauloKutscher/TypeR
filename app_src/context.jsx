@@ -33,8 +33,8 @@ const storeFields = [
   "multiBubbleMode",
   "showTips",
   "showQuickStyleSize",
-  "inlineTextShapR",
-  "textShapRBubbleAware",
+  "inlineTextShapeR",
+  "textShapeRBubbleAware",
   "internalPadding",
   "interpretMarkdown",
   "styleSizeStep",
@@ -147,8 +147,8 @@ const initialState = {
   resizeTextBoxOnCenter: false,
   showTips: storage.data?.showTips !== false,
   showQuickStyleSize: storage.data?.showQuickStyleSize !== false,
-  inlineTextShapR: storage.data?.inlineTextShapR === true,
-  textShapRBubbleAware: storage.data?.textShapRBubbleAware !== false,
+  inlineTextShapeR: storage.data?.inlineTextShapeR === true,
+  textShapeRBubbleAware: storage.data?.textShapeRBubbleAware !== false,
   modalType: null,
   modalData: {},
   images: [],
@@ -669,16 +669,16 @@ const reducer = (state, action) => {
       break;
     }
 
-    case "setInlineTextShapR": {
-      newState.inlineTextShapR = !!action.value;
-      if (newState.inlineTextShapR) {
-        newState.textShapRBubbleAware = true;
+    case "setInlineTextShapeR": {
+      newState.inlineTextShapeR = !!action.value;
+      if (newState.inlineTextShapeR) {
+        newState.textShapeRBubbleAware = true;
       }
       break;
     }
 
-    case "setTextShapRBubbleAware": {
-      newState.textShapRBubbleAware = !!action.value;
+    case "setTextShapeRBubbleAware": {
+      newState.textShapeRBubbleAware = !!action.value;
       break;
     }
 

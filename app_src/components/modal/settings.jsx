@@ -46,8 +46,8 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [showQuickStyleSize, setShowQuickStyleSize] = React.useState(
     context.state.showQuickStyleSize !== false
   );
-  const [inlineTextShapR, setInlineTextShapR] = React.useState(
-    context.state.inlineTextShapR === true
+  const [inlineTextShapeR, setInlineTextShapeR] = React.useState(
+    context.state.inlineTextShapeR === true
   );
   const [styleSizeStep, setStyleSizeStep] = React.useState(
     context.state.styleSizeStep !== undefined ? String(context.state.styleSizeStep) : "1"
@@ -128,8 +128,8 @@ const SettingsModal = React.memo(function SettingsModal() {
     setEdited(true);
   };
 
-  const changeInlineTextShapR = (e) => {
-    setInlineTextShapR(e.target.checked);
+  const changeInlineTextShapeR = (e) => {
+    setInlineTextShapeR(e.target.checked);
     setEdited(true);
   };
   const changeStyleSizeStep = (e) => {
@@ -284,10 +284,10 @@ const SettingsModal = React.memo(function SettingsModal() {
         value: showQuickStyleSize,
       });
     }
-    if (inlineTextShapR !== context.state.inlineTextShapR) {
+    if (inlineTextShapeR !== context.state.inlineTextShapeR) {
       context.dispatch({
-        type: "setInlineTextShapR",
-        value: inlineTextShapR,
+        type: "setInlineTextShapeR",
+        value: inlineTextShapeR,
       });
     }
     const parsedStyleSizeStep = parseFloat(String(styleSizeStep).replace(",", "."));
@@ -648,15 +648,15 @@ const SettingsModal = React.memo(function SettingsModal() {
               <div className="settings-checkbox-grid">
                 <div className="settings-checkbox-item">
                   <label className="settings-checkbox-label">
-                    <input type="checkbox" checked={inlineTextShapR} onChange={changeInlineTextShapR} />
+                    <input type="checkbox" checked={inlineTextShapeR} onChange={changeInlineTextShapeR} />
                     <div className="settings-checkbox-custom"></div>
                     <div className="settings-checkbox-content">
                       <span>
-                        {locale.settingsInlineTextShapRLabel || "TextShapR"}
+                        {locale.settingsInlineTextShapeRLabel || "TextShapeR"}
                         <b className="settings-new-badge">{locale.settingsNewBadge || "New"}</b>
                       </span>
                       <div className="settings-checkbox-hint">
-                        {locale.settingsInlineTextShapRHint || "Shows text shape suggestions directly in the main panel."}
+                        {locale.settingsInlineTextShapeRHint || "Shows text shape suggestions directly in the main panel."}
                       </div>
                     </div>
                   </label>

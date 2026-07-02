@@ -102,7 +102,7 @@ const safeJsonParse = (raw, fallback = {}) => {
 };
 
 // Tracks in-flight Photoshop actions so low-priority polling (hotkeys, inline
-// TextShapR) can back off instead of contending in the ExtendScript queue
+// TextShapeR) can back off instead of contending in the ExtendScript queue
 let hostActionsPending = 0;
 const isHostActionPending = () => hostActionsPending > 0;
 const trackHostAction = (callback) => {
@@ -849,7 +849,7 @@ const getCurrentSelection = (callback = () => {}) => {
 
 // Photoshop action event IDs (charIDToTypeID values): 'slct' fires on layer
 // selection, 'setd' on property/text edits — both mean the active text layer
-// may have changed and inline TextShapR should refresh.
+// may have changed and inline TextShapeR should refresh.
 const PS_EVENT_SELECT = 1936483188;
 const PS_EVENT_SET = 1936028772;
 

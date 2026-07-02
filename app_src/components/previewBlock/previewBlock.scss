@@ -227,7 +227,7 @@
   justify-content: space-between;
 }
 
-.preview-textshapr {
+.preview-textshaper {
   -webkit-font-smoothing: antialiased;
   border: 1px solid rgba(#000, 0.3);
   border-radius: 6px;
@@ -240,7 +240,7 @@
   overflow: hidden;
 }
 
-.preview-textshapr-head {
+.preview-textshaper-head {
   align-items: center;
   background: rgba(#fff, 0.06);
   border-bottom: 1px solid rgba(#fff, 0.12);
@@ -258,7 +258,7 @@
 
 }
 
-.preview-textshapr-open {
+.preview-textshaper-open {
   align-items: center;
   background: none;
   border: 0;
@@ -282,7 +282,7 @@
   }
 }
 
-.preview-textshapr-pager {
+.preview-textshaper-pager {
   align-items: center;
   display: inline-flex;
   flex: 0 0 auto;
@@ -321,7 +321,7 @@
   }
 }
 
-.preview-textshapr-shape-dot {
+.preview-textshaper-shape-dot {
   background: #43a047;
   border-radius: 50%;
   display: inline-block;
@@ -335,14 +335,14 @@
   }
 }
 
-.preview-textshapr-bubble-toggle {
+.preview-textshaper-bubble-toggle {
   &.is-active {
     color: #b17fe0 !important;
     opacity: 1 !important;
   }
 }
 
-.preview-textshapr-list {
+.preview-textshaper-list {
   display: grid;
   flex: 1 1 auto;
   gap: 4px;
@@ -351,7 +351,7 @@
   padding: 4px;
 }
 
-.preview-textshapr-choice {
+.preview-textshaper-choice {
   align-items: center;
   background: rgba(#000, 0.08);
   border: 1px solid rgba(#fff, 0.1);
@@ -377,7 +377,7 @@
   }
 }
 
-.light-theme .preview-textshapr-choice {
+.light-theme .preview-textshaper-choice {
   background: rgba(#000, 0.03);
   border-color: rgba(#000, 0.12);
 
@@ -387,7 +387,7 @@
   }
 }
 
-.preview-textshapr-rank {
+.preview-textshaper-rank {
   font-size: 9px;
   line-height: 9px;
   opacity: 0.45;
@@ -396,7 +396,7 @@
   top: 2px;
 }
 
-.preview-textshapr-text {
+.preview-textshaper-text {
   align-items: center;
   align-self: stretch;
   display: flex;
@@ -407,7 +407,7 @@
   overflow: hidden;
 }
 
-.preview-textshapr-fit {
+.preview-textshaper-fit {
   display: inline-block;
   flex: 0 0 auto;
   font-size: 9px;
@@ -417,13 +417,13 @@
   transform-origin: center center;
 }
 
-.preview-textshapr-line {
+.preview-textshaper-line {
   display: block;
   min-height: 1em;
   white-space: nowrap;
 }
 
-.preview-textshapr-empty {
+.preview-textshaper-empty {
   align-items: center;
   display: flex;
   font-size: 11px;

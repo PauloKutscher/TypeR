@@ -34,13 +34,13 @@ const loadAppModule = (relativePath) => {
 
 const {
   estimateManualLineCount,
-  generateManualTextShapRVariant,
-  generateTextShapRVariants,
+  generateManualTextShapeRVariant,
+  generateTextShapeRVariants,
   visibleLength,
   visibleWidth,
-} = loadAppModule("app_src/textShapR.js");
+} = loadAppModule("app_src/textShapeR.js");
 
-const variants = generateTextShapRVariants("This sentence needs a pleasant bubble shaped manga layout today.");
+const variants = generateTextShapeRVariants("This sentence needs a pleasant bubble shaped manga layout today.");
 assert.strictEqual(variants.length, 10);
 assert.strictEqual(new Set(variants.map((variant) => variant.text)).size, variants.length);
 assert.ok(variants[0].lines.length >= 2);
@@ -55,29 +55,29 @@ if (bestLengths.length > 2) {
   assert.ok(Math.abs(bestLengths[0] - bestLengths[1]) <= 6);
 }
 
-const hyphenated = generateTextShapRVariants("extraordinarily shaped lettering can fit better", { limit: 10 });
+const hyphenated = generateTextShapeRVariants("extraordinarily shaped lettering can fit better", { limit: 10 });
 assert.ok(hyphenated.some((variant) => /-\n/.test(variant.text)));
 
-const noHyphen = generateTextShapRVariants("extraordinarily shaped lettering can fit better", { limit: 10, allowHyphenation: false });
+const noHyphen = generateTextShapeRVariants("extraordinarily shaped lettering can fit better", { limit: 10, allowHyphenation: false });
 assert.ok(noHyphen.every((variant) => !/-\n/.test(variant.text)));
 
-const markdown = generateTextShapRVariants("A **bold sentence** should keep markdown markers safe", { limit: 10 });
+const markdown = generateTextShapeRVariants("A **bold sentence** should keep markdown markers safe", { limit: 10 });
 assert.ok(markdown.every((variant) => !/\*\*bo\nld|sent\nence\*\*/.test(variant.text)));
 assert.ok(markdown.every((variant) => (variant.text.match(/\*\*/g) || []).length === 2));
 
-const short = generateTextShapRVariants("Bonjour");
+const short = generateTextShapeRVariants("Bonjour");
 assert.deepStrictEqual(short.map((variant) => variant.text), ["Bonjour"]);
 
 const profileText = "A longer sentence can choose different bubble silhouettes for the same lettering.";
-const tall = generateTextShapRVariants(profileText, { profile: "tall", limit: 10 });
-const wide = generateTextShapRVariants(profileText, { profile: "wide", limit: 10 });
+const tall = generateTextShapeRVariants(profileText, { profile: "tall", limit: 10 });
+const wide = generateTextShapeRVariants(profileText, { profile: "wide", limit: 10 });
 assert.ok(tall[0].lines.length > wide[0].lines.length);
 assert.ok(visibleWidth("minimum") < visibleWidth("maximum"));
 
-const punctuated = generateTextShapRVariants("Mais attends, je voulais juste te parler de ce qui est arrive hier soir.", { limit: 10 });
+const punctuated = generateTextShapeRVariants("Mais attends, je voulais juste te parler de ce qui est arrive hier soir.", { limit: 10 });
 assert.ok(/attends,\n/.test(punctuated[0].text));
 
-const clyde = generateTextShapRVariants("CLYDE, JE PEUX UTILISER UN M\u00c9DAILLON ?", { limit: 10 });
+const clyde = generateTextShapeRVariants("CLYDE, JE PEUX UTILISER UN M\u00c9DAILLON ?", { limit: 10 });
 const hasAbruptJump = (variant) => {
   const widths = variant.lines.map(visibleWidth);
   const maxWidth = Math.max.apply(null, widths);
@@ -88,12 +88,12 @@ const hasAbruptJump = (variant) => {
 assert.ok(!/^CLYDE,\nJE PEUX UTILISER/.test(clyde[0].text));
 assert.ok(clyde.slice(0, 5).every((variant) => variant.lines.length <= 2 || !hasAbruptJump(variant)));
 
-const frenchHyphenation = generateTextShapRVariants("utiliser", { limit: 10 });
+const frenchHyphenation = generateTextShapeRVariants("utiliser", { limit: 10 });
 assert.ok(frenchHyphenation.some((variant) => /uti-\nliser/i.test(variant.text)));
 assert.ok(frenchHyphenation.every((variant) => !/util-\niser/i.test(variant.text)));
 
 const manualText = "Manual shaping should follow the bubble selection and still keep a readable text block.";
-const manual = generateManualTextShapRVariant(manualText, {
+const manual = generateManualTextShapeRVariant(manualText, {
   width: 260,
   height: 360,
   shape: "ellipse",
@@ -118,7 +118,7 @@ const selectionProfile = {
     { y: 1, left: 0.48, right: 0.52, width: 0.04 },
   ],
 };
-const selectionManual = generateManualTextShapRVariant(manualText, {
+const selectionManual = generateManualTextShapeRVariant(manualText, {
   width: 260,
   height: 360,
   shape: "selection",
@@ -128,4 +128,4 @@ const selectionManual = generateManualTextShapRVariant(manualText, {
 assert.ok(selectionManual.targets[2] > selectionManual.targets[0]);
 assert.ok(selectionManual.targets[2] > selectionManual.targets[4]);
 
-console.log("TextShapR tests passed");
+console.log("TextShapeR tests passed");

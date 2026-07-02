@@ -11,7 +11,7 @@ const EditStyleModal = React.lazy(() => import(/* webpackChunkName: "modal-edit-
 const EditFolderModal = React.lazy(() => import(/* webpackChunkName: "modal-edit-folder" */ './editFolder'));
 const ExportModal = React.lazy(() => import(/* webpackChunkName: "modal-export" */ './export'));
 const UpdateModal = React.lazy(() => import(/* webpackChunkName: "modal-update" */ './update'));
-const TextShapRModal = React.lazy(() => import(/* webpackChunkName: "modal-textshapr" */ './textShapR'));
+const TextShapeRModal = React.lazy(() => import(/* webpackChunkName: "modal-textshaper" */ './textShapeR'));
 
 class ModalErrorBoundary extends React.Component {
     constructor(props) {
@@ -64,7 +64,7 @@ const Modal = React.memo(function Modal() {
     else if (modalType === 'editFolder') modalContent = <EditFolderModal />;
     else if (modalType === 'export') modalContent = <ExportModal />;
     else if (modalType === 'update') modalContent = <UpdateModal />;
-    else if (modalType === 'textShapR') modalContent = <TextShapRModal />;
+    else if (modalType === 'textShapeR') modalContent = <TextShapeRModal />;
 
     React.useEffect(() => {
         if (!context.state.notFirstTime) {

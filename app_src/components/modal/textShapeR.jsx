@@ -1,4 +1,4 @@
-import "./textShapR.scss";
+import "./textShapeR.scss";
 
 import React from "react";
 import { FiArrowRightCircle, FiCheck, FiRefreshCw, FiX } from "react-icons/fi";
@@ -6,21 +6,21 @@ import { FiArrowRightCircle, FiCheck, FiRefreshCw, FiX } from "react-icons/fi";
 import { csInterface, locale, setActiveLayerText, getStyleObject, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { getScaledStyle } from "../../textLayerPayload";
-import { estimateManualLineCount, generateManualTextShapRVariant, generateTextShapRVariants } from "../../textShapR";
-import TextShapRFitPreview from "../textShapRFitPreview";
+import { estimateManualLineCount, generateManualTextShapeRVariant, generateTextShapeRVariants } from "../../textShapeR";
+import TextShapeRFitPreview from "../textShapeRFitPreview";
 
 const PROFILE_OPTIONS = [
-  { id: "balanced", labelKey: "textShapRProfileBalanced", fallback: "Balanced" },
-  { id: "round", labelKey: "textShapRProfileRound", fallback: "Round" },
-  { id: "tall", labelKey: "textShapRProfileTall", fallback: "Tall" },
-  { id: "wide", labelKey: "textShapRProfileWide", fallback: "Wide" },
+  { id: "balanced", labelKey: "textShapeRProfileBalanced", fallback: "Balanced" },
+  { id: "round", labelKey: "textShapeRProfileRound", fallback: "Round" },
+  { id: "tall", labelKey: "textShapeRProfileTall", fallback: "Tall" },
+  { id: "wide", labelKey: "textShapeRProfileWide", fallback: "Wide" },
 ];
 
 const MANUAL_SHAPES = [
-  { id: "selection", labelKey: "textShapRManualShapeSelection", fallback: "Selection" },
-  { id: "sine", labelKey: "textShapRManualShapeSine", fallback: "Sine" },
-  { id: "ellipse", labelKey: "textShapRManualShapeEllipse", fallback: "Ellipse" },
-  { id: "diamond", labelKey: "textShapRManualShapeDiamond", fallback: "Diamond" },
+  { id: "selection", labelKey: "textShapeRManualShapeSelection", fallback: "Selection" },
+  { id: "sine", labelKey: "textShapeRManualShapeSine", fallback: "Sine" },
+  { id: "ellipse", labelKey: "textShapeRManualShapeEllipse", fallback: "Ellipse" },
+  { id: "diamond", labelKey: "textShapeRManualShapeDiamond", fallback: "Diamond" },
 ];
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -69,14 +69,14 @@ const renderMarkdownText = (text, markdownEnabled) => {
     if (run.bold) style.fontWeight = "bold";
     if (run.italic) style.fontStyle = "italic";
     return (
-      <span key={`textshapr-md-${index}`} style={style}>
+      <span key={`textshaper-md-${index}`} style={style}>
         {run.text}
       </span>
     );
   });
 };
 
-const TextShapRModal = React.memo(function TextShapRModal() {
+const TextShapeRModal = React.memo(function TextShapeRModal() {
   const context = useContext();
   const line = context.state.currentLine || { text: "" };
   const textBlockStyle = context.state.currentStyle || {};
@@ -121,7 +121,7 @@ const TextShapRModal = React.memo(function TextShapRModal() {
   }, []);
 
   const variants = React.useMemo(
-    () => generateTextShapRVariants(sourceText, {
+    () => generateTextShapeRVariants(sourceText, {
       limit: 10,
       allowHyphenation,
       profile,
@@ -145,7 +145,7 @@ const TextShapRModal = React.memo(function TextShapRModal() {
 
   const selectedVariant = variants.find((variant) => variant.id === selectedId) || variants[0] || null;
   const manualVariant = React.useMemo(
-    () => generateManualTextShapRVariant(sourceText, manualSettings),
+    () => generateManualTextShapeRVariant(sourceText, manualSettings),
     [sourceText, manualSettings]
   );
 
@@ -164,7 +164,7 @@ const TextShapRModal = React.memo(function TextShapRModal() {
           text: "",
           style: null,
           loading: false,
-          error: locale.textShapRLayerNoText || "Select a Photoshop text layer first.",
+          error: locale.textShapeRLayerNoText || "Select a Photoshop text layer first.",
         });
         return;
       }
@@ -212,10 +212,10 @@ const TextShapRModal = React.memo(function TextShapRModal() {
   }, []);
 
   const scanSelection = React.useCallback(() => {
-    setManualStatus(locale.textShapRManualScanning || "Scanning selection...");
+    setManualStatus(locale.textShapeRManualScanning || "Scanning selection...");
     getSelectionShape((selectionShape) => {
       if (!selectionShape?.bounds) {
-        setManualStatus(locale.textShapRManualNoSelection || "No active Photoshop selection.");
+        setManualStatus(locale.textShapeRManualNoSelection || "No active Photoshop selection.");
         return;
       }
       const selection = selectionShape.bounds;
@@ -229,8 +229,8 @@ const TextShapRModal = React.memo(function TextShapRModal() {
         height,
         lineCount: estimateManualLineCount(sourceText, width, height),
       }));
-      const statusKey = selectionShape.fallback ? "textShapRManualSelectionBoundsLoaded" : "textShapRManualSelectionLoaded";
-      setManualStatus((locale[statusKey] || locale.textShapRManualSelectionLoaded || "Selection {width}x{height} loaded.")
+      const statusKey = selectionShape.fallback ? "textShapeRManualSelectionBoundsLoaded" : "textShapeRManualSelectionLoaded";
+      setManualStatus((locale[statusKey] || locale.textShapeRManualSelectionLoaded || "Selection {width}x{height} loaded.")
         .replace("{width}", width)
         .replace("{height}", height));
     });
@@ -244,8 +244,8 @@ const TextShapRModal = React.memo(function TextShapRModal() {
 
   const sourceStatus = textSource === "layer"
     ? layerSource.loading
-      ? (locale.textShapRLayerLoading || "Reading selected layer...")
-      : layerSource.error || (layerSource.text ? (locale.textShapRLayerLoaded || "Selected layer loaded.") : "")
+      ? (locale.textShapeRLayerLoading || "Reading selected layer...")
+      : layerSource.error || (layerSource.text ? (locale.textShapeRLayerLoaded || "Selected layer loaded.") : "")
     : "";
 
   React.useEffect(() => {
@@ -281,35 +281,35 @@ const TextShapRModal = React.memo(function TextShapRModal() {
   return (
     <React.Fragment>
       <div className="app-modal-header hostBrdBotContrast">
-        <div className="app-modal-title">{locale.textShapRTitle || "TextShapR"}</div>
-        <div className="textshapr-mode-tabs">
+        <div className="app-modal-title">{locale.textShapeRTitle || "TextShapeR"}</div>
+        <div className="textshaper-mode-tabs">
           <button className={mode === "auto" ? "is-active" : ""} onClick={() => setMode("auto")}>
-            {locale.textShapRAutoMode || "Auto"}
+            {locale.textShapeRAutoMode || "Auto"}
           </button>
           <button className={mode === "manual" ? "is-active" : ""} onClick={() => setMode("manual")}>
-            {locale.textShapRManualMode || "Manual"}
+            {locale.textShapeRManualMode || "Manual"}
           </button>
         </div>
         <button className="topcoat-icon-button" onClick={close} title={locale.close || "Close"}>
           <FiX size={14} />
         </button>
       </div>
-      <div className="app-modal-body textshapr-modal-body">
-        <div className="textshapr-source-bar hostBrdBotContrast">
-          <div className="textshapr-source-tabs" role="tablist">
+      <div className="app-modal-body textshaper-modal-body">
+        <div className="textshaper-source-bar hostBrdBotContrast">
+          <div className="textshaper-source-tabs" role="tablist">
             <button
               type="button"
               className={textSource === "textblock" ? "is-active" : ""}
               onClick={() => setSourceMode("textblock")}
             >
-              {locale.textShapRSourceTextBlock || "Block"}
+              {locale.textShapeRSourceTextBlock || "Block"}
             </button>
             <button
               type="button"
               className={textSource === "layer" ? "is-active" : ""}
               onClick={() => setSourceMode("layer")}
             >
-              {locale.textShapRSourceLayer || "Layer"}
+              {locale.textShapeRSourceLayer || "Layer"}
             </button>
           </div>
           {textSource === "layer" && (
@@ -318,85 +318,85 @@ const TextShapRModal = React.memo(function TextShapRModal() {
               type="button"
               onClick={refreshLayerSource}
               disabled={layerSource.loading}
-              title={locale.textShapRLayerRefresh || "Refresh selected layer"}
+              title={locale.textShapeRLayerRefresh || "Refresh selected layer"}
             >
               <FiRefreshCw size={13} />
             </button>
           )}
-          {sourceStatus && <div className="textshapr-source-status">{sourceStatus}</div>}
+          {sourceStatus && <div className="textshaper-source-status">{sourceStatus}</div>}
         </div>
         {mode === "auto" ? (
           <React.Fragment>
-            <div className="textshapr-controls hostBrdBotContrast">
-              <div className="textshapr-profile-tabs" role="tablist">
+            <div className="textshaper-controls hostBrdBotContrast">
+              <div className="textshaper-profile-tabs" role="tablist">
                 {PROFILE_OPTIONS.map((option) => (
                   <button
                     key={option.id}
                     type="button"
-                    className={"textshapr-profile-tab" + (profile === option.id ? " is-active" : "")}
+                    className={"textshaper-profile-tab" + (profile === option.id ? " is-active" : "")}
                     onClick={() => setProfile(option.id)}
                   >
                     {locale[option.labelKey] || option.fallback}
                   </button>
                 ))}
               </div>
-              <label className="textshapr-hyphen-toggle">
+              <label className="textshaper-hyphen-toggle">
                 <input
                   type="checkbox"
                   checked={allowHyphenation}
                   onChange={(event) => setAllowHyphenation(event.target.checked)}
                 />
-                <span>{locale.textShapRHyphenToggle || "Hyphenation"}</span>
+                <span>{locale.textShapeRHyphenToggle || "Hyphenation"}</span>
               </label>
               {autoShape ? (
                 <span
-                  className="textshapr-shape-badge"
-                  title={locale.textShapRShapeActive || "Shapes follow the current selection outline"}
+                  className="textshaper-shape-badge"
+                  title={locale.textShapeRShapeActive || "Shapes follow the current selection outline"}
                 >
-                  {locale.textShapRShapeBadge || "Selection"}
+                  {locale.textShapeRShapeBadge || "Selection"}
                 </span>
               ) : null}
             </div>
-            <div className="textshapr-grid">
+            <div className="textshaper-grid">
               {variants.map((variant, index) => (
                 <button
                   key={variant.id}
                   type="button"
                   className={
-                    "textshapr-tile hostBgdDark" +
+                    "textshaper-tile hostBgdDark" +
                     (applyingId === variant.id ? " is-applying" : "") +
                     (selectedId === variant.id ? " is-selected" : "")
                   }
                   onClick={() => applyVariant(variant)}
-                  title={locale.textShapRApply || "Apply this shape"}
+                  title={locale.textShapeRApply || "Apply this shape"}
                 >
-                  <span className="textshapr-tile-rank">{index + 1}</span>
-                  <TextShapRFitPreview
-                    outerClassName="textshapr-tile-text"
-                    innerClassName="textshapr-tile-fit"
+                  <span className="textshaper-tile-rank">{index + 1}</span>
+                  <TextShapeRFitPreview
+                    outerClassName="textshaper-tile-text"
+                    innerClassName="textshaper-tile-fit"
                     contentKey={`${variant.text}|${markdownEnabled}|${styleObject.fontFamily || ""}`}
                     style={{ ...styleObject, fontFamily: styleObject.fontFamily || "Tahoma" }}
                   >
                     {variant.lines.map((variantLine, lineIndex) => (
-                      <span key={`${variant.id}-${lineIndex}`} className="textshapr-line">
+                      <span key={`${variant.id}-${lineIndex}`} className="textshaper-line">
                         {renderMarkdownText(variantLine, markdownEnabled)}
                       </span>
                     ))}
-                  </TextShapRFitPreview>
+                  </TextShapeRFitPreview>
                   {variant.hyphenCount > 0 && (
-                    <span className="textshapr-hyphen">{locale.textShapRHyphenated || "hyphen"}</span>
+                    <span className="textshaper-hyphen">{locale.textShapeRHyphenated || "hyphen"}</span>
                   )}
                 </button>
               ))}
             </div>
             {!variants.length && (
-              <div className="textshapr-empty">{locale.textShapREmpty || "No text available for TextShapR."}</div>
+              <div className="textshaper-empty">{locale.textShapeREmpty || "No text available for TextShapeR."}</div>
             )}
           </React.Fragment>
         ) : (
-          <div className="textshapr-manual">
-            <div className="textshapr-manual-toolbar hostBrdBotContrast">
-              <div className="textshapr-shape-tabs">
+          <div className="textshaper-manual">
+            <div className="textshaper-manual-toolbar hostBrdBotContrast">
+              <div className="textshaper-shape-tabs">
                 {MANUAL_SHAPES.map((shapeOption) => (
                   <button
                     key={shapeOption.id}
@@ -409,7 +409,7 @@ const TextShapRModal = React.memo(function TextShapRModal() {
                 ))}
               </div>
               <button className="topcoat-button" onClick={scanSelection}>
-                <FiRefreshCw size={13} /> {locale.textShapRManualUseSelection || "Selection"}
+                <FiRefreshCw size={13} /> {locale.textShapeRManualUseSelection || "Selection"}
               </button>
             </div>
             <ManualPreview
@@ -418,25 +418,25 @@ const TextShapRModal = React.memo(function TextShapRModal() {
               styleObject={styleObject}
               markdownEnabled={markdownEnabled}
             />
-            <div className="textshapr-manual-status">{manualStatus || (locale.textShapRManualHint || "Use the current Photoshop selection as the bubble size.")}</div>
-            <div className="textshapr-manual-controls">
-              <ManualSlider label={locale.textShapRManualWidth || "Width"} value={manualSettings.width} min={80} max={1200} step={1} onChange={(value) => updateManualSetting("width", value)} />
-              <ManualSlider label={locale.textShapRManualHeight || "Height"} value={manualSettings.height} min={80} max={1200} step={1} onChange={(value) => updateManualSetting("height", value)} />
-              <ManualSlider label={locale.textShapRManualLines || "Lines"} value={manualSettings.lineCount} min={1} max={8} step={1} onChange={(value) => updateManualSetting("lineCount", value)} />
-              <ManualSlider label={locale.textShapRManualSoftness || "Softness"} value={manualSettings.softness} min={0.2} max={1.2} step={0.01} digits={2} onChange={(value) => updateManualSetting("softness", value)} />
-              <ManualSlider label={locale.textShapRManualEdge || "Edge"} value={manualSettings.floor} min={0} max={0.5} step={0.01} digits={2} onChange={(value) => updateManualSetting("floor", value)} />
+            <div className="textshaper-manual-status">{manualStatus || (locale.textShapeRManualHint || "Use the current Photoshop selection as the bubble size.")}</div>
+            <div className="textshaper-manual-controls">
+              <ManualSlider label={locale.textShapeRManualWidth || "Width"} value={manualSettings.width} min={80} max={1200} step={1} onChange={(value) => updateManualSetting("width", value)} />
+              <ManualSlider label={locale.textShapeRManualHeight || "Height"} value={manualSettings.height} min={80} max={1200} step={1} onChange={(value) => updateManualSetting("height", value)} />
+              <ManualSlider label={locale.textShapeRManualLines || "Lines"} value={manualSettings.lineCount} min={1} max={8} step={1} onChange={(value) => updateManualSetting("lineCount", value)} />
+              <ManualSlider label={locale.textShapeRManualSoftness || "Softness"} value={manualSettings.softness} min={0.2} max={1.2} step={0.01} digits={2} onChange={(value) => updateManualSetting("softness", value)} />
+              <ManualSlider label={locale.textShapeRManualEdge || "Edge"} value={manualSettings.floor} min={0} max={0.5} step={0.01} digits={2} onChange={(value) => updateManualSetting("floor", value)} />
             </div>
           </div>
         )}
       </div>
-      <div className="app-modal-footer hostBrdTopContrast textshapr-footer">
-        <div>{locale.textShapRFooter || "Click a shape to test it. Shift+number applies and advances."}</div>
-        <div className="textshapr-footer-actions">
+      <div className="app-modal-footer hostBrdTopContrast textshaper-footer">
+        <div>{locale.textShapeRFooter || "Click a shape to test it. Shift+number applies and advances."}</div>
+        <div className="textshaper-footer-actions">
           <button className="topcoat-button" onClick={() => applyVariant(mode === "manual" ? manualVariant : selectedVariant)} disabled={!(mode === "manual" ? manualVariant : selectedVariant) || !!applyingId}>
-            <FiCheck size={13} /> {locale.textShapRApplyShort || "Apply"}
+            <FiCheck size={13} /> {locale.textShapeRApplyShort || "Apply"}
           </button>
           <button className="topcoat-button--cta" onClick={() => applyVariant(mode === "manual" ? manualVariant : selectedVariant, true)} disabled={!(mode === "manual" ? manualVariant : selectedVariant) || !!applyingId}>
-            <FiArrowRightCircle size={13} /> {locale.textShapRApplyNext || "Apply + next"}
+            <FiArrowRightCircle size={13} /> {locale.textShapeRApplyNext || "Apply + next"}
           </button>
           <button className="topcoat-button" onClick={close}>
             <FiX size={13} /> {locale.close || "Close"}
@@ -450,7 +450,7 @@ const TextShapRModal = React.memo(function TextShapRModal() {
 const ManualSlider = React.memo(function ManualSlider({ label, value, min, max, step, digits = 0, onChange }) {
   const displayValue = digits ? Number(value).toFixed(digits) : Math.round(value);
   return (
-    <label className="textshapr-manual-slider">
+    <label className="textshaper-manual-slider">
       <span>{label}</span>
       <input
         type="range"
@@ -494,32 +494,32 @@ const ManualPreview = React.memo(function ManualPreview({ variant, settings, sty
   }
 
   return (
-    <div className="textshapr-manual-preview">
-      <div className="textshapr-manual-stage" style={{ width: previewWidth, height: previewHeight }}>
+    <div className="textshaper-manual-preview">
+      <div className="textshaper-manual-stage" style={{ width: previewWidth, height: previewHeight }}>
         {settings.shape === "selection" && selectionPoints ? (
-          <svg className="textshapr-manual-selection" viewBox={`0 0 ${previewWidth} ${previewHeight}`} preserveAspectRatio="none">
+          <svg className="textshaper-manual-selection" viewBox={`0 0 ${previewWidth} ${previewHeight}`} preserveAspectRatio="none">
             <polygon points={selectionPoints} />
           </svg>
         ) : (
-          <div className="textshapr-manual-bubble" style={bubbleStyle} />
+          <div className="textshaper-manual-bubble" style={bubbleStyle} />
         )}
-        <div className="textshapr-manual-text" style={styleObject}>
-          <TextShapRFitPreview
-            outerClassName="textshapr-manual-fit-outer"
-            innerClassName="textshapr-manual-fit"
+        <div className="textshaper-manual-text" style={styleObject}>
+          <TextShapeRFitPreview
+            outerClassName="textshaper-manual-fit-outer"
+            innerClassName="textshaper-manual-fit"
             contentKey={`${(variant?.lines || []).join("\n")}|${markdownEnabled}|${styleObject.fontFamily || ""}`}
             style={{ fontFamily: styleObject.fontFamily || "Tahoma" }}
           >
             {(variant?.lines || []).map((variantLine, lineIndex) => (
-              <span key={`manual-${lineIndex}`} className="textshapr-line">
+              <span key={`manual-${lineIndex}`} className="textshaper-line">
                 {renderMarkdownText(variantLine, markdownEnabled)}
               </span>
             ))}
-          </TextShapRFitPreview>
+          </TextShapeRFitPreview>
         </div>
       </div>
     </div>
   );
 });
 
-export default TextShapRModal;
+export default TextShapeRModal;

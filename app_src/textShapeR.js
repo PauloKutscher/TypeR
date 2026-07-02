@@ -585,7 +585,7 @@ const generateHyphenTokenSets = (words) => {
   return sets;
 };
 
-const generateTextShapRVariants = (text, options = {}) => {
+const generateTextShapeRVariants = (text, options = {}) => {
   const normalized = normalizeText(text);
   if (!normalized) return [];
 
@@ -657,7 +657,7 @@ const generateTextShapRVariants = (text, options = {}) => {
     .map((variant, index) => ({ ...variant, id: `shape-${index + 1}` }));
 };
 
-const generateManualTextShapRVariant = (text, options = {}) => {
+const generateManualTextShapeRVariant = (text, options = {}) => {
   const normalized = normalizeText(text);
   if (!normalized) return null;
   const words = splitWordsPreservingMarkdown(normalized);
@@ -707,4 +707,4 @@ const generateManualTextShapRVariant = (text, options = {}) => {
   };
 };
 
-export { generateTextShapRVariants, generateManualTextShapRVariant, estimateManualLineCount, visibleLength, visibleWidth };
+export { generateTextShapeRVariants, generateManualTextShapeRVariant, estimateManualLineCount, visibleLength, visibleWidth };
