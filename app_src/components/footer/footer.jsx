@@ -34,6 +34,10 @@ const AppFooter = React.memo(function AppFooter() {
     context.dispatch({ type: "setMultiBubbleMode", value: !context.state.multiBubbleMode });
   };
 
+  const toggleInlineTextShapeR = () => {
+    context.dispatch({ type: "setInlineTextShapeR", value: !context.state.inlineTextShapeR });
+  };
+
   return (
     <React.Fragment>
       <span className="link" onClick={openHelp}>
@@ -48,12 +52,23 @@ const AppFooter = React.memo(function AppFooter() {
           : locale.footerOpenRepo}
       </span>
       <span
-        className="link footer-mode-indicator"
+        className="link footer-mode-indicator footer-mode-spacer"
+        onClick={toggleInlineTextShapeR}
+        title={locale.inlineTextShapeRModeHint || "Shows or hides TextShapeR suggestions directly in the main panel"}
+      >
+        <span className={`footer-mode-dot ${context.state.inlineTextShapeR ? "is-on" : ""}`} />
+        <span className="footer-mode-label">{locale.textShapeRTitle || "TextShapeR"}</span>
+        <span className="footer-mode-status">
+          {context.state.inlineTextShapeR ? (locale.multiBubbleModeOn || "ON") : (locale.multiBubbleModeOff || "OFF")}
+        </span>
+      </span>
+      <span
+        className="link footer-mode-indicator footer-mode-adjacent"
         onClick={toggleMultiBubble}
         title={locale.multiBubbleModeHint || "Allows capturing multiple selections to insert multiple texts at once"}
       >
         <span className={`footer-mode-dot ${context.state.multiBubbleMode ? "is-on" : ""}`} />
-        <span className="footer-mode-label">{locale.multiBubbleModeShort || "MB"}</span>
+        <span className="footer-mode-label">Multi-bubble</span>
         <span className="footer-mode-status">
           {context.state.multiBubbleMode ? (locale.multiBubbleModeOn || "ON") : (locale.multiBubbleModeOff || "OFF")}
         </span>

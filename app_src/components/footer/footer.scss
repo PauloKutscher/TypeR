@@ -19,12 +19,18 @@
     margin-left: 8px;
   }
   .link.footer-mode-indicator {
-    margin-left: auto;
+    margin-left: 0;
     display: inline-flex;
     align-items: center;
     gap: 4px;
     font-size: 11px;
     cursor: pointer;
+  }
+  .link.footer-mode-spacer {
+    margin-left: auto;
+  }
+  .link.footer-mode-adjacent {
+    margin-left: 12px;
   }
   .footer-mode-dot {
     width: 8px;

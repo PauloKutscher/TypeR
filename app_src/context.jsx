@@ -147,7 +147,7 @@ const initialState = {
   resizeTextBoxOnCenter: false,
   showTips: storage.data?.showTips !== false,
   showQuickStyleSize: storage.data?.showQuickStyleSize !== false,
-  inlineTextShapeR: storage.data?.inlineTextShapeR === true,
+  inlineTextShapeR: storage.data?.inlineTextShapeR !== false,
   textShapeRBubbleAware: storage.data?.textShapeRBubbleAware !== false,
   modalType: null,
   modalData: {},
