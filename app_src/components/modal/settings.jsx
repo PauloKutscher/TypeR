@@ -61,6 +61,9 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [resetLineCounterOnPage, setResetLineCounterOnPage] = React.useState(
     context.state.resetLineCounterOnPage !== false
   );
+  const [multiTabEnabled, setMultiTabEnabled] = React.useState(
+    context.state.multiTabEnabled !== false
+  );
   const [edited, setEdited] = React.useState(false);
 
   // States manager
@@ -182,6 +185,11 @@ const SettingsModal = React.memo(function SettingsModal() {
 
   const changeInterpretMarkdown = (e) => {
     setInterpretMarkdown(e.target.checked);
+    setEdited(true);
+  };
+
+  const changeMultiTabEnabled = (e) => {
+    setMultiTabEnabled(e.target.checked);
     setEdited(true);
   };
 
@@ -318,6 +326,20 @@ const SettingsModal = React.memo(function SettingsModal() {
         type: "setResetLineCounterOnPage",
         value: resetLineCounterOnPage,
       });
+    }
+    if (multiTabEnabled !== (context.state.multiTabEnabled !== false)) {
+      const openTabs = context.state.tabs || [];
+      if (!multiTabEnabled && openTabs.length > 1) {
+        const message = (locale.settingsMultiTabDisableConfirm || 'Disable multi-tab? All tabs other than "{name}" will be lost.')
+          .replace("{name}", openTabs[0].name);
+        if (confirm(message)) {
+          context.dispatch({ type: "setMultiTabEnabled", value: false });
+        } else {
+          setMultiTabEnabled(true);
+        }
+      } else {
+        context.dispatch({ type: "setMultiTabEnabled", value: multiTabEnabled });
+      }
     }
     const shortcut = {};
     document.querySelectorAll("input[id^=shortcut_]").forEach((input) => {
@@ -657,6 +679,21 @@ const SettingsModal = React.memo(function SettingsModal() {
                       </span>
                       <div className="settings-checkbox-hint">
                         {locale.settingsInlineTextShapeRHint || "Shows text shape suggestions directly in the main panel."}
+                      </div>
+                    </div>
+                  </label>
+                </div>
+                <div className="settings-checkbox-item">
+                  <label className="settings-checkbox-label">
+                    <input type="checkbox" checked={multiTabEnabled} onChange={changeMultiTabEnabled} />
+                    <div className="settings-checkbox-custom"></div>
+                    <div className="settings-checkbox-content">
+                      <span>
+                        {locale.settingsMultiTabLabel || "Multi-tab"}
+                        <b className="settings-new-badge">{locale.settingsNewBadge || "New"}</b>
+                      </span>
+                      <div className="settings-checkbox-hint">
+                        {locale.settingsMultiTabHint || "Manage several series at once with tabs above the text block, each with its own text and PSD sync."}
                       </div>
                     </div>
                   </label>

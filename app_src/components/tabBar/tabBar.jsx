@@ -55,6 +55,8 @@ const TabBar = React.memo(function TabBar() {
 
   const addTab = () => context.dispatch({ type: "addTab" });
 
+  if (context.state.multiTabEnabled === false) return null;
+
   return (
     <div className="tab-bar hostBgdDark">
       <div className="tab-bar-list">

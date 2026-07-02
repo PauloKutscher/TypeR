@@ -42,6 +42,7 @@ const storeFields = [
   "resetLineCounterOnPage",
   "tabs",
   "currentTabId",
+  "multiTabEnabled",
 ];
 
 // Fields that belong to each tab (text script + PSD sync)
@@ -190,6 +191,7 @@ const initialState = {
   interpretMarkdown: storage.data?.interpretMarkdown === true,
   styleSizeStep: 1,
   resetLineCounterOnPage: storage.data?.resetLineCounterOnPage !== false,
+  multiTabEnabled: storage.data?.multiTabEnabled !== false,
   ...storage.data,
   shortcut: { ...defaultShortcut, ...(storage.data?.shortcut || {}) },
 };
@@ -838,6 +840,18 @@ const reducer = (state, action) => {
       const name = (action.name || "").trim();
       if (!name) break;
       newState.tabs = state.tabs.map((tab) => (tab.id === action.id ? { ...tab, name } : tab));
+      break;
+    }
+
+    case "setMultiTabEnabled": {
+      const enabled = action.value !== false;
+      newState.multiTabEnabled = enabled;
+      if (!enabled && state.tabs.length > 1) {
+        // Disabling multi-tab keeps only the first tab; the rest is discarded
+        const firstTab = state.tabs[0];
+        newState.tabs = [firstTab];
+        loadTabIntoState(newState, firstTab);
+      }
       break;
     }
 

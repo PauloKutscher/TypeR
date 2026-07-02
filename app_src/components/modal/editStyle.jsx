@@ -563,6 +563,15 @@ const StyleDetails = React.memo(function StyleDetails(props) {
               <AiOutlineFontSize size={18} />
             </button>
           )}
+          {textStyle.ligature ? (
+            <button className="topcoat-icon-button--large" title={locale.editStyleLigatures} onClick={(e) => changeProp("ligature", false, e)}>
+              <span className="style-edit-ligature-icon">fi</span>
+            </button>
+          ) : (
+            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleLigatures} onClick={(e) => changeProp("ligature", true, e)}>
+              <span className="style-edit-ligature-icon">fi</span>
+            </button>
+          )}
         </div>
       </div>
       <div className="style-edit-props-row">

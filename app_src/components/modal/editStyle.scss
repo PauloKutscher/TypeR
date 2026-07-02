@@ -90,6 +90,16 @@
         margin-left: 15px;
     }
 }
+.style-edit-ligature-icon {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-feature-settings: 'liga';
+    display: inline-block;
+    font-style: italic;
+    line-height: 18px;
+    font-size: 16px;
+    height: 18px;
+    width: 18px;
+}
 .style-edit-props-icon {
     flex: 0 0 auto;
     height: 25px;
