@@ -61,6 +61,33 @@
   cursor: pointer;
 }
 
+.global-tooltip {
+  background: rgba(#111, 0.96);
+  border: 1px solid rgba(#fff, 0.16);
+  border-radius: 4px;
+  box-shadow: 0 5px 16px rgba(#000, 0.32);
+  box-sizing: border-box;
+  color: #fff;
+  font-size: 11px;
+  left: 0;
+  line-height: 1.25;
+  max-width: 280px;
+  opacity: 0;
+  padding: 5px 7px;
+  pointer-events: none;
+  position: fixed;
+  top: 0;
+  transform: translateY(2px);
+  transition: opacity 0.08s linear, transform 0.08s linear;
+  white-space: normal;
+  z-index: 100000;
+
+  &.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .fields {
   & + & {
     padding-top: 10px;

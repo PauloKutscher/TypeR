@@ -148,7 +148,7 @@ const initialState = {
   showTips: storage.data?.showTips !== false,
   showQuickStyleSize: storage.data?.showQuickStyleSize !== false,
   inlineTextShapR: storage.data?.inlineTextShapR === true,
-  textShapRBubbleAware: storage.data?.textShapRBubbleAware === true,
+  textShapRBubbleAware: storage.data?.textShapRBubbleAware !== false,
   modalType: null,
   modalData: {},
   images: [],
@@ -641,6 +641,9 @@ const reducer = (state, action) => {
 
     case "setInlineTextShapR": {
       newState.inlineTextShapR = !!action.value;
+      if (newState.inlineTextShapR) {
+        newState.textShapRBubbleAware = true;
+      }
       break;
     }
 

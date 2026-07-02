@@ -281,6 +281,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const toggleBubbleAware = React.useCallback(() => {
     context.dispatch({ type: "setTextShapRBubbleAware", value: !bubbleAware });
   }, [context, bubbleAware]);
+  const bubbleAwareTitle = bubbleAware
+    ? (locale.textShapRBubbleToggleOn || "Bubble-aware is on: when there is no active selection, TextShapR detects the bubble around the selected text layer and shapes suggestions to it. Click to turn it off.")
+    : (locale.textShapRBubbleToggleOff || "Bubble-aware is off: TextShapR only follows a manual Photoshop selection. Click to auto-detect the bubble around the selected text layer.");
 
   React.useEffect(() => {
     setInlineVariantPage((current) => Math.min(current, inlinePageCount - 1));
@@ -666,7 +669,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         {context.state.inlineTextShapR ? (
           <div className="preview-textshapr hostBgdDark" onMouseEnter={() => { refreshInlineLayerSource(); refreshInlineSelectionShape(); }}>
             <div className="preview-textshapr-head">
-              <button type="button" className="preview-textshapr-open" onClick={openTextShapR} title={locale.textShapRTitle || "TextShapR"}>
+              <button type="button" className="preview-textshapr-open" onClick={openTextShapR} title={locale.textShapROpenFull || "Open the full TextShapR panel"}>
                 <FiType size={13} />
                 <span>{locale.textShapRTitle || "TextShapR"}</span>
               </button>
@@ -683,7 +686,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                   type="button"
                   className={"preview-textshapr-bubble-toggle" + (bubbleAware ? " is-active" : "")}
                   onClick={toggleBubbleAware}
-                  title={locale.textShapRBubbleToggle || "Bubble-aware: auto-detect the bubble around the text"}
+                  title={bubbleAwareTitle}
                 >
                   <FaMagic size={10} />
                 </button>
@@ -691,7 +694,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                   type="button"
                   onClick={() => { refreshInlineLayerSource(true); refreshInlineSelectionShape(true); }}
                   disabled={inlineLayerSource.loading}
-                  title={locale.textShapRLayerRefresh || "Refresh selected layer"}
+                  title={locale.textShapRLayerRefreshHint || "Refresh the selected Photoshop text layer, its style, and the bubble/selection shape"}
                 >
                   <FiRefreshCw size={11} />
                 </button>
@@ -699,7 +702,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                   type="button"
                   onClick={() => moveInlineTextShapRPage(-1)}
                   disabled={inlinePageCount <= 1}
-                  title={locale.prevLine || "Previous"}
+                  title={locale.textShapRPreviousSuggestions || "Show previous TextShapR suggestions"}
                 >
                   <FiChevronLeft size={12} />
                 </button>
@@ -708,7 +711,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                   type="button"
                   onClick={() => moveInlineTextShapRPage(1)}
                   disabled={inlinePageCount <= 1}
-                  title={locale.nextLine || "Next"}
+                  title={locale.textShapRNextSuggestions || "Show next TextShapR suggestions"}
                 >
                   <FiChevronRight size={12} />
                 </button>
@@ -721,7 +724,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                   type="button"
                   className={"preview-textshapr-choice" + (applyingTextShapRId === variant.id ? " is-applying" : "")}
                   onClick={(event) => applyTextShapRVariant(variant, event.shiftKey)}
-                  title={locale.textShapRApply || "Apply this shape"}
+                  title={locale.textShapRInlineApplyHint || "Apply this text shape to the selected Photoshop text layer. Shift-click also moves to the next line."}
                 >
                   <span className="preview-textshapr-rank">{inlineVariantPage * inlinePageSize + index + 1}</span>
                   <TextShapRFitPreview
