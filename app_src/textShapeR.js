@@ -92,7 +92,11 @@ const visibleWidth = (text) => {
   return width;
 };
 
-const tokenLength = (token) => visibleWidth(token.text);
+const tokenLength = (token) => {
+  // Token text never changes: cache the measured width on the token itself
+  if (token.__width == null) token.__width = visibleWidth(token.text);
+  return token.__width;
+};
 
 const lineText = (tokens) => tokens.map((token) => token.text).join(" ").trim();
 
@@ -233,11 +237,26 @@ const buildTargets = (tokens, lineCount, curve, shift, bias, minWeight) => {
 
 const serializeLines = (lines) => lines.map((line) => line.map((token) => token.text).join(" ").trim()).join("\n");
 
-const rangeRespectsForcedBreaks = (tokens, from, to) => {
-  for (let index = from; index < to; index++) {
-    if (tokens[index].forceBreakAfter && index !== to - 1) return false;
+const getTokenMetrics = (tokens) => {
+  // Cached on the token array: prefix width sums and per-token flags make
+  // every DP line cost O(1) instead of re-measuring joined strings
+  if (tokens.__metrics) return tokens.__metrics;
+  const tokenCount = tokens.length;
+  const prefix = new Array(tokenCount + 1);
+  prefix[0] = 0;
+  const endsBreak = new Array(tokenCount);
+  const punctOnly = new Array(tokenCount);
+  const breakCount = new Array(tokenCount + 1);
+  breakCount[0] = 0;
+  for (let index = 0; index < tokenCount; index++) {
+    prefix[index + 1] = prefix[index] + tokenLength(tokens[index]);
+    endsBreak[index] = endsWithBreakPunctuation(tokens[index].text);
+    punctOnly[index] = /^[.,;:!?…]+$/.test(stripMarkdownForMeasure(tokens[index].text));
+    breakCount[index + 1] = breakCount[index] + (tokens[index].forceBreakAfter ? 1 : 0);
   }
-  return true;
+  const metrics = { prefix, endsBreak, punctOnly, breakCount };
+  tokens.__metrics = metrics;
+  return metrics;
 };
 
 const buildCandidate = (tokens, lineCount, curve, shift, bias, minWeight, targetsOverride) => {
@@ -245,21 +264,23 @@ const buildCandidate = (tokens, lineCount, curve, shift, bias, minWeight, target
   if (tokens.length < lineCount) return null;
   const targets = targetsOverride || buildTargets(tokens, lineCount, curve, shift, bias, minWeight);
   const tokenCount = tokens.length;
+  const { prefix, endsBreak, punctOnly, breakCount } = getTokenMetrics(tokens);
   const dp = Array.from({ length: lineCount + 1 }, () => Array(tokenCount + 1).fill(Infinity));
   const prev = Array.from({ length: lineCount + 1 }, () => Array(tokenCount + 1).fill(-1));
   dp[0][0] = 0;
 
   const lineCost = (lineIndex, from, to) => {
-    if (!rangeRespectsForcedBreaks(tokens, from, to)) return Infinity;
-    const line = tokens.slice(from, to);
+    // A forced break inside the range (anywhere but on its last token)
+    // makes the line invalid; prefix counts make the check O(1)
+    if (breakCount[to - 1] - breakCount[from] > 0) return Infinity;
     const target = targets[lineIndex] || 1;
-    const width = lineLength(line);
+    const width = prefix[to] - prefix[from] + 0.45 * (to - from - 1);
     const ratio = (width - target) / target;
     let cost = ratio * ratio;
-    if (lineIndex < lineCount - 1 && endsWithBreakPunctuation(lineText(line))) {
+    if (lineIndex < lineCount - 1 && endsBreak[to - 1]) {
       cost = Math.max(0, cost - 0.09);
     }
-    if (/^[.,;:!?…]+$/.test(serializeLines([line]))) cost += 3;
+    if (to - from === 1 && punctOnly[from]) cost += 3;
     return cost;
   };
 
@@ -671,7 +692,10 @@ const generateTextShapeRVariants = (text, options = {}) => {
 
   if (options.allowHyphenation !== false) {
     generateHyphenTokenSets(words).forEach((tokens) => {
-      const hyphenMaxLines = Math.min(options.maxLines || maxLines, Math.max(1, tokens.length));
+      // Hyphen sets hold more tokens than words: cap by the profile range,
+      // not by the word-count-capped maxLines (a single long word must still
+      // be allowed to split onto two lines)
+      const hyphenMaxLines = Math.min(options.maxLines || Math.max(profileMaxLines, maxLines), Math.max(1, tokens.length));
       for (let lineCount = Math.max(2, minLines); lineCount <= hyphenMaxLines; lineCount++) {
         generationParams.forEach((params) => {
           params.curves.forEach((curve) => {

@@ -15,6 +15,7 @@ import TextShapeRFitPreview from "../textShapeRFitPreview";
 const normalizeLayerText = (text) => String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
 
 const getLayerSourceKey = (source) => JSON.stringify({
+  layerId: source.layerId || null,
   text: source.text,
   textStyleRange: source.style?.textProps?.layerText?.textStyleRange || null,
   paragraphStyleRange: source.style?.textProps?.layerText?.paragraphStyleRange || null,
@@ -31,6 +32,7 @@ const getActiveTextLayerSource = (callback) => {
       }
       const source = {
         text: normalizeLayerText(data.textProps.layerText.textKey),
+        layerId: typeof data.layerId === "number" ? data.layerId : null,
         style: {
           textProps: data.textProps,
           stroke: data.stroke || null,
@@ -53,6 +55,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     text: "",
     style: null,
     key: "",
+    layerId: null,
     loading: false,
     error: "",
   });
@@ -65,10 +68,13 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const [inlineSelectionShape, setInlineSelectionShape] = React.useState(null);
   const batchOrderRef = React.useRef([]);
   const batchPending = React.useRef(false);
+  const batchQueued = React.useRef(false);
   const batchRunRef = React.useRef(null);
+  const batchSelectionRef = React.useRef([]);
   const [batchSelection, setBatchSelection] = React.useState([]);
   const [batchRun, setBatchRun] = React.useState(null);
   batchRunRef.current = batchRun;
+  batchSelectionRef.current = batchSelection;
   const inlineTextStyle = inlineLayerSource.style?.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {};
   const inlineStyleObject = getStyleObject(inlineTextStyle);
   const markdownEnabled = context.state.interpretMarkdown !== false;
@@ -131,7 +137,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         setInlineLayerSource((current) => {
           const error = locale.textShapeRLayerNoText || "Select a Photoshop text layer first.";
           if (!current.text && current.error === error && !current.loading) return current;
-          return { text: "", style: null, key: "", loading: false, error };
+          return { text: "", style: null, key: "", layerId: null, loading: false, error };
         });
         return;
       }
@@ -144,6 +150,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         text: source.text,
         style: source.style,
         key: source.key,
+        layerId: source.layerId,
         loading: false,
         error: "",
       });
@@ -182,7 +189,10 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         return;
       }
 
-      if (!bubbleAware || !inlineSourceKey.current) {
+      // While several layers are selected (batch being lined up) the wand
+      // would fire on an ambiguous target and churn the document: hold off
+      const multiSelecting = batchSelectionRef.current.length > 1 && !batchRunRef.current;
+      if (!bubbleAware || !inlineSourceKey.current || multiSelecting) {
         inlineShapePending.current = false;
         inlineShapeKey.current = "";
         setInlineSelectionShape((current) => (current ? null : current));
@@ -224,32 +234,49 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   // layer at a time. Photoshop only reports stacking order, so the click
   // order is reconstructed by diffing the selection on every select event.
   const refreshBatchSelection = React.useCallback(() => {
-    if (batchPending.current) return;
     // While a batch runs the panel drives the layer selection itself
     if (batchRunRef.current) return;
+    if (batchPending.current) {
+      // A click landed while a diff was in flight: queue one trailing run so
+      // the final selection state is never missed
+      batchQueued.current = true;
+      return;
+    }
     batchPending.current = true;
     csInterface.evalScript("getSelectedTextLayers()", (result) => {
       batchPending.current = false;
-      let ids = [];
+      let ids = null;
       try {
         const data = JSON.parse(result || "{}");
-        ids = (data.layers || []).map((layer) => layer.id).filter((id) => typeof id === "number");
+        if (!data.error) {
+          ids = (data.layers || []).map((layer) => layer.id).filter((id) => typeof id === "number");
+        }
       } catch (error) {
-        return;
+        ids = null;
       }
-      const kept = batchOrderRef.current.filter((id) => ids.indexOf(id) !== -1);
-      const added = ids.filter((id) => kept.indexOf(id) === -1);
-      const nextOrder = kept.concat(added);
-      batchOrderRef.current = nextOrder;
-      setBatchSelection((current) => (
-        current.length === nextOrder.length && current.every((id, index) => id === nextOrder[index])
-          ? current
-          : nextOrder
-      ));
+      if (ids) {
+        const kept = batchOrderRef.current.filter((id) => ids.indexOf(id) !== -1);
+        const added = ids.filter((id) => kept.indexOf(id) === -1);
+        const nextOrder = kept.concat(added);
+        batchOrderRef.current = nextOrder;
+        setBatchSelection((current) => (
+          current.length === nextOrder.length && current.every((id, index) => id === nextOrder[index])
+            ? current
+            : nextOrder
+        ));
+      }
+      if (batchQueued.current) {
+        batchQueued.current = false;
+        refreshBatchSelection();
+      }
     });
   }, []);
 
   const goToBatchLayer = React.useCallback((layerId) => {
+    // Blank the source first so stale variants of the previous layer are
+    // never clickable while the next one loads
+    inlineSourceKey.current = "";
+    setInlineLayerSource({ text: "", style: null, key: "", layerId: null, loading: true, error: "" });
     csInterface.evalScript(`selectLayerById(${JSON.stringify(layerId)})`, () => {
       refreshInlineLayerSource(true);
       refreshInlineSelectionShape(true);
@@ -289,12 +316,14 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     // Primary signal: Photoshop notifies the panel when a layer is selected
     // or edited. Debounced because 'setd' events arrive in bursts.
     const unsubscribePhotoshopEvents = addPhotoshopEventListener(() => {
+      // The batch diff runs on every event, undebounced: collapsing quick
+      // successive layer clicks would lose the order the user picked them in
+      refreshBatchSelection();
       if (inlineEventDebounce.current) clearTimeout(inlineEventDebounce.current);
       inlineEventDebounce.current = setTimeout(() => {
         inlineEventDebounce.current = null;
         refreshInlineLayerSource();
         refreshInlineSelectionShape();
-        refreshBatchSelection();
       }, 120);
     });
 
@@ -642,6 +671,12 @@ const PreviewBlock = React.memo(function PreviewBlock() {
 
   const applyTextShapeRVariant = React.useCallback((variant, advance = false) => {
     if (!variant || applyingTextShapeRId) return;
+    // In batch mode, only apply once the loaded layer really is the queued
+    // one — a fast click during the layer switch must not hit the wrong layer
+    if (batchRunRef.current) {
+      const expectedLayerId = batchRunRef.current.queue[batchRunRef.current.index];
+      if (inlineLayerSource.loading || !inlineLayerSource.layerId || inlineLayerSource.layerId !== expectedLayerId) return;
+    }
     setApplyingTextShapeRId(variant.id);
     const lineStyle = getScaledStyle(inlineLayerSource.style, context.state.textScale);
     setActiveLayerText(variant.text, lineStyle, context.state.direction, (ok) => {
@@ -655,7 +690,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       refreshInlineLayerSource();
       if (advance) context.dispatch({ type: "nextLine", add: true });
     });
-  }, [applyingTextShapeRId, context, inlineLayerSource.style, refreshInlineLayerSource, advanceTextShapeRBatch]);
+  }, [applyingTextShapeRId, context, inlineLayerSource.style, inlineLayerSource.loading, inlineLayerSource.layerId, refreshInlineLayerSource, advanceTextShapeRBatch]);
 
   const handleIncrementChange = React.useCallback((e) => {
     context.dispatch({ type: "setTextSizeIncrement", increment: e.target.value });

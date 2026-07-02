@@ -1377,10 +1377,22 @@ function getHotkeyPressed() {
 function getActiveLayerText() {
   if (!documents.length) {
     return "";
-  } else if (activeDocument.activeLayer.kind != LayerKind.TEXT) {
+  }
+  // ActionManager only: touching activeDocument.activeLayer through the DOM
+  // collapses a multi-layer selection down to a single layer
+  if (!_layerIsTextLayer()) {
     return "";
   }
+  var layerId = null;
+  try {
+    var layerIdProp = stringIDToTypeID("layerID");
+    var idRef = new ActionReference();
+    idRef.putProperty(charID.Property, layerIdProp);
+    idRef.putEnumerated(charID.Layer, charID.Ordinal, charID.Target);
+    layerId = executeActionGet(idRef).getInteger(layerIdProp);
+  } catch (idError) {}
   return jamJSON.stringify({
+    layerId: layerId,
     textProps: jamText.getLayerText(),
     stroke: _getLayerStroke(),
   });
@@ -1553,6 +1565,11 @@ function getActiveLayerBubbleShape(data) {
   if (_getCurrentSelectionBounds()) {
     return jamJSON.stringify({ error: "hasSelection" });
   }
+  // With several layers targeted the wand origin is ambiguous, and the user
+  // is probably lining up a batch: leave the selection alone
+  if (_getTargetLayerCount() > 1) {
+    return jamJSON.stringify({ error: "multi" });
+  }
 
   var tolerance = data && data.tolerance ? parseInt(data.tolerance, 10) : 20;
   if (isNaN(tolerance)) tolerance = 20;
@@ -1623,21 +1640,48 @@ function getSelectedTextLayers() {
   }
   for (var j = 0; j < indexes.length; j++) {
     try {
-      var layerRef = new ActionReference();
+      // Per-property gets: pulling the full layer descriptor is slow and
+      // drags the whole text descriptor along for every selected layer
+      var textRef = new ActionReference();
+      textRef.putProperty(charID.Property, charID.Text);
       if (indexes[j] === -1) {
-        layerRef.putEnumerated(charID.Layer, charID.Ordinal, charID.Target);
+        textRef.putEnumerated(charID.Layer, charID.Ordinal, charID.Target);
       } else {
-        layerRef.putIndex(charID.Layer, indexes[j]);
+        textRef.putIndex(charID.Layer, indexes[j]);
       }
-      var descriptor = executeActionGet(layerRef);
-      if (!descriptor.hasKey(charID.Text)) continue;
+      if (!executeActionGet(textRef).hasKey(charID.Text)) continue;
+
+      var idRef = new ActionReference();
+      idRef.putProperty(charID.Property, layerIdProp);
+      if (indexes[j] === -1) {
+        idRef.putEnumerated(charID.Layer, charID.Ordinal, charID.Target);
+      } else {
+        idRef.putIndex(charID.Layer, indexes[j]);
+      }
+      var nameRef = new ActionReference();
+      nameRef.putProperty(charID.Property, nameProp);
+      if (indexes[j] === -1) {
+        nameRef.putEnumerated(charID.Layer, charID.Ordinal, charID.Target);
+      } else {
+        nameRef.putIndex(charID.Layer, indexes[j]);
+      }
       layers.push({
-        id: descriptor.getInteger(layerIdProp),
-        name: descriptor.getString(nameProp),
+        id: executeActionGet(idRef).getInteger(layerIdProp),
+        name: executeActionGet(nameRef).getString(nameProp),
       });
     } catch (layerError) {}
   }
   return jamJSON.stringify({ layers: layers });
+}
+
+function _getTargetLayerCount() {
+  var targetLayers = stringIDToTypeID("targetLayers");
+  var reference = new ActionReference();
+  reference.putProperty(charID.Property, targetLayers);
+  reference.putEnumerated(charID.Document, charID.Ordinal, charID.Target);
+  var doc = executeActionGet(reference);
+  if (!doc.hasKey(targetLayers)) return 1;
+  return doc.getList(targetLayers).count;
 }
 
 function selectLayerById(id) {
