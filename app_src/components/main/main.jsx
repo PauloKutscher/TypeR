@@ -4,6 +4,7 @@ import React from "react";
 import { readStorage, writeToStorage, resizeTextArea } from "../../utils";
 import Modal from "../modal/modal";
 import TextBlock from "../textBlock/textBlock";
+import TabBar from "../tabBar/tabBar";
 import PreviewBlock from "../previewBlock/previewBlock";
 import StylesBlock from "../stylesBlock/stylesBlock";
 import AppFooter from "../footer/footer";
@@ -74,6 +75,7 @@ const ResizeableCont = React.memo(function ResizeableCont() {
         <PreviewBlock />
       </div>
       <div className="top-divider hostBgdDark"></div>
+      <TabBar />
       <div className="middle-block text-block">
         <TextBlock />
       </div>

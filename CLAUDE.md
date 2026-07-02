@@ -8,12 +8,12 @@ TypeR is an Adobe Photoshop extension designed for typesetters working with mang
 
 ## Build Commands
 
-don't build the extension because you can't really test it because it's on photoshop.
-
 The build process:
 1. Runs `clean.js` to clear the `app/` directory
 2. Uses webpack to bundle React components from `app_src/` to `app/`
 3. Runs `copyThemes.js` to copy theme files
+
+At the end of every prompt where code was changed, run `npm run build` followed by `./install_mac.sh` to build and install the extension on Mac.
 
 ##Important
 

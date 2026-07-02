@@ -39,7 +39,31 @@ const storeFields = [
   "interpretMarkdown",
   "styleSizeStep",
   "resetLineCounterOnPage",
+  "tabs",
+  "currentTabId",
 ];
+
+// Fields that belong to each tab (text script + PSD sync)
+const tabFields = ["text", "images", "currentLineIndex", "lastOpenedImagePath"];
+
+const createTab = (name, data = {}) => ({
+  id: Math.random().toString(36).substr(2, 8),
+  name,
+  text: data.text || "",
+  images: data.images || [],
+  currentLineIndex: data.currentLineIndex || 0,
+  lastOpenedImagePath: data.lastOpenedImagePath || null,
+});
+
+const loadTabIntoState = (state, tab) => {
+  state.currentTabId = tab.id;
+  state.text = tab.text || "";
+  state.images = tab.images || [];
+  state.currentLineIndex = tab.currentLineIndex || 0;
+  state.lastOpenedImagePath = tab.lastOpenedImagePath || null;
+  // Stored selections are bound to the previously opened PSD
+  state.storedSelections = [];
+};
 
 const defaultShortcut = {
   add: ["WIN", "CTRL"],
@@ -165,6 +189,19 @@ const initialState = {
   ...storage.data,
   shortcut: { ...defaultShortcut, ...(storage.data?.shortcut || {}) },
 };
+
+// Multi-tab migration: wrap pre-tab data into a single tab, or restore the
+// active tab's fields from the stored tabs list
+if (!Array.isArray(initialState.tabs) || !initialState.tabs.length) {
+  const firstTab = createTab((locale.tabDefaultName || "Tab") + " 1", initialState);
+  initialState.tabs = [firstTab];
+  initialState.currentTabId = firstTab.id;
+} else {
+  const activeTab = initialState.tabs.find((tab) => tab.id === initialState.currentTabId) || initialState.tabs[0];
+  loadTabIntoState(initialState, activeTab);
+  // Keep stored selections across restarts (loadTabIntoState clears them)
+  initialState.storedSelections = storage.data?.storedSelections || [];
+}
 
 const reducer = (state, action) => {
   let thenScroll = false;
@@ -753,6 +790,41 @@ const reducer = (state, action) => {
       newState.resetLineCounterOnPage = action.value !== false;
       break;
     }
+
+    case "addTab": {
+      const name = action.name || (locale.tabDefaultName || "Tab") + " " + (state.tabs.length + 1);
+      const tab = createTab(name);
+      newState.tabs = state.tabs.concat(tab);
+      loadTabIntoState(newState, tab);
+      break;
+    }
+
+    case "switchTab": {
+      if (action.id === state.currentTabId) break;
+      const tab = state.tabs.find((t) => t.id === action.id);
+      if (!tab) break;
+      loadTabIntoState(newState, tab);
+      break;
+    }
+
+    case "renameTab": {
+      const name = (action.name || "").trim();
+      if (!name) break;
+      newState.tabs = state.tabs.map((tab) => (tab.id === action.id ? { ...tab, name } : tab));
+      break;
+    }
+
+    case "deleteTab": {
+      if (state.tabs.length <= 1) break;
+      const index = state.tabs.findIndex((tab) => tab.id === action.id);
+      if (index < 0) break;
+      const tabs = state.tabs.filter((tab) => tab.id !== action.id);
+      newState.tabs = tabs;
+      if (state.currentTabId === action.id) {
+        loadTabIntoState(newState, tabs[Math.min(index, tabs.length - 1)]);
+      }
+      break;
+    }
   }
 
   // Detect which fields changed to skip unnecessary recomputation
@@ -987,6 +1059,29 @@ const reducer = (state, action) => {
     scrollToLine(newState.currentLineIndex);
   }
 
+  // Phase 5.5: Mirror the per-tab fields into the active tab so tabs stay
+  // consistent and persisted on every change
+  if (newState.tabs && newState.tabs.length) {
+    let tabIndex = newState.tabs.findIndex((tab) => tab.id === newState.currentTabId);
+    if (tabIndex < 0) {
+      // Recover from an invalid tab id (e.g. settings imported from an older version)
+      tabIndex = 0;
+      newState.currentTabId = newState.tabs[0].id;
+    }
+    if (tabIndex >= 0) {
+      const activeTab = newState.tabs[tabIndex];
+      if (tabFields.some((field) => activeTab[field] !== newState[field])) {
+        const tabs = newState.tabs.concat([]);
+        const updatedTab = { ...activeTab };
+        tabFields.forEach((field) => {
+          updatedTab[field] = newState[field];
+        });
+        tabs[tabIndex] = updatedTab;
+        newState.tabs = tabs;
+      }
+    }
+  }
+
   // Phase 6: Storage - only write if a stored field actually changed
   newState.initiated = true;
   let hasStorageChange = false;
@@ -1007,7 +1102,7 @@ const reducer = (state, action) => {
       if (
         newState[field] !== state[field] &&
         (field === "text" || field === "currentLineIndex" || field === "currentStyleId" || field === "textScale" ||
-          field === "styles" || field === "storedSelections")
+          field === "styles" || field === "storedSelections" || field === "tabs")
       ) {
         shouldDebounceStorage = true;
       }
