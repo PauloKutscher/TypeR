@@ -49,7 +49,7 @@ const HelpModal = React.memo(function HelpModal() {
             </div>
             <div className="app-modal-footer hostBrdTopContrast">
                 <div>
-                    <span className="link" onClick={() => openUrl(config.appUrl)}><b>{config.appTitle}</b></span> ({locale.helpVersion}: {config.appVersion}), developed by {config.authorName}
+                    <span className="link" onClick={() => openUrl(config.appUrl)}><b>{config.appTitle}</b></span> ({locale.helpVersion}: {config.appVersion}), developed by <span className="link" onClick={() => openUrl(config.authorUrl)}>{config.authorName}</span>
                 </div>
                 <div>
                     <span className="link" onClick={() => openUrl(config.typerToolsUrl)}>typertools</span>, developped by Swirt

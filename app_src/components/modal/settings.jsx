@@ -1,11 +1,12 @@
 import React from "react";
-import { FiX, FiSettings, FiEye, FiEyeOff, FiToggleLeft, FiDatabase, FiAlertTriangle, FiChevronUp, FiChevronDown, FiRotateCcw } from "react-icons/fi";
+import { FiX, FiSettings, FiEye, FiEyeOff, FiToggleLeft, FiDatabase, FiAlertTriangle, FiChevronUp, FiChevronDown, FiRotateCcw, FiCheck, FiPlayCircle } from "react-icons/fi";
 import { MdSave } from "react-icons/md";
 import { FaKeyboard, FaFileExport, FaFileImport } from "react-icons/fa";
 
 import config from "../../config";
 import { locale, nativeAlert, nativeConfirm, checkUpdate, readStorage, writeToStorage, deleteStorageFile, openFile } from "../../utils";
 import { useContext, defaultUiLayout, normalizeUiLayout } from "../../context";
+import { EDITOR_THEME_PRESETS, getEditorThemePreviewColors } from "../../themePresets";
 import Shortcut from "./shortCut";
 
 const SettingsModal = React.memo(function SettingsModal() {
@@ -67,6 +68,7 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [multiTabEnabled, setMultiTabEnabled] = React.useState(
     context.state.multiTabEnabled !== false
   );
+  const [editorTheme, setEditorTheme] = React.useState(context.state.editorTheme || "system");
   const [multiTabConfirmOpen, setMultiTabConfirmOpen] = React.useState(false);
   const [edited, setEdited] = React.useState(false);
 
@@ -217,6 +219,11 @@ const SettingsModal = React.memo(function SettingsModal() {
 
   const changeResetLineCounterOnPage = (e) => {
     setResetLineCounterOnPage(e.target.checked);
+    setEdited(true);
+  };
+
+  const changeEditorTheme = (theme) => {
+    setEditorTheme(theme);
     setEdited(true);
   };
 
@@ -425,6 +432,9 @@ const SettingsModal = React.memo(function SettingsModal() {
     }
     if (multiTabEnabled !== (context.state.multiTabEnabled !== false)) {
       context.dispatch({ type: "setMultiTabEnabled", value: multiTabEnabled });
+    }
+    if (editorTheme !== context.state.editorTheme) {
+      context.dispatch({ type: "setEditorTheme", theme: editorTheme });
     }
     const layoutToSave = buildUiLayoutToSave();
     if (JSON.stringify(layoutToSave) !== JSON.stringify(normalizeUiLayout(context.state.uiLayout))) {
@@ -785,6 +795,45 @@ const SettingsModal = React.memo(function SettingsModal() {
         return (
           <div className="fields">
             <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupTheme || "Theme"}</div>
+              <div className="settings-theme-grid">
+                {EDITOR_THEME_PRESETS.map((theme) => {
+                  const preview = getEditorThemePreviewColors(theme);
+                  const isActive = editorTheme === theme.id;
+                  return (
+                    <button
+                      type="button"
+                      key={theme.id}
+                      className={"settings-theme-choice" + (isActive ? " m-active" : "")}
+                      onClick={() => changeEditorTheme(theme.id)}
+                      title={theme.label}
+                      style={{ "--theme-card-accent": preview.accent }}
+                    >
+                      <span className="settings-theme-preview" style={{ backgroundColor: preview.surface }}>
+                        <span className="settings-theme-preview-bar" style={{ backgroundColor: preview.panel }}>
+                          <i style={{ backgroundColor: preview.accent }} />
+                          <i style={{ backgroundColor: preview.muted }} />
+                        </span>
+                        <span className="settings-theme-preview-line m-long" style={{ backgroundColor: preview.text }} />
+                        <span className="settings-theme-preview-line" style={{ backgroundColor: preview.muted }} />
+                        <span className="settings-theme-preview-pill" style={{ backgroundColor: preview.accent }} />
+                        {isActive && (
+                          <span
+                            className="settings-theme-check"
+                            style={{ backgroundColor: preview.accent, color: preview.accentText || preview.surface }}
+                          >
+                            <FiCheck size={10} />
+                          </span>
+                        )}
+                      </span>
+                      <span className="settings-theme-name">{theme.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="field-descr">{locale.settingsThemeHint || "Choose a TypeR theme. Photoshop follows the host appearance."}</div>
+            </div>
+            <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupInterface || "Interface layout"}</div>
               <div className="settings-layout">
                 <div className="settings-layout-mini-wrap">
@@ -991,17 +1040,19 @@ const SettingsModal = React.memo(function SettingsModal() {
                       <span>{locale.multiBubbleModeToggle || "Multi-Bubble Mode"}</span>
                       <div className="settings-checkbox-hint">
                         {locale.multiBubbleModeHint || "Allows capturing multiple selections to insert multiple texts at once"}
-                        <br />
-                        <a 
-                          href="#"
+                        <button
+                          type="button"
+                          className="settings-help-badge"
                           onClick={(e) => {
                             e.preventDefault();
+                            e.stopPropagation();
                             window.cep && window.cep.util && window.cep.util.openURLInDefaultBrowser('https://youtu.be/gmIh-eEj2HY');
                           }}
-                          style={{color: '#007acc', textDecoration: 'underline', cursor: 'pointer'}}
+                          title={locale.multiBubbleModeHowToUse || "How to use"}
                         >
+                          <FiPlayCircle size={12} />
                           {locale.multiBubbleModeHowToUse || "How to use"}
-                        </a>
+                        </button>
                       </div>
                     </div>
                   </label>

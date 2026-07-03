@@ -2,7 +2,11 @@ import './CSInterface';
 
 import LightTheme from './topcoat/css/topcoat-desktop-light.min.css';
 import DarkTheme from './topcoat/css/topcoat-desktop-dark.min.css';
+import { readStorage } from '../utils';
+import { getEditorThemePreset, normalizeEditorTheme } from '../themePresets';
 
+let currentAppSkinInfo = null;
+let currentEditorTheme = normalizeEditorTheme(readStorage("editorTheme"));
 
 function computeValue(value, delta) {
     var computedValue = !isNaN(delta) ? value + delta : value;
@@ -36,8 +40,40 @@ function addRule(stylesheetId, selector, rule) {
     }
 }
 
+function setBodyThemeMode(mode) {
+    if (mode === "light") {
+        document.body.classList.remove('dark-theme');
+        document.body.classList.add('light-theme');
+    } else {
+        document.body.classList.remove('light-theme');
+        document.body.classList.add('dark-theme');
+    }
+}
+
+function applyEditorTheme(id) {
+    currentEditorTheme = normalizeEditorTheme(id);
+    var preset = getEditorThemePreset(currentEditorTheme);
+    var mode = preset.mode;
+    if (mode === "system") {
+        if (currentAppSkinInfo) updateThemeWithAppSkinInfo(currentAppSkinInfo);
+        return;
+    }
+
+    var topcoatCSS = document.getElementById('topcoat');
+    topcoatCSS.href = mode === "light" ? LightTheme : DarkTheme;
+    setBodyThemeMode(mode);
+    document.body.setAttribute("data-editor-theme", preset.id);
+    document.documentElement.setAttribute("data-editor-theme", preset.id);
+
+    var colors = preset.colors || {};
+    Object.keys(colors).forEach(function (key) {
+        document.documentElement.style.setProperty("--editor-" + key, colors[key]);
+    });
+}
+
 function updateThemeWithAppSkinInfo(appSkinInfo) {
-    
+    currentAppSkinInfo = appSkinInfo;
+
     var panelBgColor = appSkinInfo.panelBackgroundColor.color;
     var lightBgdColor = toHex(panelBgColor, 20);
     var darkBgdColor = toHex(panelBgColor, -20);
@@ -80,14 +116,12 @@ function updateThemeWithAppSkinInfo(appSkinInfo) {
     addRule(styleId, ".hostButton:active", "background-color: #" + darkBgdColor);
     addRule(styleId, ".hostButton", "border-color: #" + lightBgdColor);
     
-    var topcoatCSS = document.getElementById('topcoat');
-    topcoatCSS.href = isLight ? LightTheme : DarkTheme;
-    if (isLight) {
-        document.body.classList.remove('dark-theme');
-        document.body.classList.add('light-theme');
-    } else {
-        document.body.classList.remove('light-theme');
-        document.body.classList.add('dark-theme');
+    if (currentEditorTheme === "system") {
+        var topcoatCSS = document.getElementById('topcoat');
+        topcoatCSS.href = isLight ? LightTheme : DarkTheme;
+        setBodyThemeMode(isLight ? "light" : "dark");
+        document.body.setAttribute("data-editor-theme", "system");
+        document.documentElement.setAttribute("data-editor-theme", "system");
     }
 }
 
@@ -99,3 +133,9 @@ function onAppThemeColorChanged() {
 const csInterface = new window.CSInterface();
 updateThemeWithAppSkinInfo(csInterface.hostEnvironment.appSkinInfo);
 csInterface.addEventListener(window.CSInterface.THEME_COLOR_CHANGED_EVENT, onAppThemeColorChanged);
+
+window.addEventListener("typer-editor-theme-change", function (event) {
+    applyEditorTheme(event.detail && event.detail.theme);
+});
+
+export { applyEditorTheme };

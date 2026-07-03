@@ -4,6 +4,8 @@ import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, check
 import config from "./config";
 import { getNextLineNumberState } from "./lineNumbering";
 import { setDehyphenationEnabled } from "./textShapeR";
+import { normalizeEditorTheme } from "./themePresets";
+import { applyEditorTheme } from "./lib/themeManager";
 
 const storage = readStorage();
 const storeFields = [
@@ -46,6 +48,7 @@ const storeFields = [
   "currentTabId",
   "multiTabEnabled",
   "uiLayout",
+  "editorTheme",
 ];
 
 // Fields that belong to each tab (text script + PSD sync)
@@ -250,6 +253,7 @@ const initialState = {
   ...storage.data,
   shortcut: { ...defaultShortcut, ...(storage.data?.shortcut || {}) },
   uiLayout: normalizeUiLayout(storage.data?.uiLayout),
+  editorTheme: normalizeEditorTheme(storage.data?.editorTheme),
 };
 
 // Multi-tab migration: wrap pre-tab data into a single tab, or restore the
@@ -924,6 +928,11 @@ const reducer = (state, action) => {
       break;
     }
 
+    case "setEditorTheme": {
+      newState.editorTheme = normalizeEditorTheme(action.theme);
+      break;
+    }
+
     case "resetUiLayout": {
       newState.uiLayout = normalizeUiLayout(null);
       break;
@@ -1252,6 +1261,9 @@ const ContextProvider = React.memo(function ContextProvider(props) {
       document.body.setAttribute("dir", direction);
     }
   }, [state.direction]);
+  React.useEffect(() => {
+    applyEditorTheme(state.editorTheme);
+  }, [state.editorTheme]);
   React.useEffect(() => {
     if (state.checkUpdates) {
       checkUpdate(config.appVersion).then((data) => {

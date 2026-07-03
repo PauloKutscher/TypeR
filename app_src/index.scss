@@ -175,3 +175,256 @@
     flex-shrink: 0;
   }
 }
+
+body[data-editor-theme]:not([data-editor-theme="system"]) {
+  background: var(--editor-surface) !important;
+  color: var(--editor-text) !important;
+
+  .hostElt,
+  .hostBgd,
+  .app-body {
+    background-color: var(--editor-surface) !important;
+    color: var(--editor-text) !important;
+  }
+
+  .hostBgdDark,
+  .top-divider,
+  .middle-divider {
+    background-color: var(--editor-surfaceAlt) !important;
+  }
+
+  .hostBgdLight,
+  .middle-divider > div {
+    background-color: var(--editor-panel) !important;
+  }
+
+  .hostBrdTopContrast {
+    border-top-color: var(--editor-border) !important;
+  }
+
+  .app-modal-hatch {
+    background: rgba(0, 0, 0, 0.42) !important;
+  }
+
+  .app-modal-inner,
+  .settings-confirm-dialog {
+    background: var(--editor-surfaceAlt) !important;
+    color: var(--editor-text) !important;
+    border: 1px solid var(--editor-border);
+  }
+
+  .app-modal-header,
+  .app-modal-footer {
+    background: var(--editor-panel) !important;
+  }
+
+  .topcoat-button,
+  .topcoat-button--large,
+  .topcoat-button--quiet,
+  .topcoat-button--large--quiet,
+  .topcoat-icon-button,
+  .topcoat-icon-button--large,
+  .topcoat-icon-button--quiet,
+  .topcoat-icon-button--large--quiet {
+    background: var(--editor-inputAlt) !important;
+    border-color: var(--editor-border) !important;
+    box-shadow: none !important;
+    color: var(--editor-text) !important;
+    text-shadow: none !important;
+
+    &:hover:not(:disabled) {
+      background: var(--editor-panel) !important;
+      border-color: var(--editor-borderStrong) !important;
+    }
+  }
+
+  .topcoat-button--cta,
+  .topcoat-button--large--cta,
+  .style-item.m-current {
+    background: var(--editor-accent) !important;
+    border-color: var(--editor-accent) !important;
+    color: var(--editor-accentText) !important;
+    text-shadow: none !important;
+
+    &:hover:not(:disabled) {
+      background: var(--editor-accentHover) !important;
+      border-color: var(--editor-accentHover) !important;
+    }
+  }
+
+  .topcoat-textarea,
+  .topcoat-text-input,
+  .topcoat-text-input--large,
+  .preview-top_size-input {
+    background: var(--editor-input) !important;
+    border-color: var(--editor-border) !important;
+    box-shadow: none !important;
+    color: var(--editor-text) !important;
+    text-shadow: none !important;
+
+    &:focus {
+      border-color: var(--editor-accent) !important;
+    }
+  }
+
+  .text-block,
+  .text-message {
+    background: var(--editor-codeBg) !important;
+  }
+
+  .text-lines:before,
+  .text-lines:after {
+    background: var(--editor-codeGutter) !important;
+  }
+
+  .text-line {
+    color: var(--editor-codeMuted) !important;
+
+    &.m-current {
+      background: var(--editor-codeCurrent) !important;
+      color: var(--editor-codeCurrentText) !important;
+
+      &:before,
+      &:after {
+        border-color: var(--editor-accent) !important;
+      }
+    }
+  }
+
+  // Written flat: nesting "& + &:before" under a parent selector compiles
+  // to an invalid combinator chain that never matches.
+  .text-line + .text-line:before {
+    border-top-color: var(--editor-border) !important;
+  }
+
+  .text-line-text {
+    background: var(--editor-codeBg) !important;
+
+    .text-line.m-current & {
+      background: var(--editor-codeCurrent) !important;
+    }
+
+    .text-line.m-page & {
+      background: var(--editor-codePage) !important;
+    }
+  }
+
+  .text-area,
+  .text-area-overlay {
+    color: var(--editor-codeText) !important;
+    caret-color: var(--editor-codeText) !important;
+  }
+
+  .text-message > div,
+  .field-descr,
+  .settings-checkbox-hint {
+    color: var(--editor-muted) !important;
+  }
+
+  .folder-item,
+  .settings-layout-block-row,
+  .settings-layout-mini,
+  .settings-layout-mini-block,
+  .export-section,
+  .export-folder-item,
+  .export-font-item,
+  .export-settings-item,
+  .settings-checkbox-item {
+    background: var(--editor-panel) !important;
+    border-color: var(--editor-border) !important;
+  }
+
+  .folder-header:hover,
+  .style-item:hover {
+    outline-color: var(--editor-borderStrong) !important;
+  }
+
+  .settings-checkbox-custom {
+    border-color: var(--editor-borderStrong) !important;
+
+    &::after {
+      border-color: var(--editor-accent) !important;
+    }
+  }
+
+  .settings-checkbox-label input:checked + .settings-checkbox-custom {
+    border-color: var(--editor-accent) !important;
+    background: var(--editor-accentSoft) !important;
+  }
+
+  // Tabs follow the same elevation scale as the rest of the modal:
+  // rail on panel, active tab highlighted with the accent.
+  .settings-tabs {
+    background: var(--editor-panel) !important;
+    border-radius: 4px;
+  }
+
+  .settings-tab {
+    color: var(--editor-muted) !important;
+    opacity: 1 !important;
+
+    &:hover {
+      color: var(--editor-text) !important;
+      outline-color: var(--editor-borderStrong) !important;
+    }
+  }
+
+  .settings-tab--active {
+    background: var(--editor-accentSoft) !important;
+    color: var(--editor-text) !important;
+    box-shadow: inset 0 -2px 0 var(--editor-accent) !important;
+  }
+
+  .settings-group-title {
+    color: var(--editor-text) !important;
+  }
+
+  .settings-checkbox-label span,
+  .settings-checkbox-content span {
+    color: var(--editor-text) !important;
+  }
+
+  .settings-new-badge {
+    background: var(--editor-accentSoft) !important;
+    border-color: var(--editor-accent) !important;
+    color: var(--editor-accent) !important;
+  }
+
+  .settings-help-badge {
+    background: var(--editor-accentSoft) !important;
+    border-color: var(--editor-accent) !important;
+    color: var(--editor-accent) !important;
+  }
+
+  .export-summary {
+    background: var(--editor-panel) !important;
+  }
+
+  .global-tooltip {
+    background: var(--editor-panel) !important;
+    border-color: var(--editor-borderStrong) !important;
+    color: var(--editor-text) !important;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--editor-borderStrong);
+    border: 2px solid transparent;
+    border-radius: 6px;
+    background-clip: padding-box;
+
+    &:hover {
+      background-color: var(--editor-muted);
+      background-clip: padding-box;
+    }
+  }
+
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
