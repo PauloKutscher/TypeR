@@ -1,7 +1,7 @@
 {
   "name": "typertools",
   "version": "2.6.0",
-  "author": "Swirt, SeanR, Sakushi, Grave",
+  "author": "Sakushi, SeanR",
   "main": "app/index.js",
   "browserslist": [
     "since 2012"

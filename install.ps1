@@ -35,9 +35,9 @@ $msg_close    = "Close Photoshop (if it is open)."
 $msg_complete = "Installation completed."
 $msg_open     = "Open Photoshop and in the upper menu click the following: [Window] > [Extensions] > [TypeR]"
 $msg_pause    = "Press Enter to continue..."
-$msg_credits  = "Many thanks to Swirt for TyperTools and SeanR & Sakushi for this fork."
+$msg_credits  = "TypeR developed by Sakushi & SeanR."
+$msg_typertools = "typertools, developed by Swirt: https://swirt.github.io/typertools/"
 $msg_discord  = "ScanR's Discord if you need help: https://discord.com/invite/Pdmfmqk"
-$msg_discord2 = "Grave's Discord if you need help: https://discord.gg/kk6weaMDFa"
 
 if ($Lang -eq "fr") {
     $msg_install  = "L'extension Photoshop TypeR v$ExtVersion sera installee."
@@ -45,9 +45,9 @@ if ($Lang -eq "fr") {
     $msg_complete = "Installation terminee."
     $msg_open     = "Ouvrez Photoshop et dans le menu superieur cliquez sur : [Fenetre] > [Extensions] > [TypeR]"
     $msg_pause    = "Appuyez sur Entree pour continuer..."
-    $msg_credits  = "Merci beaucoup et Swirt pour TyperTools et SeanR & Sakushi pour ce fork."
+    $msg_credits  = "TypeR développé par Sakushi & SeanR."
+    $msg_typertools = "typertools, développé par Swirt : https://swirt.github.io/typertools/"
     $msg_discord  = "Discord de ScanR si besoin d'aide : https://discord.com/invite/Pdmfmqk"
-    $msg_discord2 = "Discord de Grave si besoin d'aide : https://discord.gg/kk6weaMDFa"
 }
 elseif ($Lang -eq "es") {
     $msg_install  = "La extensión de Photoshop TypeR v$ExtVersion se instalará."
@@ -55,9 +55,9 @@ elseif ($Lang -eq "es") {
     $msg_complete = "Instalación completada."
     $msg_open     = "Abre Photoshop y en el menú superior haz clic en lo siguiente: [Ventana] > [Extensiones] > [TypeR]"
     $msg_pause    = "Presiona Enter para continuar..."
-    $msg_credits  = "Muchas gracias a Swirt por TyperTools y a SeanR & Sakushi por este fork."
+    $msg_credits  = "TypeR desarrollado por Sakushi & SeanR."
+    $msg_typertools = "typertools, desarrollado por Swirt: https://swirt.github.io/typertools/"
     $msg_discord  = "Discord de ScanR si necesitas ayuda: https://discord.com/invite/Pdmfmqk"
-    $msg_discord2 = "Discord de Grave si necesitas ayuda: https://discord.gg/kk6weaMDFa"
 }
 elseif ($Lang -eq "pt") {
     $msg_install  = "Photoshop extension TypeR v$ExtVersion will be installed."
@@ -65,9 +65,9 @@ elseif ($Lang -eq "pt") {
     $msg_complete = "Instalação concluída."
     $msg_open     = "Abra o Photoshop e no menu superior clique em: [Janela] > [Extensões] > [TypeR]"
     $msg_pause    = "Pressione Enter para continuar..."
-    $msg_credits  = "Muito obrigado a Swirt pelo TyperTools e a SeanR & Sakushi por este fork."
+    $msg_credits  = "TypeR desenvolvido por Sakushi & SeanR."
+    $msg_typertools = "typertools, desenvolvido por Swirt: https://swirt.github.io/typertools/"
     $msg_discord  = "Discord do ScanR se precisar de ajuda: https://discord.com/invite/Pdmfmqk"
-    $msg_discord2 = "Discord do Grave se precisar de ajuda: https://discord.gg/kk6weaMDFa"
 }
 
 Clear-Host
@@ -160,7 +160,7 @@ Write-Host "+------------------------------------------------------------------+
 Write-Host "| Credits:                                                         |"
 Write-Host "+------------------------------------------------------------------+"
 Write-Host ("  {0}" -f $msg_credits)
+Write-Host ("  {0}" -f $msg_typertools)
 Write-Host ("  {0}" -f $msg_discord)
-Write-Host ("  {0}" -f $msg_discord2)
 Write-Host ""
 Read-Host -Prompt $msg_pause

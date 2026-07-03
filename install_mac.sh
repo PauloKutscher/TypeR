@@ -29,9 +29,9 @@ MSG_PRESS_KEY_EN="Press any key to continue"
 MSG_INSTALL_COMPLETE_EN="Installation completed."
 MSG_OPEN_PHOTOSHOP_EN="Open Photoshop and in the menu click the following: [Window] > [Extensions] > [TypeR]"
 MSG_PRESS_ENTER_EN="Press Enter to continue"
-MSG_CREDITS_EN="Thanks a lot to Swirt for TyperTools and SeanR & Sakushi for this fork."
+MSG_CREDITS_EN="TypeR developed by Sakushi & SeanR."
+MSG_TYPERTOOLS_EN="typertools, developed by Swirt: https://swirt.github.io/typertools/"
 MSG_DISCORD_EN="ScanR's Discord if you need help: https://discord.com/invite/Pdmfmqk"
-MSG_DISCORD2_EN="Grave's Discord if you need help: https://discord.gg/kk6weaMDFa"
 
 # —————————————————————————————————————————————————————————————
 # Messages en français
@@ -42,9 +42,9 @@ MSG_PRESS_KEY_FR="Appuyez sur une touche pour continuer"
 MSG_INSTALL_COMPLETE_FR="Installation terminée."
 MSG_OPEN_PHOTOSHOP_FR="Ouvrez Photoshop et dans le menu cliquez sur : [Fenêtre] > [Extensions] > [TypeR]"
 MSG_PRESS_ENTER_FR="Appuyez sur Entrée pour continuer"
-MSG_CREDITS_FR="Merci beaucoup à Swirt pour TyperTools et SeanR & Sakushi pour ce fork."
+MSG_CREDITS_FR="TypeR développé par Sakushi & SeanR."
+MSG_TYPERTOOLS_FR="typertools, développé par Swirt : https://swirt.github.io/typertools/"
 MSG_DISCORD_FR="Discord de ScanR si besoin d'aide : https://discord.com/invite/Pdmfmqk"
-MSG_DISCORD2_FR="Discord de Grave si besoin d'aide : https://discord.gg/kk6weaMDFa"
 
 # —————————————————————————————————————————————————————————————
 # Messages en espagnol
@@ -55,9 +55,9 @@ MSG_PRESS_KEY_ES="Presiona cualquier tecla para continuar"
 MSG_INSTALL_COMPLETE_ES="Instalación completada."
 MSG_OPEN_PHOTOSHOP_ES="Abre Photoshop y en el menú haz clic en: [Ventana] > [Extensiones] > [TypeR]"
 MSG_PRESS_ENTER_ES="Presiona Enter para continuar"
-MSG_CREDITS_ES="Muchas gracias a Swirt por TyperTools y a SeanR & Sakushi por este fork."
+MSG_CREDITS_ES="TypeR desarrollado por Sakushi & SeanR."
+MSG_TYPERTOOLS_ES="typertools, desarrollado por Swirt: https://swirt.github.io/typertools/"
 MSG_DISCORD_ES="Discord de ScanR si necesitas ayuda: https://discord.com/invite/Pdmfmqk"
-MSG_DISCORD2_ES="Discord de Grave si necesitas ayuda: https://discord.gg/kk6weaMDFa"
 
 # —————————————————————————————————————————————————————————————
 # Messages en portugais
@@ -68,9 +68,9 @@ MSG_PRESS_KEY_PT="Pressione qualquer tecla para continuar"
 MSG_INSTALL_COMPLETE_PT="Instalação concluída."
 MSG_OPEN_PHOTOSHOP_PT="Abra o Photoshop e no menu clique em: [Janela] > [Extensões] > [TypeR]"
 MSG_PRESS_ENTER_PT="Pressione Enter para continuar"
-MSG_CREDITS_PT="Muito obrigado ao Swirt pelo TyperTools e ao SeanR & Sakushi por este fork."
+MSG_CREDITS_PT="TypeR desenvolvido por Sakushi & SeanR."
+MSG_TYPERTOOLS_PT="typertools, desenvolvido por Swirt: https://swirt.github.io/typertools/"
 MSG_DISCORD_PT="Discord do ScanR se precisar de ajuda: https://discord.com/invite/Pdmfmqk"
-MSG_DISCORD2_PT="Discord do Grave se precisar de ajuda: https://discord.gg/kk6weaMDFa"
 
 # —————————————————————————————————————————————————————————————
 # Affectation des messages en fonction de la langue
@@ -83,8 +83,8 @@ if [ "$LANGUAGE" = "fr" ]; then
   MSG_OPEN_PHOTOSHOP=$MSG_OPEN_PHOTOSHOP_FR
   MSG_PRESS_ENTER=$MSG_PRESS_ENTER_FR
   MSG_CREDITS=$MSG_CREDITS_FR
+  MSG_TYPERTOOLS=$MSG_TYPERTOOLS_FR
   MSG_DISCORD=$MSG_DISCORD_FR
-  MSG_DISCORD2=$MSG_DISCORD2_FR
 elif [ "$LANGUAGE" = "es" ]; then
   MSG_INSTALL=$MSG_INSTALL_ES
   MSG_CLOSE_PHOTOSHOP=$MSG_CLOSE_PHOTOSHOP_ES
@@ -93,8 +93,8 @@ elif [ "$LANGUAGE" = "es" ]; then
   MSG_OPEN_PHOTOSHOP=$MSG_OPEN_PHOTOSHOP_ES
   MSG_PRESS_ENTER=$MSG_PRESS_ENTER_ES
   MSG_CREDITS=$MSG_CREDITS_ES
+  MSG_TYPERTOOLS=$MSG_TYPERTOOLS_ES
   MSG_DISCORD=$MSG_DISCORD_ES
-  MSG_DISCORD2=$MSG_DISCORD2_ES
 elif [ "$LANGUAGE" = "pt" ]; then
   MSG_INSTALL=$MSG_INSTALL_PT
   MSG_CLOSE_PHOTOSHOP=$MSG_CLOSE_PHOTOSHOP_PT
@@ -103,8 +103,8 @@ elif [ "$LANGUAGE" = "pt" ]; then
   MSG_OPEN_PHOTOSHOP=$MSG_OPEN_PHOTOSHOP_PT
   MSG_PRESS_ENTER=$MSG_PRESS_ENTER_PT
   MSG_CREDITS=$MSG_CREDITS_PT
+  MSG_TYPERTOOLS=$MSG_TYPERTOOLS_PT
   MSG_DISCORD=$MSG_DISCORD_PT
-  MSG_DISCORD2=$MSG_DISCORD2_PT
 else
   MSG_INSTALL=$MSG_INSTALL_EN
   MSG_CLOSE_PHOTOSHOP=$MSG_CLOSE_PHOTOSHOP_EN
@@ -113,8 +113,8 @@ else
   MSG_OPEN_PHOTOSHOP=$MSG_OPEN_PHOTOSHOP_EN
   MSG_PRESS_ENTER=$MSG_PRESS_ENTER_EN
   MSG_CREDITS=$MSG_CREDITS_EN
+  MSG_TYPERTOOLS=$MSG_TYPERTOOLS_EN
   MSG_DISCORD=$MSG_DISCORD_EN
-  MSG_DISCORD2=$MSG_DISCORD2_EN
 fi
 
 # —————————————————————————————————————————————————————————————
@@ -181,8 +181,8 @@ $MSG_INSTALL_COMPLETE
 $MSG_OPEN_PHOTOSHOP
 
 $MSG_CREDITS
+$MSG_TYPERTOOLS
 $MSG_DISCORD
-$MSG_DISCORD2
 
 EOF
 read -n 1 -p "$MSG_PRESS_ENTER"

@@ -4,7 +4,9 @@ Welcome to **TypeR v2.6.0**, the definitive update that completely overhauls how
 
 ## 🧑‍💻 Lead Contributors
 
-* Swirt, SeanR, Sakushi, **Grave**
+* Sakushi, SeanR
+
+TypeR is based on [typertools](https://swirt.github.io/typertools/), developed by Swirt.
 
 ---
 
@@ -29,6 +31,3 @@ Welcome to **TypeR v2.6.0**, the definitive update that completely overhauls how
 
 Join the original creators' community to discuss TyperTools or SwirtTools:
 👉 **[Original Discord Server](https://discord.gg/dsHn3xQQTC)**
-
-To contact Grave, provide feedback, or discuss this fork update:
-👉 **[Grave's Discord Server](https://discord.gg/kk6weaMDFa)**

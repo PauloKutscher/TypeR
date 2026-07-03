@@ -48,11 +48,12 @@ const HelpModal = React.memo(function HelpModal() {
                 </div>
             </div>
             <div className="app-modal-footer hostBrdTopContrast">
-                <span className="link" onClick={() => openUrl(config.appUrl)}><b>{config.appTitle}</b></span> ({locale.helpVersion}: {config.appVersion}){', '}
-                {locale.helpAuthor} <span className="link" onClick={() => openUrl(config.authorUrl)}>{config.authorName}</span>
-                {config.authorName2 ? (
-                    <React.Fragment> & <span className="link" onClick={() => openUrl(config.authorUrl2)}>{config.authorName2}</span></React.Fragment>
-                ) : null}
+                <div>
+                    <span className="link" onClick={() => openUrl(config.appUrl)}><b>{config.appTitle}</b></span> ({locale.helpVersion}: {config.appVersion}), developed by {config.authorName}
+                </div>
+                <div>
+                    <span className="link" onClick={() => openUrl(config.typerToolsUrl)}>typertools</span>, developped by Swirt
+                </div>
             </div>
         </React.Fragment>
     );
