@@ -974,9 +974,9 @@ const SettingsModal = React.memo(function SettingsModal() {
                       <input type="checkbox" checked={dehyphenateTextShapeR} onChange={changeDehyphenateTextShapeR} />
                       <div className="settings-checkbox-custom"></div>
                       <div className="settings-checkbox-content">
-                        <span>{locale.settingsDehyphenateLabel || "TextShapeR: merge hyphenated words"}</span>
+                        <span>{locale.settingsDehyphenateLabel || "TextShapeR: join words split by hyphenation"}</span>
                         <div className="settings-checkbox-hint">
-                          {locale.settingsDehyphenateHint || "Treats \"silho- uette\" as \"silhouette\" when generating shapes. Disable if compound words get wrongly merged."}
+                          {locale.settingsDehyphenateHint || "When shaping text, joins words split across line breaks. Turn off if real compound words should stay separated."}
                         </div>
                       </div>
                     </label>

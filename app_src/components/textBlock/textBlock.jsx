@@ -74,9 +74,21 @@ const TextBlock = React.memo(function TextBlock() {
   const [focused, setFocused] = React.useState(false);
   const lastOpenedPath = React.useRef(null);
   const textAreaRef = React.useRef(null);
+  const linesRef = React.useRef(null);
 
   // Fix: only resize when text changes, not on every render
   React.useEffect(resizeTextArea, [context.state.text]);
+
+  // The textarea must always match the rendered lines' height: if it goes
+  // stale (panel re-shown, UI zoom, markdown/ignore-tags toggles, rewrap),
+  // the .text-lines layer keeps the clicks and the textarea becomes
+  // uneditable. Observe the lines block so every height change re-syncs.
+  React.useEffect(() => {
+    if (typeof ResizeObserver === "undefined" || !linesRef.current) return undefined;
+    const observer = new ResizeObserver(() => resizeTextArea(true));
+    observer.observe(linesRef.current);
+    return () => observer.disconnect();
+  }, []);
 
   React.useEffect(() => {
     scrollToLine(context.state.currentLineIndex, 1000);
@@ -263,7 +275,7 @@ const TextBlock = React.memo(function TextBlock() {
 
   return (
     <React.Fragment>
-      <div className="text-lines">
+      <div className="text-lines" ref={linesRef}>
         {linesWithNums.map(({ line, lineNum }) => (
           <LineItem
             key={line.rawIndex}

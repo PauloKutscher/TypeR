@@ -1155,7 +1155,11 @@ const resizeTextArea = (defer = false) => {
   const textArea = document.querySelector(".text-area");
   const textLines = document.querySelector(".text-lines");
   if (textArea && textLines) {
-    textArea.style.height = textLines.offsetHeight + "px";
+    // A hidden panel measures 0: applying it would collapse the textarea and
+    // make it unclickable until the next sync, so keep the previous height
+    const height = textLines.offsetHeight;
+    if (!height) return;
+    textArea.style.height = height + "px";
   }
 };
 

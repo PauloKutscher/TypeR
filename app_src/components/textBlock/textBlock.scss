@@ -170,6 +170,9 @@
   border: none;
   resize: none;
   width: 100%;
+  // Never let a stale/zero JS-set height make the textarea unclickable:
+  // keep it at least as tall as the visible block, like .text-lines
+  min-height: 100%;
   z-index: 4;
   &.m-focused {
     -webkit-text-fill-color: currentColor;
