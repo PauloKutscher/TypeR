@@ -1556,6 +1556,26 @@ function getUserFonts() {
   });
 }
 
+var frontmostCheckCache = { time: 0, front: true };
+
+function isHostAppFrontmost() {
+  // ScriptUI.environment.keyboardState reports the system-wide keyboard
+  // state, so hotkeys would fire even while another app is focused. There is
+  // no ExtendScript API for the foreground app, so shell out on macOS.
+  if ($.os && $.os.indexOf("Windows") === 0) return true;
+  var now = new Date().getTime();
+  if (now - frontmostCheckCache.time < 300) return frontmostCheckCache.front;
+  var front = true;
+  try {
+    front = app.system('lsappinfo info -only name `lsappinfo front` 2>/dev/null | grep -qi photoshop') === 0;
+  } catch (e) {
+    front = true;
+  }
+  frontmostCheckCache.time = now;
+  frontmostCheckCache.front = front;
+  return front;
+}
+
 function getHotkeyPressed() {
   var state = ScriptUI.environment.keyboardState;
   var string = "a";
@@ -1574,6 +1594,9 @@ function getHotkeyPressed() {
   }
   if (state.keyName) {
     string += state.keyName.toUpperCase() + "a";
+  }
+  if (string !== "a" && !isHostAppFrontmost()) {
+    return "a";
   }
   return string;
 }

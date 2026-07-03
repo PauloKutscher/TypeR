@@ -65,7 +65,23 @@ const PROFILE_PRESETS = {
   },
 };
 
-const normalizeText = (text) => String(text || "").replace(/\s+/g, " ").trim();
+// Merges hyphenation left over from a previous line break: "silho- uette"
+// reads as the word "silhouette". A lowercase continuation means the hyphen
+// was a line-break artefact and is dropped; an uppercase one means a broken
+// compound ("Jean- Paul") whose hyphen must be kept. Standalone dashes
+// ("il - enfin - vint", "—") never match: a letter must sit right before
+// the hyphen and the space only after it.
+const DEHYPHENATE_PATTERN = /([A-Za-zÀ-ÖØ-öø-ÿ])- ([A-Za-zÀ-ÖØ-öø-ÿ])/g;
+const LOWERCASE_LETTER = /[a-zà-öø-ÿ]/;
+
+const dehyphenate = (text) => {
+  if (text.indexOf("- ") === -1) return text;
+  return text.replace(DEHYPHENATE_PATTERN, (match, before, after) => (
+    LOWERCASE_LETTER.test(after) ? before + after : before + "-" + after
+  ));
+};
+
+const normalizeText = (text) => dehyphenate(String(text || "").replace(/\s+/g, " ").trim());
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 const stripMarkdownForMeasure = (text) => String(text || "")
