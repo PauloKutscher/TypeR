@@ -1055,7 +1055,90 @@ const changeActiveLayerTextSize = (val, callback = () => {}) => {
   }));
 };
 
+// On macOS host.jsx checks the frontmost app itself (via lsappinfo), but
+// ExtendScript has no such option on Windows. There we run a hidden
+// persistent PowerShell watcher that prints the foreground process name
+// every 250ms, and gate the hotkey poll on it. Requires Node (see manifest
+// --enable-nodejs); if anything is unavailable we fail open to the old
+// behavior so hotkeys never break.
+const foregroundWatcher = {
+  name: "",
+  time: 0,
+  started: false,
+  restartTimer: null,
+};
+
+const toBase64Utf16le = (str) => {
+  let bin = "";
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i);
+    bin += String.fromCharCode(c & 0xff) + String.fromCharCode(c >> 8);
+  }
+  return window.btoa(bin);
+};
+
+const startForegroundWatcher = () => {
+  if (foregroundWatcher.started) return;
+  if (!navigator.platform || navigator.platform.indexOf("Win") !== 0) return;
+  const nodeRequire = (window.cep_node && window.cep_node.require) || (typeof window.require === "function" ? window.require : null);
+  if (!nodeRequire) return;
+  let spawn;
+  try {
+    spawn = nodeRequire("child_process").spawn;
+  } catch (e) {
+    return;
+  }
+  const psScript = [
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class FW { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); }';",
+    "while ($true) {",
+    "$h = [FW]::GetForegroundWindow(); $procId = [uint32]0;",
+    "[void][FW]::GetWindowThreadProcessId($h, [ref]$procId);",
+    "$n = ''; try { $n = (Get-Process -Id $procId -ErrorAction Stop).ProcessName } catch {};",
+    "[Console]::Out.WriteLine($n); [Console]::Out.Flush();",
+    "Start-Sleep -Milliseconds 250 }",
+  ].join(" ");
+  foregroundWatcher.started = true;
+  try {
+    const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", toBase64Utf16le(psScript)], {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    child.stdout.on("data", (data) => {
+      const lines = data.toString().split(/\r?\n/).filter((line) => line.length);
+      if (lines.length) {
+        foregroundWatcher.name = lines[lines.length - 1];
+        foregroundWatcher.time = Date.now();
+      }
+    });
+    const scheduleRestart = () => {
+      foregroundWatcher.started = false;
+      foregroundWatcher.time = 0;
+      if (foregroundWatcher.restartTimer) return;
+      foregroundWatcher.restartTimer = setTimeout(() => {
+        foregroundWatcher.restartTimer = null;
+        startForegroundWatcher();
+      }, 5000);
+    };
+    child.on("error", scheduleRestart);
+    child.on("exit", scheduleRestart);
+  } catch (e) {
+    foregroundWatcher.started = false;
+  }
+};
+
+const isHostAppInForeground = () => {
+  // Stale or missing data (watcher unavailable, killed, or non-Windows
+  // where macOS is handled host-side): fail open
+  if (!foregroundWatcher.time || Date.now() - foregroundWatcher.time > 2000) return true;
+  return /photoshop/i.test(foregroundWatcher.name);
+};
+
 const getHotkeyPressed = (callback) => {
+  startForegroundWatcher();
+  if (!isHostAppInForeground()) {
+    callback("a");
+    return;
+  }
   csInterface.evalScript("getHotkeyPressed()", callback);
 };
 
