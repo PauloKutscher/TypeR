@@ -222,7 +222,18 @@ const mergePunctuationWords = (words) => {
   return merged;
 };
 
+const hyphenSplitCache = new Map();
+
 const getHyphenSplits = (word) => {
+  const cached = hyphenSplitCache.get(word);
+  if (cached) return cached;
+  const splits = computeHyphenSplits(word);
+  if (hyphenSplitCache.size >= 512) hyphenSplitCache.clear();
+  hyphenSplitCache.set(word, splits);
+  return splits;
+};
+
+const computeHyphenSplits = (word) => {
   const { body, punctuation } = splitTrailingPunctuation(word);
   if (!body || body.length < 8) return [];
   if (hasMarkdownSyntax(body) || /[-'’\s]/.test(body)) return [];
@@ -271,69 +282,94 @@ const getTokenMetrics = (tokens) => {
   const tokenCount = tokens.length;
   const prefix = new Array(tokenCount + 1);
   prefix[0] = 0;
+  const charPrefix = new Array(tokenCount + 1);
+  charPrefix[0] = 0;
   const endsBreak = new Array(tokenCount);
   const punctOnly = new Array(tokenCount);
   const breakCount = new Array(tokenCount + 1);
   breakCount[0] = 0;
+  const punctCount = new Array(tokenCount + 1);
+  punctCount[0] = 0;
   for (let index = 0; index < tokenCount; index++) {
     prefix[index + 1] = prefix[index] + tokenLength(tokens[index]);
+    charPrefix[index + 1] = charPrefix[index] + visibleLength(tokens[index].text);
     endsBreak[index] = endsWithBreakPunctuation(tokens[index].text);
     punctOnly[index] = /^[.,;:!?…]+$/.test(stripMarkdownForMeasure(tokens[index].text));
     breakCount[index + 1] = breakCount[index] + (tokens[index].forceBreakAfter ? 1 : 0);
+    punctCount[index + 1] = punctCount[index] + (punctOnly[index] ? 1 : 0);
   }
-  const metrics = { prefix, endsBreak, punctOnly, breakCount };
+  const metrics = { prefix, charPrefix, endsBreak, punctOnly, breakCount, punctCount };
   tokens.__metrics = metrics;
   return metrics;
 };
 
-const buildCandidate = (tokens, lineCount, curve, shift, bias, minWeight, targetsOverride) => {
+// Lines wider than this ratio of their target never survive scoring: stop
+// extending `to` past it so the DP inner loop stays proportional to the
+// target width instead of the whole token count
+const DP_WIDTH_PRUNE_RATIO = 2.5;
+
+// Flat typed-array DP buffers reused across every buildCandidate run: the
+// generator fires this DP hundreds of times per call and per-run 2D array
+// allocation dominated the profile
+let dpBuffer = new Float64Array(0);
+let prevBuffer = new Int32Array(0);
+
+const buildCandidate = (tokens, lineCount, targets) => {
   if (!tokens.length || lineCount < 1) return null;
   if (tokens.length < lineCount) return null;
-  const targets = targetsOverride || buildTargets(tokens, lineCount, curve, shift, bias, minWeight);
   const tokenCount = tokens.length;
   const { prefix, endsBreak, punctOnly, breakCount } = getTokenMetrics(tokens);
-  const dp = Array.from({ length: lineCount + 1 }, () => Array(tokenCount + 1).fill(Infinity));
-  const prev = Array.from({ length: lineCount + 1 }, () => Array(tokenCount + 1).fill(-1));
-  dp[0][0] = 0;
-
-  const lineCost = (lineIndex, from, to) => {
-    // A forced break inside the range (anywhere but on its last token)
-    // makes the line invalid; prefix counts make the check O(1)
-    if (breakCount[to - 1] - breakCount[from] > 0) return Infinity;
-    const target = targets[lineIndex] || 1;
-    const width = prefix[to] - prefix[from] + 0.45 * (to - from - 1);
-    const ratio = (width - target) / target;
-    let cost = ratio * ratio;
-    if (lineIndex < lineCount - 1 && endsBreak[to - 1]) {
-      cost = Math.max(0, cost - 0.09);
-    }
-    if (to - from === 1 && punctOnly[from]) cost += 3;
-    return cost;
-  };
+  const stride = tokenCount + 1;
+  const size = (lineCount + 1) * stride;
+  if (dpBuffer.length < size) {
+    dpBuffer = new Float64Array(size);
+    prevBuffer = new Int32Array(size);
+  }
+  dpBuffer.fill(Infinity, 0, size);
+  prevBuffer.fill(-1, 0, size);
+  dpBuffer[0] = 0;
 
   for (let lineIndex = 0; lineIndex < lineCount; lineIndex++) {
+    const target = targets[lineIndex] || 1;
+    const pruneWidth = target * (1 + DP_WIDTH_PRUNE_RATIO);
+    const isLastLine = lineIndex === lineCount - 1;
+    const rowOffset = lineIndex * stride;
+    const nextRowOffset = rowOffset + stride;
+    const maxTo = tokenCount - (lineCount - lineIndex - 1);
     for (let from = lineIndex; from <= tokenCount; from++) {
-      if (!Number.isFinite(dp[lineIndex][from])) continue;
-      const remainingLines = lineCount - lineIndex - 1;
-      const maxTo = tokenCount - remainingLines;
+      const baseCost = dpBuffer[rowOffset + from];
+      if (baseCost === Infinity) continue;
+      const fromPrefix = prefix[from];
+      const fromBreaks = breakCount[from];
       for (let to = from + 1; to <= maxTo; to++) {
-        const cost = lineCost(lineIndex, from, to);
-        if (!Number.isFinite(cost)) continue;
-        const nextCost = dp[lineIndex][from] + cost;
-        if (nextCost < dp[lineIndex + 1][to]) {
-          dp[lineIndex + 1][to] = nextCost;
-          prev[lineIndex + 1][to] = from;
+        const width = prefix[to] - fromPrefix + 0.45 * (to - from - 1);
+        // Single-token lines stay allowed so one giant word can never make
+        // the whole DP infeasible
+        if (width > pruneWidth && to > from + 1) break;
+        // A forced break inside the range (anywhere but on its last token)
+        // makes the line invalid; prefix counts make the check O(1)
+        if (breakCount[to - 1] - fromBreaks > 0) continue;
+        const ratio = (width - target) / target;
+        let cost = ratio * ratio;
+        if (!isLastLine && endsBreak[to - 1]) {
+          cost = cost > 0.09 ? cost - 0.09 : 0;
+        }
+        if (to - from === 1 && punctOnly[from]) cost += 3;
+        const nextCost = baseCost + cost;
+        if (nextCost < dpBuffer[nextRowOffset + to]) {
+          dpBuffer[nextRowOffset + to] = nextCost;
+          prevBuffer[nextRowOffset + to] = from;
         }
       }
     }
   }
 
-  if (!Number.isFinite(dp[lineCount][tokenCount])) return null;
+  if (dpBuffer[lineCount * stride + tokenCount] === Infinity) return null;
 
   const lines = [];
   let cursor = tokenCount;
   for (let lineIndex = lineCount; lineIndex > 0; lineIndex--) {
-    const from = prev[lineIndex][cursor];
+    const from = prevBuffer[lineIndex * stride + cursor];
     if (from < 0) return null;
     lines.unshift(tokens.slice(from, cursor));
     cursor = from;
@@ -539,33 +575,37 @@ const splitTokensForManualTargets = (tokens, targets, settings) => {
   const punctuationBonus = settings.punctuationBonus == null ? 0.04 : settings.punctuationBonus;
   const edgeMin = settings.edgeMin || 0;
   const edgeMinPenalty = settings.edgeMinPenalty == null ? 1.8 : settings.edgeMinPenalty;
+  const { prefix, charPrefix, endsBreak, punctCount } = getTokenMetrics(tokens);
   const dp = Array.from({ length: lineCount + 1 }, () => Array(tokenCount + 1).fill(Infinity));
   const prev = Array.from({ length: lineCount + 1 }, () => Array(tokenCount + 1).fill(-1));
   dp[0][0] = 0;
 
-  const lineCost = (lineIndex, from, to) => {
-    const width = sumTokenRange(tokens, from, to);
-    const target = targets[lineIndex] || 1;
+  // Prefix sums keep every line cost O(1); this DP runs on every manual
+  // slider tick so re-joining and re-measuring strings here froze the drag
+  const lineCost = (lineIndex, from, to, target, width) => {
     const ratio = (width - target) / target;
     let cost = ratio * ratio;
-    const text = lineText(tokens.slice(from, to));
-    if (lineIndex < lineCount - 1 && endsWithBreakPunctuation(text)) {
+    if (lineIndex < lineCount - 1 && endsBreak[to - 1]) {
       cost = Math.max(0, cost - punctuationBonus);
     }
-    if ((lineIndex === 0 || lineIndex === lineCount - 1) && edgeMin > 0 && visibleLength(text) < edgeMin) {
+    if ((lineIndex === 0 || lineIndex === lineCount - 1) && edgeMin > 0 && charPrefix[to] - charPrefix[from] + (to - from - 1) < edgeMin) {
       cost += edgeMinPenalty;
     }
-    if (/^[.,;:!?…]+$/.test(stripMarkdownForMeasure(text))) cost += 3;
+    if (punctCount[to] - punctCount[from] === to - from) cost += 3;
     return cost;
   };
 
   for (let lineIndex = 0; lineIndex < lineCount; lineIndex++) {
+    const target = targets[lineIndex] || 1;
+    const pruneWidth = target * (1 + DP_WIDTH_PRUNE_RATIO);
     for (let from = lineIndex; from <= tokenCount; from++) {
       if (!Number.isFinite(dp[lineIndex][from])) continue;
       const remainingLines = lineCount - lineIndex - 1;
       const maxTo = tokenCount - remainingLines;
       for (let to = from + 1; to <= maxTo; to++) {
-        const nextCost = dp[lineIndex][from] + lineCost(lineIndex, from, to);
+        const width = prefix[to] - prefix[from] + 0.45 * (to - from - 1);
+        if (width > pruneWidth && to > from + 1) break;
+        const nextCost = dp[lineIndex][from] + lineCost(lineIndex, from, to, target, width);
         if (nextCost < dp[lineIndex + 1][to]) {
           dp[lineIndex + 1][to] = nextCost;
           prev[lineIndex + 1][to] = from;
@@ -600,8 +640,25 @@ const estimateManualLineCount = (text, width = 320, height = 280) => {
   return clamp(Math.round(Math.sqrt(wordCount * aspect * 1.35)), 2, maxLines);
 };
 
-const addCandidate = (resultMap, tokens, lineCount, curve, shift, bias, hyphenCount, profile, targetsOverride, minWeightOverride) => {
-  const lines = buildCandidate(tokens, lineCount, curve, shift, bias, minWeightOverride == null ? profile.minWeight : minWeightOverride, targetsOverride);
+let nextTokenSetId = 1;
+const getTokenSetId = (tokens) => {
+  if (!tokens.__id) tokens.__id = nextTokenSetId++;
+  return tokens.__id;
+};
+
+const addCandidate = (resultMap, seenTargets, tokens, lineCount, curve, shift, bias, hyphenCount, profile, targetsOverride, minWeightOverride) => {
+  if (!tokens.length || tokens.length < lineCount) return;
+  const targets = targetsOverride || buildTargets(tokens, lineCount, curve, shift, bias, minWeightOverride == null ? profile.minWeight : minWeightOverride);
+  // Many curve/shift/bias combos collapse to (near) identical line targets
+  // once clamped: dedupe BEFORE the DP runs, not after, at ~quarter-char
+  // resolution — the split is insensitive to smaller target changes
+  let signature = getTokenSetId(tokens) + ":" + lineCount;
+  for (let index = 0; index < targets.length; index++) {
+    signature += "," + Math.round(targets[index] * 4);
+  }
+  if (seenTargets.has(signature)) return;
+  seenTargets.add(signature);
+  const lines = buildCandidate(tokens, lineCount, targets);
   if (!lines) return;
   const text = serializeLines(lines);
   if (!text || resultMap.has(text)) return;
@@ -614,14 +671,16 @@ const addCandidate = (resultMap, tokens, lineCount, curve, shift, bias, hyphenCo
   });
 };
 
-const generateHyphenTokenSets = (words) => {
+const generateHyphenTokenSets = (words, baseTokens) => {
   const sets = [];
   words.forEach((word, wordIndex) => {
     getHyphenSplits(word).forEach((split) => {
       const tokens = [];
       words.forEach((currentWord, index) => {
         if (index !== wordIndex) {
-          tokens.push({ text: currentWord });
+          // Reuse the base token objects so their cached measured widths are
+          // shared across every hyphen set instead of re-measured
+          tokens.push(baseTokens[index]);
           return;
         }
         tokens.push({ text: split.prefix, forceBreakAfter: true });
@@ -633,13 +692,34 @@ const generateHyphenTokenSets = (words) => {
   return sets;
 };
 
+// Same text + same options come back often (hover refreshes, panel
+// re-mounts, page switches): cache the last few results so those are free
+const VARIANT_CACHE_LIMIT = 16;
+const variantCache = new Map();
+
+const getVariantCacheKey = (text, options) => JSON.stringify([
+  text,
+  options.profile || null,
+  options.limit || null,
+  options.maxLines || null,
+  options.allowHyphenation !== false,
+  options.width || null,
+  options.height || null,
+  options.shapeProfile?.rows || null,
+]);
+
 const generateTextShapeRVariants = (text, options = {}) => {
   const normalized = normalizeText(text);
   if (!normalized) return [];
 
+  const cacheKey = getVariantCacheKey(normalized, options);
+  const cached = variantCache.get(cacheKey);
+  if (cached) return cached;
+
   const profile = PROFILE_PRESETS[options.profile] || PROFILE_PRESETS.balanced;
   const words = mergePunctuationWords(splitWordsPreservingMarkdown(normalized));
   const resultMap = new Map();
+  const seenTargets = new Set();
   const shapeRows = normalizeShapeRows(options.shapeProfile).filter((row) => row.width > 0);
   const aspect = options.width > 0 && options.height > 0
     ? clamp(options.height / options.width, 0.25, 3)
@@ -702,7 +782,7 @@ const generateTextShapeRVariants = (text, options = {}) => {
     const targets = buildManualTargets(tokens, lineCount, shapeTargetSettings);
     [-1, 0, 1].forEach((bias) => {
       const biasedTargets = bias === 0 ? targets : targets.map((target) => Math.max(1, target + bias));
-      addCandidate(resultMap, tokens, lineCount, 0, 0, 0, hyphenCount, scoringProfile, biasedTargets);
+      addCandidate(resultMap, seenTargets, tokens, lineCount, 0, 0, 0, hyphenCount, scoringProfile, biasedTargets);
     });
   };
 
@@ -710,7 +790,7 @@ const generateTextShapeRVariants = (text, options = {}) => {
     generationParams.forEach((params) => {
       params.curves.forEach((curve) => {
         params.shifts.forEach((shift) => {
-          params.biases.forEach((bias) => addCandidate(resultMap, baseTokens, lineCount, curve, shift, bias, 0, scoringProfile, null, params.minWeight));
+          params.biases.forEach((bias) => addCandidate(resultMap, seenTargets, baseTokens, lineCount, curve, shift, bias, 0, scoringProfile, null, params.minWeight));
         });
       });
     });
@@ -718,15 +798,20 @@ const generateTextShapeRVariants = (text, options = {}) => {
   }
 
   if (options.allowHyphenation !== false) {
-    generateHyphenTokenSets(words).forEach((tokens) => {
+    generateHyphenTokenSets(words, baseTokens).forEach((tokens) => {
       // Hyphen sets hold more tokens than words: cap by the profile range,
       // not by the word-count-capped maxLines (a single long word must still
       // be allowed to split onto two lines)
       const hyphenMaxLines = Math.min(options.maxLines || Math.max(profileMaxLines, maxLines), Math.max(1, tokens.length));
       for (let lineCount = Math.max(2, minLines); lineCount <= hyphenMaxLines; lineCount++) {
         generationParams.forEach((params) => {
-          params.curves.forEach((curve) => {
-            params.shifts.forEach((shift) => addCandidate(resultMap, tokens, lineCount, curve, shift, 0, 1, scoringProfile, null, params.minWeight));
+          // Hyphen variants carry a heavy score penalty and rarely win: a
+          // reduced curve/shift grid keeps the good ones at a third of the
+          // DP runs the full grid would burn
+          const hyphenCurves = params.curves.length > 2 ? [params.curves[0], params.curves[2]] : params.curves;
+          const hyphenShifts = params.shifts.slice(0, 3);
+          hyphenCurves.forEach((curve) => {
+            hyphenShifts.forEach((shift) => addCandidate(resultMap, seenTargets, tokens, lineCount, curve, shift, 0, 1, scoringProfile, null, params.minWeight));
           });
         });
         addShapeCandidates(tokens, lineCount, 1);
@@ -758,9 +843,15 @@ const generateTextShapeRVariants = (text, options = {}) => {
     pickedTexts.add(variant.text);
   });
 
-  return picked
+  const result = picked
     .sort((a, b) => a.score - b.score || a.text.localeCompare(b.text))
     .map((variant, index) => ({ ...variant, id: `shape-${index + 1}` }));
+
+  if (variantCache.size >= VARIANT_CACHE_LIMIT) {
+    variantCache.delete(variantCache.keys().next().value);
+  }
+  variantCache.set(cacheKey, result);
+  return result;
 };
 
 const generateManualTextShapeRVariant = (text, options = {}) => {

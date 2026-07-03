@@ -1,9 +1,9 @@
 import "./textShapeR.scss";
 
 import React from "react";
-import { FiArrowRightCircle, FiCheck, FiRefreshCw, FiX } from "react-icons/fi";
+import { FiArrowRightCircle, FiCheck, FiRefreshCw, FiRotateCcw, FiX } from "react-icons/fi";
 
-import { csInterface, locale, setActiveLayerText, getStyleObject, parseMarkdownRuns } from "../../utils";
+import { csInterface, locale, setActiveLayerText, undoLastTextChange, getStyleObject, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { getScaledStyle } from "../../textLayerPayload";
 import { estimateManualLineCount, generateManualTextShapeRVariant, generateTextShapeRVariants } from "../../textShapeR";
@@ -82,6 +82,7 @@ const TextShapeRModal = React.memo(function TextShapeRModal() {
   const textBlockStyle = context.state.currentStyle || {};
   const markdownEnabled = context.state.interpretMarkdown !== false;
   const [applyingId, setApplyingId] = React.useState(null);
+  const [undoDepth, setUndoDepth] = React.useState(0);
   const [profile, setProfile] = React.useState("balanced");
   const [allowHyphenation, setAllowHyphenation] = React.useState(true);
   const [selectedId, setSelectedId] = React.useState(null);
@@ -193,19 +194,33 @@ const TextShapeRModal = React.memo(function TextShapeRModal() {
       if (!variant || applyingId) return;
       setSelectedId(variant.id);
       setApplyingId(variant.id);
-      const lineStyle = getScaledStyle(sourceStyle, context.state.textScale);
+      // Layer-sourced applies keep the layer's own formatting: skipping the
+      // full style + stroke re-apply host-side is noticeably faster
+      const lineStyle = textSource === "layer" ? null : getScaledStyle(sourceStyle, context.state.textScale);
       setActiveLayerText(variant.text, lineStyle, context.state.direction, (ok) => {
         setApplyingId(null);
         if (!ok) return;
         setSelectedId(variant.id);
+        setUndoDepth((depth) => depth + 1);
         if (advance) {
           context.dispatch({ type: "setModal" });
           context.dispatch({ type: "nextLine", add: true });
         }
       });
     },
-    [applyingId, context, sourceStyle]
+    [applyingId, context, sourceStyle, textSource]
   );
+
+  // Jumps Photoshop history back to just before the last applied shape to
+  // restore the layer text as it was
+  const undoApply = React.useCallback(() => {
+    if (applyingId || !undoDepth) return;
+    undoLastTextChange((ok) => {
+      if (!ok) return;
+      setUndoDepth((depth) => Math.max(0, depth - 1));
+      if (textSource === "layer") refreshLayerSource();
+    });
+  }, [applyingId, undoDepth, textSource, refreshLayerSource]);
 
   const updateManualSetting = React.useCallback((field, value) => {
     setManualSettings((current) => ({ ...current, [field]: value }));
@@ -250,6 +265,14 @@ const TextShapeRModal = React.memo(function TextShapeRModal() {
 
   React.useEffect(() => {
     const handleKeyDown = (event) => {
+      if ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === "z" && !event.shiftKey) {
+        const undoTarget = event.target;
+        const undoTagName = undoTarget && undoTarget.tagName;
+        if (undoTarget?.isContentEditable || undoTagName === "INPUT" || undoTagName === "TEXTAREA") return;
+        event.preventDefault();
+        undoApply();
+        return;
+      }
       if (mode !== "auto") return;
       if (!variants.length || applyingId) return;
       const target = event.target;
@@ -276,7 +299,7 @@ const TextShapeRModal = React.memo(function TextShapeRModal() {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [applyingId, applyVariant, mode, selectedVariant, variants]);
+  }, [applyingId, applyVariant, mode, selectedVariant, variants, undoApply]);
 
   return (
     <React.Fragment>
@@ -432,6 +455,9 @@ const TextShapeRModal = React.memo(function TextShapeRModal() {
       <div className="app-modal-footer hostBrdTopContrast textshaper-footer">
         <div>{locale.textShapeRFooter || "Click a shape to test it. Shift+number applies and advances."}</div>
         <div className="textshaper-footer-actions">
+          <button className="topcoat-button" onClick={undoApply} disabled={!undoDepth || !!applyingId} title={locale.textShapeRUndo || "Undo the last applied shape (Ctrl+Z, steps Photoshop history back)"}>
+            <FiRotateCcw size={13} /> {locale.textShapeRUndoShort || "Undo"}
+          </button>
           <button className="topcoat-button" onClick={() => applyVariant(mode === "manual" ? manualVariant : selectedVariant)} disabled={!(mode === "manual" ? manualVariant : selectedVariant) || !!applyingId}>
             <FiCheck size={13} /> {locale.textShapeRApplyShort || "Apply"}
           </button>

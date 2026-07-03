@@ -1791,6 +1791,58 @@ function stopSelectionMonitoring() {
   monitor.lastBounds = null;
 }
 
+function deselectDocumentSelection() {
+  try {
+    if (!documents.length) return "doc";
+    try {
+      _deselect();
+    } catch (deselectError) {}
+    var monitor = _hostState.selectionMonitor;
+    monitor.lastBounds = null;
+    monitor.lastBoundsKey = null;
+    return "";
+  } catch (e) {
+    return "error";
+  }
+}
+
+function _getActiveHistoryIndex() {
+  var reference = new ActionReference();
+  reference.putEnumerated(stringIDToTypeID("historyState"), charID.Ordinal, charID.Target);
+  var descriptor = executeActionGet(reference);
+  return descriptor.getInteger(stringIDToTypeID("itemIndex")) - 1;
+}
+
+// Jumps back to just before the most recent "TyperTools Change" history
+// state. A plain single-step undo lands on selection/wand noise (bubble
+// detection creates several history states between two applies), so the
+// undo must search the history by name instead.
+function undoLastTyperChange() {
+  try {
+    if (!documents.length) return "doc";
+    var doc = app.activeDocument;
+    var states = doc.historyStates;
+    if (!states.length) return "none";
+    var activeIndex;
+    try {
+      activeIndex = _getActiveHistoryIndex();
+    } catch (indexError) {
+      activeIndex = states.length - 1;
+    }
+    if (activeIndex < 0) activeIndex = 0;
+    if (activeIndex > states.length - 1) activeIndex = states.length - 1;
+    for (var search = activeIndex; search > 0; search--) {
+      if (states[search].name === "TyperTools Change") {
+        doc.activeHistoryState = states[search - 1];
+        return "";
+      }
+    }
+    return "none";
+  } catch (e) {
+    return "error";
+  }
+}
+
 function getSelectionChanged() {
   try {
     var monitor = _hostState.selectionMonitor;

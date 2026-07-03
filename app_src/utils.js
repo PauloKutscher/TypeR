@@ -910,10 +910,31 @@ const stopSelectionMonitoring = () => {
   csInterface.evalScript("stopSelectionMonitoring()");
 };
 
+// After an explicit deselect, in-flight selection polls may still report the
+// old marquee: drop their results until the deselect has really completed so
+// cleared selections are never re-added behind the user's back. ExtendScript
+// runs calls in queue order, so once the deselect callback fires every later
+// poll reflects the post-deselect document.
+let selectionResultsSuppressedUntil = 0;
+
+const deselectDocument = (callback = () => {}) => {
+  selectionResultsSuppressedUntil = Date.now() + 5000;
+  csInterface.evalScript("deselectDocumentSelection()", () => {
+    selectionResultsSuppressedUntil = Date.now();
+    callback();
+  });
+};
+
+const undoLastTextChange = (callback = () => {}) => {
+  csInterface.evalScript("undoLastTyperChange()", trackHostAction((error) => {
+    callback(!error);
+  }));
+};
+
 const getSelectionChanged = (callback = () => {}) => {
   csInterface.evalScript("getSelectionChanged()", (result) => {
     const data = safeJsonParse(result);
-    if (data.noChange || data.error || typeof data.width !== "number") {
+    if (Date.now() < selectionResultsSuppressedUntil || data.noChange || data.error || typeof data.width !== "number") {
       callback(null);
     } else {
       callback(data);
@@ -1150,4 +1171,4 @@ const openFile = (path, autoClose = false) => {
   );
 };
 
-export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, getActiveLayerText, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
+export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, getActiveLayerText, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };

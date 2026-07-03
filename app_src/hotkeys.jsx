@@ -1,6 +1,6 @@
 import React from "react";
 
-import { csInterface, setActiveLayerText, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, getHotkeyPressed, changeActiveLayerTextSize, isHostActionPending } from "./utils";
+import { csInterface, setActiveLayerText, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, getHotkeyPressed, changeActiveLayerTextSize, isHostActionPending, deselectDocument } from "./utils";
 import { useContext } from "./context";
 import { buildStoredSelectionPayload, getScaledStyle } from "./textLayerPayload";
 
@@ -62,6 +62,9 @@ const HotkeysListner = React.memo(function HotkeysListner() {
           createTextLayersInStoredSelections(payload.texts, payload.styles, storedSelections, pointText, padding, direction, (ok) => {
             if (ok) {
               ctx.dispatch({ type: "clearSelections" });
+              // Drop the live marquee too: leaving it active would make the
+              // selection poll re-add it and advance the line
+              deselectDocument();
             }
           });
         } else {

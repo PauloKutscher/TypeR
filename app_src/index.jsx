@@ -11,13 +11,46 @@ import HotkeysListner from './hotkeys';
 import MainComponent from './components/main/main';
 import GlobalTooltip from './components/globalTooltip';
 
+// A render error anywhere in the tree used to kill the whole panel (blank
+// white extension until Photoshop restarts). Catch it and offer a reload.
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("TypeR crashed:", error, info);
+  }
+
+  render() {
+    if (this.state.error) {
+      const message = (this.state.error && this.state.error.message) || String(this.state.error);
+      return (
+        <div style={{ padding: 16, fontFamily: "Tahoma, sans-serif", fontSize: 12, color: "#ccc" }}>
+          <p style={{ marginBottom: 8 }}>TypeR encountered an unexpected error.</p>
+          <pre style={{ whiteSpace: "pre-wrap", maxHeight: 160, overflow: "auto", opacity: 0.7, marginBottom: 12 }}>{message}</pre>
+          <button className="topcoat-button--large" onClick={() => window.location.reload()}>Reload TypeR</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const App = React.memo(function App() {
   return (
-    <ContextProvider>
-      <HotkeysListner />
-      <MainComponent />
-      <GlobalTooltip />
-    </ContextProvider>
+    <ErrorBoundary>
+      <ContextProvider>
+        <HotkeysListner />
+        <MainComponent />
+        <GlobalTooltip />
+      </ContextProvider>
+    </ErrorBoundary>
   );
 });
 

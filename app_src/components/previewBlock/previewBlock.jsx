@@ -1,12 +1,12 @@
 import "./previewBlock.scss";
 
 import React from "react";
-import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiChevronsRight, FiPlay, FiRefreshCw, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiX, FiType } from "react-icons/fi";
+import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiChevronsRight, FiPlay, FiRefreshCw, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiRotateCcw, FiX, FiType } from "react-icons/fi";
 import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
 
-import { csInterface, locale, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
+import { csInterface, locale, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { buildStoredSelectionPayload, getScaledStyle } from "../../textLayerPayload";
 import { generateTextShapeRVariants } from "../../textShapeR";
@@ -60,6 +60,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     error: "",
   });
   const inlineSourceKey = React.useRef("");
+  const inlineLayerIdRef = React.useRef(null);
   const inlineSourcePending = React.useRef(false);
   const inlineEventDebounce = React.useRef(null);
   const inlineLastRefreshAt = React.useRef(0);
@@ -120,6 +121,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const selectionCheckPending = React.useRef(false);
   const [shiftSelectionWarning, setShiftSelectionWarning] = React.useState(false);
   const shiftTipTimeout = React.useRef(null);
+  const [textShapeRUndoDepth, setTextShapeRUndoDepth] = React.useState(0);
   const [showClearAllTip, setShowClearAllTip] = React.useState(false);
   const clearAllTipTimeout = React.useRef(null);
   const [clearAllTipShown, setClearAllTipShown] = React.useState(false);
@@ -135,6 +137,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       inlineSourcePending.current = false;
       if (!source?.text) {
         inlineSourceKey.current = "";
+        inlineLayerIdRef.current = null;
         setInlineLayerSource((current) => {
           const error = locale.textShapeRLayerNoText || "Select a Photoshop text layer first.";
           if (!current.text && current.error === error && !current.loading) return current;
@@ -142,6 +145,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         });
         return;
       }
+      inlineLayerIdRef.current = source.layerId;
       if (source.key === inlineSourceKey.current) {
         setInlineLayerSource((current) => (current.loading || current.error ? { ...current, loading: false, error: "" } : current));
         return;
@@ -226,9 +230,10 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       }
 
       // Bubble-aware mode: magic-wand the bubble around the active text layer
-      // (same detection as align-without-selection). Cached per layer so the
-      // wand only fires when the layer changes.
-      const bubbleKey = `bubble:${inlineSourceKey.current}`;
+      // (same detection as align-without-selection). Cached per layer ID, not
+      // per layer content: the bubble doesn't move when the text changes, so
+      // applying a shape must not pay for a new wand scan.
+      const bubbleKey = `bubble:${inlineLayerIdRef.current != null ? inlineLayerIdRef.current : inlineSourceKey.current}`;
       if (bubbleKey === inlineShapeKey.current) {
         inlineShapePending.current = false;
         return;
@@ -302,6 +307,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     // Blank the source first so stale variants of the previous layer are
     // never clickable while the next one loads
     inlineSourceKey.current = "";
+    inlineLayerIdRef.current = null;
     setInlineLayerSource({ text: "", style: null, key: "", layerId: null, loading: true, error: "" });
     csInterface.evalScript(`selectLayerById(${JSON.stringify(layerId)})`, () => {
       refreshInlineLayerSource(true);
@@ -452,28 +458,37 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     }
   };
 
+  // Resets the stored selections AND the active Photoshop selection: leaving
+  // the marquee alive would make the poll re-add it right away and advance
+  // the current line behind the user's back
+  const resetStoredSelections = React.useCallback(() => {
+    context.dispatch({ type: "clearSelections" });
+    deselectDocument();
+  }, [context.dispatch]);
+
   const clearButtonTimeout = React.useRef(null);
 
-  const clearStoredSelections = () => {
+  const removeLastStoredSelection = () => {
     const storedSelections = context.state.storedSelections || [];
     if (storedSelections.length === 0) return;
-    
     context.dispatch({ type: "removeSelection", index: storedSelections.length - 1 });
+    // The removed selection is usually the live marquee: drop it in Photoshop
+    // too so the poll does not re-add it and advance the line
+    deselectDocument();
   };
 
   const handleClearMouseDown = () => {
-    const timeout = setTimeout(() => {
-      context.dispatch({ type: "clearSelections" });
+    clearButtonTimeout.current = setTimeout(() => {
       clearButtonTimeout.current = null;
+      resetStoredSelections();
     }, 1000);
-    clearButtonTimeout.current = timeout;
   };
 
   const handleClearMouseUp = () => {
     if (clearButtonTimeout.current) {
       clearTimeout(clearButtonTimeout.current);
       clearButtonTimeout.current = null;
-      clearStoredSelections();
+      removeLastStoredSelection();
     }
   };
 
@@ -485,7 +500,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   };
 
   const checkForSelectionChange = React.useCallback(() => {
-    if (!context.state.multiBubbleMode || context.state.modalType || selectionCheckPending.current || isHostActionPending()) return;
+    if (!context.state.multiBubbleMode || context.state.modalType || document.hidden || selectionCheckPending.current || isHostActionPending()) return;
     selectionCheckPending.current = true;
 
     getSelectionChanged((selection) => {
@@ -617,7 +632,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       const direction = context.state.direction;
       createTextLayersInStoredSelections(payload.texts, payload.styles, storedSelections, pointText, padding, direction, (ok) => {
         if (ok) {
-          context.dispatch({ type: "clearSelections" });
+          resetStoredSelections();
         }
       });
     } else {
@@ -653,10 +668,10 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     const padding = context.state.internalPadding || 0;
     alignTextLayerToSelection(context.state.resizeTextBoxOnCenter, padding, () => {
       if (context.state.multiBubbleMode && (context.state.storedSelections || []).length > 0) {
-        context.dispatch({ type: "clearSelections" });
+        resetStoredSelections();
       }
     });
-  }, [context.state.internalPadding, context.state.resizeTextBoxOnCenter, context.state.multiBubbleMode, context.state.storedSelections, context.dispatch]);
+  }, [context.state.internalPadding, context.state.resizeTextBoxOnCenter, context.state.multiBubbleMode, context.state.storedSelections, resetStoredSelections]);
 
   const handleDecrease = React.useCallback(() => {
     changeActiveLayerTextSize(-(context.state.textSizeIncrement || 1));
@@ -707,8 +722,10 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       if (inlineLayerSource.loading || !inlineLayerSource.layerId || inlineLayerSource.layerId !== expectedLayerId) return;
     }
     setApplyingTextShapeRId(variant.id);
-    const lineStyle = getScaledStyle(inlineLayerSource.style, context.state.textScale);
-    setActiveLayerText(variant.text, lineStyle, context.state.direction, (ok) => {
+    // Style stays untouched: passing no style makes the host keep the layer's
+    // own formatting and skip the full style + stroke re-apply, which is
+    // noticeably faster and avoids compounding the text scale on re-applies
+    setActiveLayerText(variant.text, null, context.state.direction, (ok) => {
       setApplyingTextShapeRId(null);
       if (!ok) return;
       // In batch mode a picked shape moves on to the next queued layer
@@ -716,10 +733,39 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         advanceTextShapeRBatch();
         return;
       }
-      refreshInlineLayerSource();
+      setTextShapeRUndoDepth((depth) => depth + 1);
+      // The layer text now IS the applied variant: update the source locally
+      // instead of paying a read roundtrip; the debounced Photoshop event
+      // refresh will confirm silently (same key, no re-render)
+      setInlineLayerSource((current) => {
+        const next = { ...current, text: variant.text, loading: false, error: "" };
+        next.key = getLayerSourceKey(next);
+        inlineSourceKey.current = next.key;
+        return next;
+      });
       if (advance) context.dispatch({ type: "nextLine", add: true });
     });
-  }, [applyingTextShapeRId, context, inlineLayerSource.style, inlineLayerSource.loading, inlineLayerSource.layerId, refreshInlineLayerSource, advanceTextShapeRBatch]);
+  }, [applyingTextShapeRId, context, inlineLayerSource.loading, inlineLayerSource.layerId, advanceTextShapeRBatch]);
+
+  // Hover refresh is a fallback for missed Photoshop events: rate-limit it so
+  // sweeping the cursor over the widget doesn't queue ExtendScript roundtrips
+  const handleTextShapeRMouseEnter = React.useCallback(() => {
+    if (Date.now() - inlineLastRefreshAt.current < 800 || isHostActionPending()) return;
+    refreshInlineLayerSource();
+    refreshInlineSelectionShape();
+  }, [refreshInlineLayerSource, refreshInlineSelectionShape]);
+
+  // Jumps Photoshop history back to just before the last applied shape —
+  // the panel equivalent of Ctrl+Z after trying a shape
+  const undoTextShapeRApply = React.useCallback(() => {
+    if (applyingTextShapeRId || batchRunRef.current) return;
+    undoLastTextChange((ok) => {
+      if (!ok) return;
+      setTextShapeRUndoDepth((depth) => Math.max(0, depth - 1));
+      inlineSourceKey.current = "";
+      refreshInlineLayerSource(true);
+    });
+  }, [applyingTextShapeRId, refreshInlineLayerSource]);
 
   const handleIncrementChange = React.useCallback((e) => {
     context.dispatch({ type: "setTextSizeIncrement", increment: e.target.value });
@@ -738,9 +784,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           <div className="preview-top_selection-controls">
             <div className="preview-top_selection-info">
               <span className="preview-top_selection-count">{context.state.storedSelections.length} {context.state.storedSelections.length > 1 ? (locale.selectionsCount || 'selections') : (locale.selectionCount || 'selection')}</span>
-              <button 
-                className="topcoat-icon-button--large" 
-                title={locale.clearSelections || "Clear selections"} 
+              <button
+                className="topcoat-icon-button--large"
+                title={locale.clearSelections || "Remove the last selection (hold 1s to clear all)"}
                 onMouseDown={handleClearMouseDown}
                 onMouseUp={handleClearMouseUp}
                 onMouseLeave={handleClearMouseLeave}
@@ -760,8 +806,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           <div className="preview-top_selection-tip">
             <FiMinusCircle size={14} />
             <span>{locale.multiBubbleClearAllTip || "Tip: Hold the - button for 1 second to clear all selections at once"}</span>
-            <button 
-              className="preview-top_selection-tip-close" 
+            <button
+              className="preview-top_selection-tip-close"
               onClick={closeClearAllTip}
               title={locale.close || "Close"}
             >
@@ -804,7 +850,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           </button>
         </div>
         {context.state.inlineTextShapeR ? (
-          <div className="preview-textshaper hostBgdDark" onMouseEnter={() => { refreshInlineLayerSource(); refreshInlineSelectionShape(); }}>
+          <div className="preview-textshaper hostBgdDark" onMouseEnter={handleTextShapeRMouseEnter}>
             <div className="preview-textshaper-head">
               <button type="button" className="preview-textshaper-open" onClick={openTextShapeR} title={locale.textShapeROpenFull || "Open the full TextShapeR panel"}>
                 <FiType size={13} />
@@ -863,6 +909,14 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                   title={bubbleAwareTitle}
                 >
                   <FaMagic size={10} />
+                </button>
+                <button
+                  type="button"
+                  onClick={undoTextShapeRApply}
+                  disabled={!textShapeRUndoDepth || !!applyingTextShapeRId || !!batchRun}
+                  title={locale.textShapeRUndo || "Undo the last applied shape (steps Photoshop history back)"}
+                >
+                  <FiRotateCcw size={11} />
                 </button>
                 <button
                   type="button"
