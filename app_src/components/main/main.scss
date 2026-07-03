@@ -33,6 +33,10 @@
 }
 .bottom-block {
     flex: 0 0 auto;
+    &.m-grow {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
 }
 .footer-block {
     flex: 0 0 auto;

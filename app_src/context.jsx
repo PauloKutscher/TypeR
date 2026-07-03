@@ -3,6 +3,7 @@ import PropTypes from "prop-types";
 import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, checkUpdate } from "./utils";
 import config from "./config";
 import { getNextLineNumberState } from "./lineNumbering";
+import { setDehyphenationEnabled } from "./textShapeR";
 
 const storage = readStorage();
 const storeFields = [
@@ -36,6 +37,7 @@ const storeFields = [
   "showQuickStyleSize",
   "inlineTextShapeR",
   "textShapeRBubbleAware",
+  "dehyphenateTextShapeR",
   "internalPadding",
   "interpretMarkdown",
   "styleSizeStep",
@@ -43,6 +45,7 @@ const storeFields = [
   "tabs",
   "currentTabId",
   "multiTabEnabled",
+  "uiLayout",
 ];
 
 // Fields that belong to each tab (text script + PSD sync)
@@ -67,6 +70,57 @@ const loadTabIntoState = (state, tab) => {
   state.usedLineStyles = tab.usedLineStyles || {};
   // Stored selections are bound to the previously opened PSD
   state.storedSelections = [];
+};
+
+const defaultUiLayout = {
+  order: ["preview", "text", "styles"],
+  visible: {
+    preview: true,
+    text: true,
+    styles: true,
+    tabBar: true,
+    previewCreateButton: true,
+    previewAlignButton: true,
+    previewSizeControls: true,
+    previewNav: true,
+    previewWidget: true,
+    footerHelp: true,
+    footerRepo: true,
+    footerModeToggles: true,
+  },
+  sizes: {
+    previewHeight: 130,
+    uiScale: 100,
+  },
+};
+
+const clampNumber = (value, min, max, fallback) => {
+  const num = parseInt(value, 10);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.min(max, Math.max(min, num));
+};
+
+// Merge a stored/partial layout with the defaults so missing or invalid
+// fields (older storage versions, bad imports) never break the UI
+const normalizeUiLayout = (raw) => {
+  const layout = raw && typeof raw === "object" ? raw : {};
+  const visible = { ...defaultUiLayout.visible };
+  if (layout.visible && typeof layout.visible === "object") {
+    for (const key in visible) {
+      if (typeof layout.visible[key] === "boolean") visible[key] = layout.visible[key];
+    }
+  }
+  let order = Array.isArray(layout.order)
+    ? layout.order.filter((id) => defaultUiLayout.order.includes(id))
+    : [];
+  order = order.concat(defaultUiLayout.order.filter((id) => !order.includes(id)));
+  // The panel must never end up fully empty
+  if (!visible.preview && !visible.text && !visible.styles) visible.text = true;
+  const sizes = {
+    previewHeight: clampNumber(layout.sizes?.previewHeight, 80, 300, defaultUiLayout.sizes.previewHeight),
+    uiScale: clampNumber(layout.sizes?.uiScale, 70, 150, defaultUiLayout.sizes.uiScale),
+  };
+  return { order, visible, sizes };
 };
 
 const defaultShortcut = {
@@ -178,6 +232,7 @@ const initialState = {
   showQuickStyleSize: storage.data?.showQuickStyleSize !== false,
   inlineTextShapeR: storage.data?.inlineTextShapeR !== false,
   textShapeRBubbleAware: storage.data?.textShapeRBubbleAware !== false,
+  dehyphenateTextShapeR: storage.data?.dehyphenateTextShapeR === true,
   modalType: null,
   modalData: {},
   images: [],
@@ -194,6 +249,7 @@ const initialState = {
   multiTabEnabled: storage.data?.multiTabEnabled !== false,
   ...storage.data,
   shortcut: { ...defaultShortcut, ...(storage.data?.shortcut || {}) },
+  uiLayout: normalizeUiLayout(storage.data?.uiLayout),
 };
 
 // Multi-tab migration: wrap pre-tab data into a single tab, or restore the
@@ -268,6 +324,9 @@ const reducer = (state, action) => {
         } else {
           newState[field] = action.data[field];
         }
+      }
+      if (action.data.uiLayout) {
+        newState.uiLayout = normalizeUiLayout(action.data.uiLayout);
       }
       break;
     }
@@ -738,6 +797,11 @@ const reducer = (state, action) => {
       break;
     }
 
+    case "setDehyphenateTextShapeR": {
+      newState.dehyphenateTextShapeR = action.value === true;
+      break;
+    }
+
     case "setLastOpenedImagePath": {
       newState.lastOpenedImagePath = action.path || null;
       break;
@@ -852,6 +916,16 @@ const reducer = (state, action) => {
         newState.tabs = [firstTab];
         loadTabIntoState(newState, firstTab);
       }
+      break;
+    }
+
+    case "setUiLayout": {
+      newState.uiLayout = normalizeUiLayout(action.layout);
+      break;
+    }
+
+    case "resetUiLayout": {
+      newState.uiLayout = normalizeUiLayout(null);
       break;
     }
 
@@ -1169,6 +1243,9 @@ const ContextProvider = React.memo(function ContextProvider(props) {
   const [state, dispatch] = React.useReducer(reducer, initialState);
   React.useEffect(() => dispatch({}), []);
   React.useEffect(() => {
+    setDehyphenationEnabled(state.dehyphenateTextShapeR === true);
+  }, [state.dehyphenateTextShapeR]);
+  React.useEffect(() => {
     const direction = state.direction === "rtl" ? "rtl" : "ltr";
     document.documentElement.setAttribute("dir", direction);
     if (document.body) {
@@ -1191,4 +1268,4 @@ ContextProvider.propTypes = {
   children: PropTypes.any.isRequired,
 };
 
-export { useContext, ContextProvider };
+export { useContext, ContextProvider, defaultUiLayout, normalizeUiLayout };

@@ -1,7 +1,7 @@
 import "./previewBlock.scss";
 
 import React from "react";
-import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiChevronsRight, FiPlay, FiRefreshCw, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiRotateCcw, FiX, FiType } from "react-icons/fi";
+import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiChevronsRight, FiPlay, FiRefreshCw, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiRotateCcw, FiX } from "react-icons/fi";
 import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
@@ -47,6 +47,7 @@ const getActiveTextLayerSource = (callback) => {
 
 const PreviewBlock = React.memo(function PreviewBlock() {
   const context = useContext();
+  const uiVisible = context.state.uiLayout?.visible || {};
   const style = context.state.currentStyle || {};
   const line = context.state.currentLine || { text: "" };
   const textStyle = style.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {};
@@ -701,11 +702,6 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     if (context.state.textScale === 100) context.dispatch({ type: "setTextScale", scale: null });
   }, [context.state.textScale, context.dispatch]);
 
-  const openTextShapeR = React.useCallback((event) => {
-    event.stopPropagation();
-    context.dispatch({ type: "setModal", modal: "textShapeR" });
-  }, [context.dispatch]);
-
   const moveInlineTextShapeRPage = React.useCallback((direction) => {
     setInlineVariantPage((current) => {
       if (inlinePageCount <= 1) return 0;
@@ -816,31 +812,39 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           </div>
         )}
         <div className="preview-top_main-controls">
-          <button className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large--cta" title={
-            context.state.multiBubbleMode && context.state.storedSelections && context.state.storedSelections.length > 0
-              ? (locale.multiBubbleCreateLayersDescr || "Paste {count} text layer(s)").replace("{count}", context.state.storedSelections.length)
-              : locale.createLayerDescr
-          } onClick={createLayer}>
-            <AiOutlineBorderInner size={18} /> {locale.createLayer}
-          </button>
-          <button className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large" title={locale.alignLayerDescr} onClick={handleAlignLayer}>
-            <MdCenterFocusWeak size={18} /> {locale.alignLayer}
-          </button>
-          <div className="preview-top_change-size-cont">
-            <button className="topcoat-icon-button--large" title={locale.layerTextSizeMinus} onClick={handleDecrease}>
-              <FiMinusCircle size={18} />
+          {uiVisible.previewCreateButton !== false && (
+            <button className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large--cta" title={
+              context.state.multiBubbleMode && context.state.storedSelections && context.state.storedSelections.length > 0
+                ? (locale.multiBubbleCreateLayersDescr || "Paste {count} text layer(s)").replace("{count}", context.state.storedSelections.length)
+                : locale.createLayerDescr
+            } onClick={createLayer}>
+              <AiOutlineBorderInner size={18} /> {locale.createLayer}
             </button>
-            <div className="preview-top_size-input">
-              <input min={1} max={99} type="number" value={context.state.textSizeIncrement || ""} onChange={handleIncrementChange} onBlur={handleIncrementBlur} className="topcoat-text-input" />
-              <span>px</span>
+          )}
+          {uiVisible.previewAlignButton !== false && (
+            <button className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large" title={locale.alignLayerDescr} onClick={handleAlignLayer}>
+              <MdCenterFocusWeak size={18} /> {locale.alignLayer}
+            </button>
+          )}
+          {uiVisible.previewSizeControls !== false && (
+            <div className="preview-top_change-size-cont">
+              <button className="topcoat-icon-button--large" title={locale.layerTextSizeMinus} onClick={handleDecrease}>
+                <FiMinusCircle size={18} />
+              </button>
+              <div className="preview-top_size-input">
+                <input min={1} max={99} type="number" value={context.state.textSizeIncrement || ""} onChange={handleIncrementChange} onBlur={handleIncrementBlur} className="topcoat-text-input" />
+                <span>px</span>
+              </div>
+              <button className="topcoat-icon-button--large" title={locale.layerTextSizePlus} onClick={handleIncrease}>
+                <FiPlusCircle size={18} />
+              </button>
             </div>
-            <button className="topcoat-icon-button--large" title={locale.layerTextSizePlus} onClick={handleIncrease}>
-              <FiPlusCircle size={18} />
-            </button>
-          </div>
+          )}
         </div>
       </div>
+      {(uiVisible.previewNav !== false || uiVisible.previewWidget !== false) && (
       <div className="preview-bottom">
+        {uiVisible.previewNav !== false && (
         <div className="preview-nav">
           <button className="topcoat-icon-button--large" title={locale.prevLine} onClick={handlePrevLine}>
             <FiArrowUp size={18} />
@@ -849,13 +853,13 @@ const PreviewBlock = React.memo(function PreviewBlock() {
             <FiArrowDown size={18} />
           </button>
         </div>
-        {context.state.inlineTextShapeR ? (
+        )}
+        {uiVisible.previewWidget === false ? null : context.state.inlineTextShapeR ? (
           <div className="preview-textshaper hostBgdDark" onMouseEnter={handleTextShapeRMouseEnter}>
             <div className="preview-textshaper-head">
-              <button type="button" className="preview-textshaper-open" onClick={openTextShapeR} title={locale.textShapeROpenFull || "Open the full TextShapeR panel"}>
-                <FiType size={13} />
+              <div className="preview-textshaper-title">
                 <span>{locale.textShapeRTitle || "TextShapeR"}</span>
-              </button>
+              </div>
               <div className="preview-textshaper-pager">
                 {batchRun ? (
                   <span className="preview-textshaper-batch-run">
@@ -984,7 +988,6 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                 </div>
               </div>
               <div className="preview-line-info-actions">
-                <FiType size={16} onClick={openTextShapeR} title={locale.textShapeRTitle || "TextShapeR"} />
                 <FiArrowRightCircle size={16} onClick={insertStyledText} title={locale.insertStyledText} />
               </div>
             </div>
@@ -996,6 +999,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           </div>
         )}
       </div>
+      )}
     </React.Fragment>
   );
 });

@@ -76,6 +76,153 @@
     margin-left: 6px;
 }
 
+.export-modal {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 100%;
+}
+
+.export-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.14);
+}
+
+.export-summary-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    font-size: 11px;
+    font-weight: 600;
+    opacity: 0.9;
+
+    span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
+.export-section {
+    background: rgba(0, 0, 0, 0.1);
+    padding: 8px;
+}
+
+.export-section-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.export-section-title {
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.export-section-hint {
+    font-size: 10px;
+    line-height: 1.25;
+    margin-top: 2px;
+    opacity: 0.68;
+}
+
+.export-small-button {
+    flex: 0 0 auto;
+    min-height: 24px;
+    padding: 2px 8px;
+    font-size: 11px;
+}
+
+.export-option-list,
+.export-font-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 160px;
+    overflow: auto;
+}
+
+.export-folder-item,
+.export-font-item,
+.export-settings-item {
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    transition: background 0.15s ease, outline-color 0.15s ease;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.08);
+        outline: 1px solid rgba(255, 255, 255, 0.22);
+    }
+}
+
+.export-folder-item {
+    min-height: 26px;
+}
+
+.export-font-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 6px;
+}
+
+.export-font-content,
+.export-settings-content {
+    min-width: 0;
+}
+
+.export-font-name {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.export-font-meta {
+    font-size: 10px;
+    margin-top: 2px;
+    opacity: 0.62;
+}
+
+.export-settings-item {
+    align-items: flex-start;
+    padding: 8px;
+}
+
+.export-settings-title {
+    margin-left: 0;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.export-actions {
+    margin-top: auto;
+    padding-top: 10px;
+}
+
+@media (max-width: 420px) {
+    .export-summary {
+        grid-template-columns: 1fr;
+    }
+
+    .export-section-header {
+        flex-direction: column;
+    }
+
+    .export-small-button {
+        width: 100%;
+    }
+}
+
 // Settings tabs
 .settings-tabs {
     display: flex;
@@ -522,6 +669,301 @@
     
     .light-theme input:focus + & {
         outline: 1px solid rgba(0, 0, 0, 0.5);
+    }
+}
+
+// Interface layout editor (appearance tab)
+.settings-layout {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-bottom: 10px;
+}
+
+.settings-layout-mini-wrap {
+    flex: 0 0 auto;
+    width: 96px;
+}
+
+.settings-layout-mini {
+    display: flex;
+    flex-direction: column;
+    height: 170px;
+    padding: 3px;
+    gap: 2px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+
+    .light-theme & {
+        background: rgba(0, 0, 0, 0.08);
+        border-color: rgba(0, 0, 0, 0.25);
+    }
+}
+
+.settings-layout-mini-caption {
+    margin-top: 4px;
+    font-size: 10px;
+    text-align: center;
+    opacity: 0.65;
+}
+
+.settings-layout-mini-block {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 2px;
+    min-height: 12px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.12);
+    overflow: hidden;
+
+    &.m-text {
+        flex: 1 1 auto;
+    }
+
+    .light-theme & {
+        background: rgba(0, 0, 0, 0.12);
+    }
+}
+
+.settings-layout-mini-label {
+    font-size: 8px;
+    line-height: 1;
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+.settings-layout-mini-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    width: 100%;
+    padding: 0 4px;
+    box-sizing: border-box;
+
+    .m-pill {
+        height: 5px;
+        flex: 1 1 auto;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.35);
+
+        &.m-cta {
+            background: rgba(40, 142, 223, 0.8);
+        }
+        &.m-small {
+            flex: 0 0 14px;
+        }
+    }
+
+    .m-nav {
+        width: 5px;
+        height: 10px;
+        border-radius: 1px;
+        background: rgba(255, 255, 255, 0.3);
+    }
+
+    .m-widget {
+        flex: 1 1 auto;
+        height: 10px;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.2);
+        border: 1px dashed rgba(255, 255, 255, 0.35);
+        box-sizing: border-box;
+    }
+}
+
+.settings-layout-mini-tabs {
+    display: flex;
+    gap: 2px;
+    align-self: flex-start;
+    padding: 2px 3px 0;
+
+    span {
+        width: 12px;
+        height: 3px;
+        border-radius: 1px;
+        background: rgba(255, 255, 255, 0.3);
+    }
+}
+
+.settings-layout-mini-footer {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 6px;
+    padding: 0 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.1);
+
+    span {
+        width: 8px;
+        height: 2px;
+        border-radius: 1px;
+        background: rgba(255, 255, 255, 0.35);
+
+        &.m-on {
+            background: rgba(40, 142, 223, 0.8);
+        }
+        &.m-dot {
+            width: 3px;
+        }
+    }
+
+    .light-theme & {
+        background: rgba(0, 0, 0, 0.1);
+        span {
+            background: rgba(0, 0, 0, 0.3);
+            &.m-on {
+                background: rgba(25, 118, 210, 0.7);
+            }
+        }
+    }
+}
+
+.settings-layout-blocks {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.settings-layout-block-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px;
+    background: rgba(0, 0, 0, 0.15);
+    font-size: 12px;
+
+    &.m-hidden .settings-layout-block-name {
+        opacity: 0.45;
+        text-decoration: line-through;
+    }
+
+    .light-theme & {
+        background: rgba(0, 0, 0, 0.06);
+    }
+}
+
+.settings-layout-block-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.settings-layout-icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.1);
+    color: inherit;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.25);
+    }
+
+    &:disabled {
+        opacity: 0.3;
+        cursor: default;
+    }
+
+    .light-theme & {
+        background: rgba(0, 0, 0, 0.1);
+
+        &:hover:not(:disabled) {
+            background: rgba(0, 0, 0, 0.2);
+        }
+    }
+}
+
+.settings-layout-elements {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 3px 10px;
+    margin-bottom: 10px;
+}
+
+.settings-layout-element {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 2px;
+    font-size: 11px;
+    cursor: pointer;
+
+    input[type="checkbox"] {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+        width: 1px;
+        height: 1px;
+        margin: 0;
+    }
+
+    .settings-checkbox-custom {
+        width: 13px;
+        height: 13px;
+        margin-top: 0;
+
+        &::after {
+            width: 3px;
+            height: 6px;
+        }
+    }
+
+    span {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
+.settings-layout-sizes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.settings-layout-size-field {
+    flex: 1 1 100px;
+    min-width: 90px;
+
+    .field-label {
+        font-size: 10px;
+        margin-bottom: 3px;
+        opacity: 0.75;
+    }
+
+    input {
+        width: 100%;
+        box-sizing: border-box;
+    }
+}
+
+// Small panel widths: stack the mini preview above the block list
+@media (max-width: 420px) {
+    .settings-layout {
+        flex-direction: column;
+    }
+    .settings-layout-mini-wrap {
+        width: 120px;
+        align-self: center;
     }
 }
 

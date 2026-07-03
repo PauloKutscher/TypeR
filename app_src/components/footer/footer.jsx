@@ -38,19 +38,27 @@ const AppFooter = React.memo(function AppFooter() {
     context.dispatch({ type: "setInlineTextShapeR", value: !context.state.inlineTextShapeR });
   };
 
+  const uiVisible = context.state.uiLayout?.visible || {};
+
   return (
     <React.Fragment>
+      {uiVisible.footerHelp !== false && (
       <span className="link" onClick={openHelp}>
         {locale.footerHelp}
       </span>
+      )}
       <span className="link" onClick={openSettings}>
         {locale.footerSettings}
       </span>
+      {uiVisible.footerRepo !== false && (
       <span className="link" onClick={openRepository}>
         {context.state.images.length
           ? locale.footerDesyncRepo
           : locale.footerOpenRepo}
       </span>
+      )}
+      {uiVisible.footerModeToggles !== false && (
+      <React.Fragment>
       <span
         className="link footer-mode-indicator footer-mode-spacer"
         onClick={toggleInlineTextShapeR}
@@ -73,6 +81,8 @@ const AppFooter = React.memo(function AppFooter() {
           {context.state.multiBubbleMode ? (locale.multiBubbleModeOn || "ON") : (locale.multiBubbleModeOff || "OFF")}
         </span>
       </span>
+      </React.Fragment>
+      )}
       <HiddenFileInput ref={fileInputRef} />
     </React.Fragment>
   );

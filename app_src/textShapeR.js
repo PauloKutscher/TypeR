@@ -66,19 +66,32 @@ const PROFILE_PRESETS = {
 };
 
 // Merges hyphenation left over from a previous line break: "silho- uette"
-// reads as the word "silhouette". A lowercase continuation means the hyphen
-// was a line-break artefact and is dropped; an uppercase one means a broken
-// compound ("Jean- Paul") whose hyphen must be kept. Standalone dashes
+// reads as the word "silhouette". The junction is scored with the same
+// syllable model used to create hyphenations: a real césure sits on a
+// plausible syllable boundary of the merged word, while a compound broken
+// at its own hyphen ("court- circuit", "peut- être", "voulait- il") lands
+// on an implausible one and keeps its hyphen. Uppercase continuations
+// ("Jean- Paul") always read as compounds. Standalone dashes
 // ("il - enfin - vint", "—") never match: a letter must sit right before
 // the hyphen and the space only after it.
-const DEHYPHENATE_PATTERN = /([A-Za-zÀ-ÖØ-öø-ÿ])- ([A-Za-zÀ-ÖØ-öø-ÿ])/g;
-const LOWERCASE_LETTER = /[a-zà-öø-ÿ]/;
+const DEHYPHENATE_PATTERN = /([A-Za-zÀ-ÖØ-öø-ÿ]+)- ([A-Za-zÀ-ÖØ-öø-ÿ]+)/g;
+const UPPERCASE_LETTER = /[A-ZÀ-ÖØ-Þ]/;
+// Accepts every syllable-boundary score, including the weak vowel-vowel
+// ones (7); rejects unknown clusters (10) and consonant+vowel onsets (16)
+const CESURE_MAX_PENALTY = 8;
+
+let dehyphenationEnabled = false;
+const setDehyphenationEnabled = (enabled) => {
+  dehyphenationEnabled = enabled === true;
+};
 
 const dehyphenate = (text) => {
-  if (text.indexOf("- ") === -1) return text;
-  return text.replace(DEHYPHENATE_PATTERN, (match, before, after) => (
-    LOWERCASE_LETTER.test(after) ? before + after : before + "-" + after
-  ));
+  if (!dehyphenationEnabled || text.indexOf("- ") === -1) return text;
+  return text.replace(DEHYPHENATE_PATTERN, (match, before, after) => {
+    if (UPPERCASE_LETTER.test(after[0])) return before + "-" + after;
+    const penalty = getSyllableSplitPenalty(before + after, before.length);
+    return penalty < CESURE_MAX_PENALTY ? before + after : before + "-" + after;
+  });
 };
 
 const normalizeText = (text) => dehyphenate(String(text || "").replace(/\s+/g, " ").trim());
@@ -714,6 +727,8 @@ const VARIANT_CACHE_LIMIT = 16;
 const variantCache = new Map();
 
 const getVariantCacheKey = (text, options) => JSON.stringify([
+  // The toggle changes normalization, so cached entries must not cross it
+  dehyphenationEnabled,
   text,
   options.profile || null,
   options.limit || null,
@@ -920,4 +935,4 @@ const generateManualTextShapeRVariant = (text, options = {}) => {
   };
 };
 
-export { generateTextShapeRVariants, generateManualTextShapeRVariant, estimateManualLineCount, visibleLength, visibleWidth };
+export { generateTextShapeRVariants, generateManualTextShapeRVariant, estimateManualLineCount, setDehyphenationEnabled, visibleLength, visibleWidth };

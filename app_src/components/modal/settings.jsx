@@ -1,11 +1,11 @@
 import React from "react";
-import { FiX, FiSettings, FiEye, FiToggleLeft, FiDatabase, FiAlertTriangle } from "react-icons/fi";
+import { FiX, FiSettings, FiEye, FiEyeOff, FiToggleLeft, FiDatabase, FiAlertTriangle, FiChevronUp, FiChevronDown, FiRotateCcw } from "react-icons/fi";
 import { MdSave } from "react-icons/md";
 import { FaKeyboard, FaFileExport, FaFileImport } from "react-icons/fa";
 
 import config from "../../config";
 import { locale, nativeAlert, nativeConfirm, checkUpdate, readStorage, writeToStorage, deleteStorageFile, openFile } from "../../utils";
-import { useContext } from "../../context";
+import { useContext, defaultUiLayout, normalizeUiLayout } from "../../context";
 import Shortcut from "./shortCut";
 
 const SettingsModal = React.memo(function SettingsModal() {
@@ -49,6 +49,9 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [inlineTextShapeR, setInlineTextShapeR] = React.useState(
     context.state.inlineTextShapeR === true
   );
+  const [dehyphenateTextShapeR, setDehyphenateTextShapeR] = React.useState(
+    context.state.dehyphenateTextShapeR === true
+  );
   const [styleSizeStep, setStyleSizeStep] = React.useState(
     context.state.styleSizeStep !== undefined ? String(context.state.styleSizeStep) : "1"
   );
@@ -66,6 +69,19 @@ const SettingsModal = React.memo(function SettingsModal() {
   );
   const [multiTabConfirmOpen, setMultiTabConfirmOpen] = React.useState(false);
   const [edited, setEdited] = React.useState(false);
+
+  // Interface layout editor (appearance tab)
+  const [uiLayout, setUiLayoutLocal] = React.useState(() => normalizeUiLayout(context.state.uiLayout));
+  const [previewHeight, setPreviewHeight] = React.useState(
+    String(normalizeUiLayout(context.state.uiLayout).sizes.previewHeight)
+  );
+  const [uiScale, setUiScale] = React.useState(
+    String(normalizeUiLayout(context.state.uiLayout).sizes.uiScale)
+  );
+  const [stylesHeight, setStylesHeight] = React.useState(
+    String(readStorage("bottomHeight") || 70)
+  );
+  const initialStylesHeight = React.useRef(String(readStorage("bottomHeight") || 70));
 
   // States manager
   const [stateName, setStateName] = React.useState("");
@@ -175,6 +191,11 @@ const SettingsModal = React.memo(function SettingsModal() {
     setEdited(true);
   };
 
+  const changeDehyphenateTextShapeR = (e) => {
+    setDehyphenateTextShapeR(e.target.checked);
+    setEdited(true);
+  };
+
   const changeInternalPadding = (e) => {
     const value = e.target.value;
     // Allow empty string or valid numbers
@@ -198,6 +219,51 @@ const SettingsModal = React.memo(function SettingsModal() {
     setResetLineCounterOnPage(e.target.checked);
     setEdited(true);
   };
+
+  const toggleUiElement = (key) => {
+    setUiLayoutLocal((current) => normalizeUiLayout({
+      ...current,
+      visible: { ...current.visible, [key]: current.visible[key] === false },
+    }));
+    setEdited(true);
+  };
+
+  const moveUiBlock = (id, direction) => {
+    setUiLayoutLocal((current) => {
+      const index = current.order.indexOf(id);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= current.order.length) return current;
+      const order = current.order.concat([]);
+      order[index] = order[target];
+      order[target] = id;
+      return { ...current, order };
+    });
+    setEdited(true);
+  };
+
+  const changeUiSize = (setter) => (e) => {
+    const value = e.target.value;
+    if (value === "" || /^[0-9]+$/.test(value)) {
+      setter(value);
+      setEdited(true);
+    }
+  };
+
+  const resetUiLayout = () => {
+    setUiLayoutLocal(normalizeUiLayout(null));
+    setPreviewHeight(String(defaultUiLayout.sizes.previewHeight));
+    setUiScale(String(defaultUiLayout.sizes.uiScale));
+    setStylesHeight("70");
+    setEdited(true);
+  };
+
+  const buildUiLayoutToSave = () => normalizeUiLayout({
+    ...uiLayout,
+    sizes: {
+      previewHeight: previewHeight === "" ? defaultUiLayout.sizes.previewHeight : previewHeight,
+      uiScale: uiScale === "" ? defaultUiLayout.sizes.uiScale : uiScale,
+    },
+  });
 
   const save = (e) => {
     e.preventDefault();
@@ -322,6 +388,12 @@ const SettingsModal = React.memo(function SettingsModal() {
         value: inlineTextShapeR,
       });
     }
+    if (dehyphenateTextShapeR !== context.state.dehyphenateTextShapeR) {
+      context.dispatch({
+        type: "setDehyphenateTextShapeR",
+        value: dehyphenateTextShapeR,
+      });
+    }
     const parsedStyleSizeStep = parseFloat(String(styleSizeStep).replace(",", "."));
     if (
       Number.isFinite(parsedStyleSizeStep) &&
@@ -353,6 +425,16 @@ const SettingsModal = React.memo(function SettingsModal() {
     }
     if (multiTabEnabled !== (context.state.multiTabEnabled !== false)) {
       context.dispatch({ type: "setMultiTabEnabled", value: multiTabEnabled });
+    }
+    const layoutToSave = buildUiLayoutToSave();
+    if (JSON.stringify(layoutToSave) !== JSON.stringify(normalizeUiLayout(context.state.uiLayout))) {
+      context.dispatch({ type: "setUiLayout", layout: layoutToSave });
+    }
+    if (stylesHeight !== initialStylesHeight.current && stylesHeight !== "") {
+      const parsedStylesHeight = Math.min(500, Math.max(70, parseInt(stylesHeight, 10) || 70));
+      writeToStorage({ bottomHeight: parsedStylesHeight });
+      // The styles block height is applied imperatively by the resize logic
+      setTimeout(() => window.dispatchEvent(new Event("resize")), 50);
     }
     const shortcut = {};
     document.querySelectorAll("input[id^=shortcut_]").forEach((input) => {
@@ -598,6 +680,18 @@ const SettingsModal = React.memo(function SettingsModal() {
               </div>
             </div>
             <div className="field">
+              <div className="field-label">{locale.settingsLanguageLabel}</div>
+              <div className="field-input">
+                <select value={language} onChange={changeLanguage} className="topcoat-textarea">
+                  {Object.entries(config.languages).map(([code, name]) => (
+                    <option key={code} value={code}>
+                      {code === "auto" ? locale.settingsLanguageAuto : name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="field">
               <div className="field-label">{locale.settingsTextItemKindLabel}</div>
               <div className="field-input">
                 <select value={pastePointText} onChange={changePastePointText} className="topcoat-textarea">
@@ -639,19 +733,147 @@ const SettingsModal = React.memo(function SettingsModal() {
           </div>
         );
 
-      case "appearance":
+      case "appearance": {
+        const vis = uiLayout.visible;
+        const blockLabels = {
+          preview: locale.settingsLayoutBlockPreview || "Preview & actions",
+          text: locale.settingsLayoutBlockText || "Text",
+          styles: locale.settingsLayoutBlockStyles || "Styles",
+        };
+        const layoutElements = [
+          { key: "tabBar", label: locale.settingsLayoutElTabBar || "Tab bar" },
+          { key: "previewCreateButton", label: locale.settingsLayoutElCreate || "Create layer button" },
+          { key: "previewAlignButton", label: locale.settingsLayoutElAlign || "Align button" },
+          { key: "previewSizeControls", label: locale.settingsLayoutElSize || "Text size controls" },
+          { key: "previewNav", label: locale.settingsLayoutElNav || "Line navigation arrows" },
+          { key: "previewWidget", label: locale.settingsLayoutElWidget || "Line preview / TextShapeR" },
+          { key: "footerHelp", label: locale.settingsLayoutElFooterHelp || "Footer: Help link" },
+          { key: "footerRepo", label: locale.settingsLayoutElFooterRepo || "Footer: Repository link" },
+          { key: "footerModeToggles", label: locale.settingsLayoutElFooterModes || "Footer: mode toggles" },
+        ];
+        const miniScale = 170 / 700;
+        const miniPreviewHeight = Math.max(14, Math.round((parseInt(previewHeight, 10) || 130) * miniScale));
+        const miniStylesHeight = Math.max(10, Math.round((parseInt(stylesHeight, 10) || 70) * miniScale));
+        const miniBlocks = {
+          preview: vis.preview ? (
+            <div key="preview" className="settings-layout-mini-block m-preview" style={{ height: miniPreviewHeight }}>
+              <div className="settings-layout-mini-row">
+                {vis.previewCreateButton && <span className="m-pill m-cta" />}
+                {vis.previewAlignButton && <span className="m-pill" />}
+                {vis.previewSizeControls && <span className="m-pill m-small" />}
+              </div>
+              {(vis.previewNav || vis.previewWidget) && (
+                <div className="settings-layout-mini-row">
+                  {vis.previewNav && <span className="m-nav" />}
+                  {vis.previewWidget && <span className="m-widget" />}
+                </div>
+              )}
+            </div>
+          ) : null,
+          text: vis.text ? (
+            <div key="text" className="settings-layout-mini-block m-text">
+              {vis.tabBar && <div className="settings-layout-mini-tabs"><span /><span /></div>}
+              <span className="settings-layout-mini-label">{blockLabels.text}</span>
+            </div>
+          ) : null,
+          styles: vis.styles ? (
+            <div key="styles" className="settings-layout-mini-block m-styles" style={vis.text ? { height: miniStylesHeight } : { flex: "1 1 auto" }}>
+              <span className="settings-layout-mini-label">{blockLabels.styles}</span>
+            </div>
+          ) : null,
+        };
         return (
           <div className="fields">
-            <div className="field">
-              <div className="field-label">{locale.settingsLanguageLabel}</div>
-              <div className="field-input">
-                <select value={language} onChange={changeLanguage} className="topcoat-textarea">
-                  {Object.entries(config.languages).map(([code, name]) => (
-                    <option key={code} value={code}>
-                      {code === "auto" ? locale.settingsLanguageAuto : name}
-                    </option>
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupInterface || "Interface layout"}</div>
+              <div className="settings-layout">
+                <div className="settings-layout-mini-wrap">
+                  <div className="settings-layout-mini">
+                    {uiLayout.order.map((id) => miniBlocks[id])}
+                    <div className="settings-layout-mini-footer">
+                      {vis.footerHelp && <span />}
+                      <span className="m-on" />
+                      {vis.footerRepo && <span />}
+                      {vis.footerModeToggles && (
+                        <React.Fragment>
+                          <span className="m-dot" />
+                          <span className="m-dot" />
+                        </React.Fragment>
+                      )}
+                    </div>
+                  </div>
+                  <div className="settings-layout-mini-caption">
+                    {(locale.settingsLayoutScaleCaption || "Scale: {scale}%").replace("{scale}", uiScale || "100")}
+                  </div>
+                </div>
+                <div className="settings-layout-blocks">
+                  {uiLayout.order.map((id, index) => (
+                    <div key={id} className={"settings-layout-block-row" + (vis[id] ? "" : " m-hidden")}>
+                      <button
+                        type="button"
+                        className="settings-layout-icon-btn"
+                        title={vis[id] ? (locale.settingsLayoutHide || "Hide") : (locale.settingsLayoutShow || "Show")}
+                        onClick={() => toggleUiElement(id)}
+                      >
+                        {vis[id] ? <FiEye size={13} /> : <FiEyeOff size={13} />}
+                      </button>
+                      <span className="settings-layout-block-name">{blockLabels[id]}</span>
+                      <button
+                        type="button"
+                        className="settings-layout-icon-btn"
+                        disabled={index === 0}
+                        title={locale.settingsLayoutMoveUp || "Move up"}
+                        onClick={() => moveUiBlock(id, -1)}
+                      >
+                        <FiChevronUp size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className="settings-layout-icon-btn"
+                        disabled={index === uiLayout.order.length - 1}
+                        title={locale.settingsLayoutMoveDown || "Move down"}
+                        onClick={() => moveUiBlock(id, 1)}
+                      >
+                        <FiChevronDown size={13} />
+                      </button>
+                    </div>
                   ))}
-                </select>
+                  <div className="field-descr">
+                    {locale.settingsLayoutBlocksHint || "Show, hide, and reorder the main panels. The settings stay reachable from the footer."}
+                  </div>
+                </div>
+              </div>
+              <div className="settings-layout-elements">
+                {layoutElements.map((element) => (
+                  <label key={element.key} className="settings-layout-element">
+                    <input
+                      type="checkbox"
+                      checked={vis[element.key] !== false}
+                      onChange={() => toggleUiElement(element.key)}
+                    />
+                    <div className="settings-checkbox-custom"></div>
+                    <span>{element.label}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="settings-layout-sizes">
+                <div className="settings-layout-size-field">
+                  <div className="field-label">{locale.settingsLayoutPreviewHeight || "Preview height (px)"}</div>
+                  <input type="number" min="80" max="300" value={previewHeight} onChange={changeUiSize(setPreviewHeight)} className="topcoat-text-input--large" />
+                </div>
+                <div className="settings-layout-size-field">
+                  <div className="field-label">{locale.settingsLayoutStylesHeight || "Styles height (px)"}</div>
+                  <input type="number" min="70" max="500" value={stylesHeight} onChange={changeUiSize(setStylesHeight)} className="topcoat-text-input--large" />
+                </div>
+                <div className="settings-layout-size-field">
+                  <div className="field-label">{locale.settingsLayoutUiScale || "Interface scale (%)"}</div>
+                  <input type="number" min="70" max="150" value={uiScale} onChange={changeUiSize(setUiScale)} className="topcoat-text-input--large" />
+                </div>
+              </div>
+              <div className="field">
+                <button type="button" className="topcoat-button--large" onClick={resetUiLayout}>
+                  <FiRotateCcw size={14} /> {locale.settingsLayoutReset || "Reset layout"}
+                </button>
               </div>
             </div>
             <div className="field">
@@ -674,6 +896,7 @@ const SettingsModal = React.memo(function SettingsModal() {
             </div>
           </div>
         );
+      }
 
       case "behavior":
         return (
@@ -696,6 +919,20 @@ const SettingsModal = React.memo(function SettingsModal() {
                     </div>
                   </label>
                 </div>
+                {inlineTextShapeR && (
+                  <div className="settings-checkbox-item">
+                    <label className="settings-checkbox-label">
+                      <input type="checkbox" checked={dehyphenateTextShapeR} onChange={changeDehyphenateTextShapeR} />
+                      <div className="settings-checkbox-custom"></div>
+                      <div className="settings-checkbox-content">
+                        <span>{locale.settingsDehyphenateLabel || "TextShapeR: merge hyphenated words"}</span>
+                        <div className="settings-checkbox-hint">
+                          {locale.settingsDehyphenateHint || "Treats \"silho- uette\" as \"silhouette\" when generating shapes. Disable if compound words get wrongly merged."}
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+                )}
                 <div className="settings-checkbox-item">
                   <label className="settings-checkbox-label">
                     <input type="checkbox" checked={multiTabEnabled} onChange={changeMultiTabEnabled} />

@@ -258,28 +258,18 @@
 
 }
 
-.preview-textshaper-open {
+.preview-textshaper-title {
   align-items: center;
-  background: none;
-  border: 0;
   color: inherit;
-  cursor: pointer;
   display: inline-flex;
   font-size: 10px;
-  gap: 4px;
   line-height: 14px;
   margin: 0;
   max-width: 86px;
   opacity: 0.72;
   overflow: hidden;
-  padding: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
-
-  &:hover {
-    color: #fff;
-    opacity: 1;
-  }
 }
 
 .preview-textshaper-pager {
