@@ -1,5 +1,5 @@
 import React from "react";
-import { FiX } from "react-icons/fi";
+import { FiCheckSquare, FiFolder, FiType, FiX } from "react-icons/fi";
 import { MdSave } from "react-icons/md";
 
 import config from "../../config";
@@ -10,10 +10,42 @@ import { buildFolderTree, collectDescendantIds } from "../../folderUtils";
 const ExportModal = React.memo(function ExportModal() {
   const context = useContext();
   const [selected, setSelected] = React.useState([]);
-  const [withSettings, setWithSettings] = React.useState(true);
+  const [selectedFonts, setSelectedFonts] = React.useState([]);
+  const [withSettings, setWithSettings] = React.useState(false);
   const [allSelected, setAllSelected] = React.useState(false);
   const folderTree = React.useMemo(() => buildFolderTree(context.state.folders), [context.state.folders]);
   const allFolderIds = React.useMemo(() => context.state.folders.map((folder) => folder.id), [context.state.folders]);
+  const previousFontKeys = React.useRef([]);
+  const selectedStyles = React.useMemo(
+    () => context.state.styles.filter((style) => selected.includes(style.folder)),
+    [context.state.styles, selected]
+  );
+  const fontOptions = React.useMemo(() => buildFontOptions(selectedStyles), [selectedStyles]);
+  const selectedFontSet = React.useMemo(() => new Set(selectedFonts), [selectedFonts]);
+  const exportableStyles = React.useMemo(
+    () => selectedStyles.filter((style) => selectedFontSet.has(getStyleFontKey(style))),
+    [selectedStyles, selectedFontSet]
+  );
+  const canExport = exportableStyles.length > 0 || withSettings;
+
+  React.useEffect(() => {
+    setSelectedFonts((current) => {
+      const optionKeys = fontOptions.map((font) => font.key);
+      const available = new Set(optionKeys);
+      const previousKeys = previousFontKeys.current;
+      const selectedAllPrevious =
+        previousKeys.length > 0 && previousKeys.every((key) => current.includes(key));
+      const filtered = current.filter((key) => available.has(key));
+      const added = optionKeys.filter((key) => !previousKeys.includes(key));
+      previousFontKeys.current = optionKeys;
+
+      if (!optionKeys.length) return [];
+      if (!current.length || selectedAllPrevious) {
+        return Array.from(new Set(filtered.concat(added)));
+      }
+      return filtered;
+    });
+  }, [fontOptions]);
 
   const close = () => {
     context.dispatch({ type: "setModal" });
@@ -34,6 +66,17 @@ const ExportModal = React.memo(function ExportModal() {
     setAllSelected(arr.length === allFolderIds.length);
   };
 
+  const toggleFont = (key, checked) => {
+    setSelectedFonts((current) =>
+      checked ? Array.from(new Set(current.concat(key))) : current.filter((fontKey) => fontKey !== key)
+    );
+  };
+
+  const toggleAllFonts = () => {
+    const allFontKeys = fontOptions.map((font) => font.key);
+    setSelectedFonts(selectedFonts.length === allFontKeys.length ? [] : allFontKeys);
+  };
+
   const toggleSelectAll = () => {
     if (allSelected) {
       setSelected([]);
@@ -46,7 +89,7 @@ const ExportModal = React.memo(function ExportModal() {
 
   const exportData = (e) => {
     e.preventDefault();
-    if (!selected.length && !withSettings) return;
+    if (!canExport) return;
     const pathSelect = window.cep.fs.showSaveDialogEx(
       false,
       false,
@@ -55,7 +98,7 @@ const ExportModal = React.memo(function ExportModal() {
     );
     if (!pathSelect?.data) return false;
     const folders = context.state.folders.filter((f) => selected.includes(f.id));
-    const styles = context.state.styles.filter((s) => selected.includes(s.folder));
+    const styles = exportableStyles;
     const data = {
       folders,
       styles,
@@ -85,30 +128,98 @@ const ExportModal = React.memo(function ExportModal() {
         </button>
       </div>
       <div className="app-modal-body">
-        <form className="app-modal-body-inner" onSubmit={exportData}>
-            <div className="fields">
-              <div className="export-select-all-container">
-                <button 
-                  type="button" 
-                  className="topcoat-button--large" 
-                  onClick={toggleSelectAll}
-                >
-                  {allSelected ? locale.deselectAll : locale.selectAll}
-                </button>
+        <form className="app-modal-body-inner export-modal" onSubmit={exportData}>
+          <div className="export-summary hostBrdContrast">
+            <div className="export-summary-item">
+              <FiFolder size={15} />
+              <span>{locale.exportFolderCount?.replace("{count}", selected.length) || `${selected.length} folders`}</span>
+            </div>
+            <div className="export-summary-item">
+              <FiType size={15} />
+              <span>{locale.exportStyleCount?.replace("{count}", exportableStyles.length) || `${exportableStyles.length} styles`}</span>
+            </div>
+            <div className="export-summary-item">
+              <FiCheckSquare size={15} />
+              <span>{withSettings ? (locale.exportSettingsIncluded || "Settings included") : (locale.exportSettingsSkipped || "Settings skipped")}</span>
+            </div>
+          </div>
+
+          <div className="export-section hostBrdContrast">
+            <div className="export-section-header">
+              <div>
+                <div className="export-section-title">{locale.exportFoldersTitle || "Folders"}</div>
+                <div className="export-section-hint">{locale.exportFoldersHint || "Choose the folders to include in the JSON export."}</div>
               </div>
-            {renderFolderNodes(folderTree, selected, toggleFolder)}
-            <label className="topcoat-checkbox export-settings-item">
+              <button
+                type="button"
+                className="topcoat-button--large export-small-button"
+                onClick={toggleSelectAll}
+              >
+                {allSelected ? locale.deselectAll : locale.selectAll}
+              </button>
+            </div>
+            <div className="export-option-list">
+              {renderFolderNodes(folderTree, selected, toggleFolder)}
+            </div>
+          </div>
+
+          <div className="export-section hostBrdContrast">
+            <div className="export-section-header">
+              <div>
+                <div className="export-section-title">{locale.exportFontsTitle || "Fonts"}</div>
+                <div className="export-section-hint">
+                  {fontOptions.length
+                    ? (locale.exportFontsHint || "Choose exactly which fonts from the selected folders should be exported.")
+                    : (locale.exportFontsEmpty || "Select a folder with styles to choose fonts.")}
+                </div>
+              </div>
+              {fontOptions.length ? (
+                <button
+                  type="button"
+                  className="topcoat-button--large export-small-button"
+                  onClick={toggleAllFonts}
+                >
+                  {selectedFonts.length === fontOptions.length ? locale.deselectAll : locale.selectAll}
+                </button>
+              ) : null}
+            </div>
+            <div className="export-font-grid">
+              {fontOptions.map((font) => (
+                <label key={font.key} className="topcoat-checkbox export-font-item">
+                  <input
+                    type="checkbox"
+                    checked={selectedFonts.includes(font.key)}
+                    onChange={(e) => toggleFont(font.key, e.target.checked)}
+                  />
+                  <div className="topcoat-checkbox__checkmark"></div>
+                  <div className="export-font-content">
+                    <div className="export-font-name">{font.label}</div>
+                    <div className="export-font-meta">
+                      {locale.exportFontStyleCount?.replace("{count}", font.count) || `${font.count} styles`}
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <label className="topcoat-checkbox export-settings-item hostBrdContrast">
               <input
                 type="checkbox"
                 checked={withSettings}
                 onChange={(e) => setWithSettings(e.target.checked)}
               />
               <div className="topcoat-checkbox__checkmark"></div>
-              <div className="export-settings-title">{locale.exportIncludeSettings}</div>
-            </label>
-          </div>
-          <div className="fields hostBrdTopContrast">
-            <button type="submit" className="topcoat-button--large--cta">
+              <div className="export-settings-content">
+                <div className="export-settings-title">{locale.exportIncludeSettings}</div>
+                <div className="export-section-hint">
+                  {locale.exportIncludeSettingsHint || "Keep this off when you only want to share style folders."}
+                </div>
+              </div>
+          </label>
+
+          <div className="fields hostBrdTopContrast export-actions">
+            <button type="submit" className="topcoat-button--large--cta" disabled={!canExport}>
               <MdSave size={18} /> {locale.save}
             </button>
           </div>
@@ -117,6 +228,39 @@ const ExportModal = React.memo(function ExportModal() {
     </React.Fragment>
   );
 });
+
+const getStyleTextStyle = (style) =>
+  style?.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {};
+
+const getStyleFontKey = (style) => {
+  const textStyle = getStyleTextStyle(style);
+  return (
+    textStyle.fontPostScriptName ||
+    [textStyle.fontName, textStyle.fontStyleName].filter(Boolean).join(" / ") ||
+    "__unknown_font__"
+  );
+};
+
+const getStyleFontLabel = (style) => {
+  const textStyle = getStyleTextStyle(style);
+  const name = textStyle.fontName || textStyle.fontPostScriptName || "Unknown font";
+  return textStyle.fontStyleName ? `${name} · ${textStyle.fontStyleName}` : name;
+};
+
+const buildFontOptions = (styles) => {
+  const map = new Map();
+  styles.forEach((style) => {
+    const key = getStyleFontKey(style);
+    const option = map.get(key) || {
+      key,
+      label: getStyleFontLabel(style),
+      count: 0,
+    };
+    option.count += 1;
+    map.set(key, option);
+  });
+  return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+};
 
 const renderFolderNodes = (nodes, selected, toggleFolder, depth = 0) => {
   if (!nodes || !nodes.length) return null;
