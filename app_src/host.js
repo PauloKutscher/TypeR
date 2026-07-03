@@ -70,6 +70,10 @@ var _hostState = {
     data: null,
     result: "",
   },
+  setTextShapeRText: {
+    data: null,
+    result: "",
+  },
   createTextLayerInSelection: {
     data: null,
     result: "",
@@ -1132,6 +1136,133 @@ function _setActiveLayerText() {
   });
 
   state.result = "";
+}
+
+// Lean text-only apply for TextShapeR: the panel already holds a full style
+// snapshot of the layer (read when it was selected), so this path skips the
+// expensive jamText.getLayerText() re-read, the Middle-East override actions,
+// and the stroke re-apply — none of them can have changed since only the
+// line breaking changes. Point text also skips both box conversions since it
+// can never soft-wrap: one relayout instead of four.
+function _setTextShapeRText() {
+  var state = _hostState.setTextShapeRText;
+  var payload = state.data;
+  state.result = "";
+  if (!payload) {
+    return;
+  } else if (!documents.length) {
+    state.result = "doc";
+    return;
+  } else if (!_layerIsTextLayer()) {
+    state.result = "layer";
+    return;
+  }
+  var convertedToPoint = false;
+  try {
+    var snapshot = payload.style.textProps;
+    var dataText = payload.text;
+    var oldBounds = _getCurrentTextLayerBounds();
+    var isPoint = _textLayerIsPointText();
+
+    var newTextParams = { layerText: { textKey: _normalizeTextKey(dataText) } };
+    var baseRange = _clone(snapshot.layerText.textStyleRange[0]);
+    baseRange.from = 0;
+    baseRange.to = dataText.length;
+    newTextParams.layerText.textStyleRange = [baseRange];
+
+    var snapshotParagraph = snapshot.layerText.paragraphStyleRange && snapshot.layerText.paragraphStyleRange[0];
+    var oldParagraphStyle = (snapshotParagraph && snapshotParagraph.paragraphStyle) || {};
+    var newParagraphStyle = {};
+    for (var propIndex = 0; propIndex < _SAFE_PARAGRAPH_PROPS.length; propIndex++) {
+      var prop = _SAFE_PARAGRAPH_PROPS[propIndex];
+      if (oldParagraphStyle[prop] !== undefined) {
+        newParagraphStyle[prop] = oldParagraphStyle[prop];
+      }
+    }
+    newTextParams.layerText.paragraphStyleRange = [{ from: 0, to: dataText.length, paragraphStyle: newParagraphStyle }];
+
+    _applyRichTextRanges(newTextParams, payload.richTextRuns, dataText.length);
+
+    // Carried over verbatim: dropping these made Photoshop reinterpret the
+    // size unit (text size jumps) and reset the anti-aliasing mode
+    newTextParams.layerText.antiAlias = snapshot.layerText.antiAlias || "antiAliasSmooth";
+    newTextParams.typeUnit = snapshot.typeUnit;
+
+    var userDirection = payload.direction;
+    if (userDirection === "") userDirection = null;
+    var directionBaked = false;
+    if (userDirection) {
+      var psDirection = userDirection === "rtl" ? "dirRightToLeft" : "dirLeftToRight";
+      var paragraphRanges = newTextParams.layerText.paragraphStyleRange;
+      for (var p = 0; p < paragraphRanges.length; p++) {
+        var paragraphRange = paragraphRanges[p] || {};
+        var bakedStyle = paragraphRange.paragraphStyle || {};
+        bakedStyle.directionType = psDirection;
+        bakedStyle.textComposerEngine = "textOptycaComposer";
+        paragraphRange.paragraphStyle = bakedStyle;
+        paragraphRanges[p] = paragraphRange;
+      }
+      directionBaked = true;
+    }
+
+    // Box layers hop through point text for the swap: point text never
+    // soft-wraps so no measuring box is needed, and converting back to box
+    // rebuilds a box fitted around the new text automatically — that kills
+    // both the giant measure box and the second fitting relayout
+    if (!isPoint) {
+      _changeToPointText();
+      convertedToPoint = true;
+    }
+
+    try {
+      jamText.setLayerText(newTextParams);
+    } catch (setError) {
+      if (!directionBaked) throw setError;
+      for (var q = 0; q < newTextParams.layerText.paragraphStyleRange.length; q++) {
+        var retryStyle = newTextParams.layerText.paragraphStyleRange[q].paragraphStyle || {};
+        delete retryStyle.directionType;
+        delete retryStyle.textComposerEngine;
+      }
+      jamText.setLayerText(newTextParams);
+    }
+
+    if (convertedToPoint) {
+      _changeToBoxText();
+      convertedToPoint = false;
+    }
+
+    var newBounds = _getCurrentTextLayerBounds();
+    if (!oldBounds.bottom) oldBounds = newBounds;
+    var offsetX = oldBounds.xMid - newBounds.xMid;
+    var offsetY = oldBounds.yMid - newBounds.yMid;
+    if (offsetX || offsetY) _moveLayer(offsetX, offsetY);
+    state.result = "";
+  } catch (leanError) {
+    // Restore the layer kind first so the fallback sees the original state
+    if (convertedToPoint) {
+      try {
+        _changeToBoxText();
+      } catch (revertError) {}
+    }
+    // Any surprise (stale snapshot, unexpected layer state) falls back to
+    // the battle-tested full apply path within the same history state
+    _hostState.setActiveLayerText.data = payload;
+    _setActiveLayerText();
+    state.result = _hostState.setActiveLayerText.result;
+  }
+}
+
+function setTextShapeRLayerText(data) {
+  var valid = data && data.text && data.style && data.style.textProps && data.style.textProps.layerText &&
+    data.style.textProps.layerText.textStyleRange && data.style.textProps.layerText.textStyleRange[0];
+  if (!valid) return setActiveLayerText(data);
+  if (!documents.length) return "doc";
+  var state = _hostState.setTextShapeRText;
+  state.data = data;
+  state.result = "";
+  // Same history state name as the classic apply so undoLastTyperChange works
+  app.activeDocument.suspendHistory("TyperTools Change", "_setTextShapeRText()");
+  return state.result;
 }
 
 function _createTextLayerInSelection() {

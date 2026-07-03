@@ -3,7 +3,7 @@ import "./textShapeR.scss";
 import React from "react";
 import { FiArrowRightCircle, FiCheck, FiRefreshCw, FiRotateCcw, FiX } from "react-icons/fi";
 
-import { csInterface, locale, setActiveLayerText, undoLastTextChange, getStyleObject, parseMarkdownRuns } from "../../utils";
+import { csInterface, locale, setActiveLayerText, setLayerTextFast, undoLastTextChange, getStyleObject, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { getScaledStyle } from "../../textLayerPayload";
 import { estimateManualLineCount, generateManualTextShapeRVariant, generateTextShapeRVariants } from "../../textShapeR";
@@ -194,10 +194,12 @@ const TextShapeRModal = React.memo(function TextShapeRModal() {
       if (!variant || applyingId) return;
       setSelectedId(variant.id);
       setApplyingId(variant.id);
-      // Layer-sourced applies keep the layer's own formatting: skipping the
-      // full style + stroke re-apply host-side is noticeably faster
-      const lineStyle = textSource === "layer" ? null : getScaledStyle(sourceStyle, context.state.textScale);
-      setActiveLayerText(variant.text, lineStyle, context.state.direction, (ok) => {
+      // Layer-sourced applies keep the layer's own formatting: the snapshot
+      // fast path skips the host's layer re-read and style/stroke re-apply
+      const useFastPath = textSource === "layer" && layerSource.style;
+      const applyFn = useFastPath ? setLayerTextFast : setActiveLayerText;
+      const lineStyle = useFastPath ? layerSource.style : getScaledStyle(sourceStyle, context.state.textScale);
+      applyFn(variant.text, lineStyle, context.state.direction, (ok) => {
         setApplyingId(null);
         if (!ok) return;
         setSelectedId(variant.id);
@@ -208,7 +210,7 @@ const TextShapeRModal = React.memo(function TextShapeRModal() {
         }
       });
     },
-    [applyingId, context, sourceStyle, textSource]
+    [applyingId, context, sourceStyle, textSource, layerSource.style]
   );
 
   // Jumps Photoshop history back to just before the last applied shape to

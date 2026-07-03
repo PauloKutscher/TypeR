@@ -836,6 +836,27 @@ const setActiveLayerText = (text, style, direction, callback = () => {}) => {
   }));
 };
 
+// Fast text-only apply for TextShapeR: passes the layer style snapshot the
+// panel already holds so the host can skip its full layer re-read and every
+// style/stroke re-apply — only the line breaking changes
+const setLayerTextFast = (text, layerSnapshotStyle, direction, callback = () => {}) => {
+  if (!text || !layerSnapshotStyle) {
+    setActiveLayerText(text, layerSnapshotStyle, direction, callback);
+    return;
+  }
+  const parsed = buildRichTextPayload(text);
+  const data = JSON.stringify({
+    text: parsed.text,
+    style: layerSnapshotStyle,
+    direction,
+    richTextRuns: parsed.richTextRuns,
+  });
+  csInterface.evalScript("setTextShapeRLayerText(" + data + ")", trackHostAction((error) => {
+    if (error) nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
+    callback(!error);
+  }));
+};
+
 const getCurrentSelection = (callback = () => {}) => {
   csInterface.evalScript("getCurrentSelection()", (result) => {
     const data = safeJsonParse(result);
@@ -1171,4 +1192,4 @@ const openFile = (path, autoClose = false) => {
   );
 };
 
-export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, getActiveLayerText, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
+export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, getActiveLayerText, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };

@@ -6,7 +6,7 @@ import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
 
-import { csInterface, locale, setActiveLayerText, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
+import { csInterface, locale, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { buildStoredSelectionPayload, getScaledStyle } from "../../textLayerPayload";
 import { generateTextShapeRVariants } from "../../textShapeR";
@@ -722,10 +722,10 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       if (inlineLayerSource.loading || !inlineLayerSource.layerId || inlineLayerSource.layerId !== expectedLayerId) return;
     }
     setApplyingTextShapeRId(variant.id);
-    // Style stays untouched: passing no style makes the host keep the layer's
-    // own formatting and skip the full style + stroke re-apply, which is
-    // noticeably faster and avoids compounding the text scale on re-applies
-    setActiveLayerText(variant.text, null, context.state.direction, (ok) => {
+    // Fast path: the style snapshot the widget already read lets the host
+    // skip its own layer re-read and every style/stroke re-apply — only the
+    // line breaking changes
+    setLayerTextFast(variant.text, inlineLayerSource.style, context.state.direction, (ok) => {
       setApplyingTextShapeRId(null);
       if (!ok) return;
       // In batch mode a picked shape moves on to the next queued layer
@@ -745,7 +745,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       });
       if (advance) context.dispatch({ type: "nextLine", add: true });
     });
-  }, [applyingTextShapeRId, context, inlineLayerSource.loading, inlineLayerSource.layerId, advanceTextShapeRBatch]);
+  }, [applyingTextShapeRId, context, inlineLayerSource.style, inlineLayerSource.loading, inlineLayerSource.layerId, advanceTextShapeRBatch]);
 
   // Hover refresh is a fallback for missed Photoshop events: rate-limit it so
   // sweeping the cursor over the widget doesn't queue ExtendScript roundtrips
