@@ -206,21 +206,52 @@ const splitTrailingPunctuation = (word) => {
   };
 };
 
-const getSyllableSplitPenalty = (body, index) => {
-  const left = body.slice(0, index);
-  const right = body.slice(index);
-  const prev2 = body[index - 2];
-  const prev = body[index - 1];
-  const current = body[index];
-  const next = body[index + 1];
+// French syllable attacks: consonant clusters that legally start a syllable
+// and therefore must travel together to the next line. Splitting inside one
+// ("tab-leau", "vac-he") reads as cutting mid-syllable.
+const FRENCH_ONSETS = {
+  bl: 1, br: 1, ch: 1, cl: 1, cr: 1, dr: 1, fl: 1, fr: 1, gl: 1, gn: 1,
+  gr: 1, kl: 1, kr: 1, ph: 1, pl: 1, pr: 1, rh: 1, th: 1, tr: 1, vr: 1,
+  chl: 1, chr: 1, phl: 1, phr: 1, thr: 1,
+};
 
+// Penalty scale: 0-1.5 are clean French syllable boundaries (the only ones
+// hyphenation generation uses), 6-7 are merge-plausible but never generated
+// (mute-e tails, digraph interiors, vowel-vowel), 10+ are implausible
+// boundaries that keep a compound's own hyphen during dehyphenation
+const getSyllableSplitPenalty = (body, index) => {
+  const lower = String(body || "").toLowerCase();
+  const left = lower.slice(0, index);
+  const right = lower.slice(index);
   if (!hasVowel(left) || !hasVowel(right)) return Infinity;
-  if (isConsonant(prev) && isVowel(current)) return 16;
-  if (isVowel(prev) && isConsonant(current) && isVowel(next)) return 0;
-  if (isVowel(prev2) && isConsonant(prev) && isConsonant(current) && isVowel(next)) return 1.2;
-  if (isVowel(prev) && isConsonant(current) && isConsonant(next)) return 2.4;
-  if (isVowel(prev) && isConsonant(current)) return 3;
+  const prev = lower[index - 1];
+  const current = lower[index];
   if (isVowel(prev) && isVowel(current)) return 7;
+  // Splitting between a consonant and its vowel beheads the syllable
+  if (isConsonant(prev) && isVowel(current)) return 16;
+  // French typography: no hyphen before an intervocalic x ("ta-xi")
+  if (current === "x" && isVowel(lower[index + 1])) return 12;
+  // Boundary inside an inseparable pair: mid-syllable cut, never generate
+  if (isConsonant(prev) && FRENCH_ONSETS[prev + current]) return 7;
+
+  // Walk the consonant run around the boundary: the consonants carried to
+  // the next line (the onset) must form a legal French syllable attack
+  let start = index;
+  while (start > 0 && isConsonant(lower[start - 1])) start--;
+  let end = index;
+  while (end < lower.length && isConsonant(lower[end])) end++;
+  const onset = lower.slice(index, end);
+  const codaLength = index - start;
+  const rest = lower.slice(end);
+  // Carrying consonants + mute e ("attitu-des") strands a silent syllable
+  if (rest === "e" || rest === "es") return 6;
+  // A lone aspirated/mute h can't open a carried syllable ("ca-hier")
+  if (onset === "h") return 6;
+  // Two coda consonants land here only via compound junctions
+  // ("court- circuit"): keep them implausible so dehyphenation preserves them
+  if (codaLength >= 2) return 10;
+  if (onset.length === 1) return codaLength === 0 ? 0 : 1;
+  if (FRENCH_ONSETS[onset]) return codaLength === 0 ? 0.5 : 1.5;
   return 10;
 };
 
@@ -270,7 +301,9 @@ const computeHyphenSplits = (word) => {
   const positions = [];
   for (let index = 3; index <= body.length - 3; index++) {
     const syllablePenalty = getSyllableSplitPenalty(body, index);
-    if (!Number.isFinite(syllablePenalty) || syllablePenalty >= 12) continue;
+    // Only clean syllable boundaries (0-1.5) become visible hyphenations;
+    // merge-plausible-but-ugly cuts (6+) are reserved for dehyphenation
+    if (!Number.isFinite(syllablePenalty) || syllablePenalty >= 3) continue;
     const centerPenalty = Math.abs(index - body.length / 2);
     positions.push({
       index,
@@ -430,6 +463,23 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
   const maxLineWidth = profile.maxLineWidth || 28;
   const lineTargetWeight = profile.lineTargetWeight == null ? 16 : profile.lineTargetWeight;
   let score = hyphenCount * 34 + Math.pow(Math.abs(lineCount - profile.lineTarget), 1.5) * lineTargetWeight;
+
+  const fit = profile.fit;
+  if (fit) {
+    // Absolute fit check in real pixels: text escaping the bubble outline
+    // must lose to any candidate that stays inside, whatever its aesthetics
+    const heightExcess = Math.max(0, (lineCount * fit.linePx) / (fit.height * FIT_MARGIN) - 1);
+    if (heightExcess > 0) score += 80 + heightExcess * heightExcess * 900;
+    lengths.forEach((length, index) => {
+      const available = getFitAvailableUnits(index, lineCount, fit);
+      if (available <= 0) {
+        score += 120;
+        return;
+      }
+      const excess = Math.max(0, length / available - 1);
+      if (excess > 0) score += 60 + excess * excess * 1600;
+    });
+  }
   lengths.forEach((length, index) => {
     const target = targets[index] || 1;
     const relative = (length - target) / target;
@@ -575,6 +625,48 @@ const getProfileWidthAt = (rows, y) => {
     return prev.width + (next.width - prev.width) * ratio;
   }
   return last.width;
+};
+
+// Fraction of the bubble kept as breathing room between text and outline
+const FIT_MARGIN = 0.92;
+
+// Vertical position (0..1 of bubble height) of a line's center when the
+// whole block sits vertically centered in the bubble
+const getFitLineY = (index, lineCount, fit) => (
+  0.5 + (index + 0.5 - lineCount / 2) * (fit.linePx / fit.height)
+);
+
+// Width (in measure units) actually available inside the bubble outline at
+// the height this line will render at
+const getFitAvailableUnits = (index, lineCount, fit) => {
+  const y = clamp(getFitLineY(index, lineCount, fit), 0, 1);
+  const rowWidth = fit.rows ? Math.max(0, getProfileWidthAt(fit.rows, y) || 0) : 1;
+  return (fit.width * rowWidth * FIT_MARGIN) / fit.unitPx;
+};
+
+// True when every line of a variant physically stays inside the bubble
+// outline (small tolerance for measurement noise)
+const variantFitsBubble = (lines, fit) => {
+  const lineCount = lines.length;
+  if (lineCount * fit.linePx > fit.height * FIT_MARGIN * 1.02) return false;
+  return lines.every((line, index) => (
+    visibleWidth(line) <= getFitAvailableUnits(index, lineCount, fit) * 1.02
+  ));
+};
+
+// Smallest line count whose stacked rows offer enough width for the whole
+// text while the block still fits the bubble height
+const estimateFitLineCount = (totalUnits, fit) => {
+  const maxByHeight = Math.max(1, Math.floor((fit.height * FIT_MARGIN) / fit.linePx));
+  const limit = Math.min(8, maxByHeight);
+  for (let lineCount = 1; lineCount <= limit; lineCount++) {
+    let capacity = 0;
+    for (let index = 0; index < lineCount; index++) {
+      capacity += getFitAvailableUnits(index, lineCount, fit);
+    }
+    if (capacity >= totalUnits) return lineCount;
+  }
+  return limit;
 };
 
 const buildManualTargets = (tokens, lineCount, settings) => {
@@ -737,6 +829,10 @@ const getVariantCacheKey = (text, options) => JSON.stringify([
   options.width || null,
   options.height || null,
   options.shapeProfile?.rows || null,
+  // Quantized so sub-pixel calibration jitter doesn't defeat the cache
+  options.calibration
+    ? [Math.round(options.calibration.unitPx * 50), Math.round(options.calibration.linePx * 5)]
+    : null,
 ]);
 
 const generateTextShapeRVariants = (text, options = {}) => {
@@ -752,6 +848,20 @@ const generateTextShapeRVariants = (text, options = {}) => {
   const resultMap = new Map();
   const seenTargets = new Set();
   const shapeRows = normalizeShapeRows(options.shapeProfile).filter((row) => row.width > 0);
+  // Pixel calibration measured on the live layer (rendered px per measure
+  // unit, rendered px per line): turns relative shape scoring into a real
+  // "does this line physically fit the bubble" constraint
+  const calibration = options.calibration;
+  const fit = calibration && calibration.unitPx > 0 && calibration.linePx > 0
+      && options.width > 0 && options.height > 0
+    ? {
+      unitPx: calibration.unitPx,
+      linePx: calibration.linePx,
+      width: options.width,
+      height: options.height,
+      rows: shapeRows.length > 1 ? shapeRows : null,
+    }
+    : null;
   const aspect = options.width > 0 && options.height > 0
     ? clamp(options.height / options.width, 0.25, 3)
     : null;
@@ -772,8 +882,12 @@ const generateTextShapeRVariants = (text, options = {}) => {
   }
   if (shapeRows.length > 1) {
     // A live Photoshop selection outlines the bubble: bias the line count to
-    // the bubble's aspect ratio and score candidates against its silhouette
-    const estimatedLines = estimateManualLineCount(normalized, options.width || 320, options.height || 280);
+    // the bubble's aspect ratio and score candidates against its silhouette.
+    // With pixel calibration the estimate becomes exact: the smallest line
+    // count whose rows physically hold the text.
+    const estimatedLines = fit
+      ? estimateFitLineCount(visibleWidth(normalized), fit)
+      : estimateManualLineCount(normalized, options.width || 320, options.height || 280);
     scoringProfile = {
       ...profile,
       shapeRows,
@@ -787,6 +901,18 @@ const generateTextShapeRVariants = (text, options = {}) => {
       shapeProfile: options.shapeProfile,
       softness: 1,
       floor: 0.14,
+    };
+  }
+  if (fit) {
+    // Cap line width by what the widest part of the bubble physically holds
+    const widestRow = fit.rows
+      ? fit.rows.reduce((max, row) => Math.max(max, row.width), 0)
+      : 1;
+    const absoluteMax = (fit.width * widestRow * FIT_MARGIN) / fit.unitPx;
+    scoringProfile = {
+      ...scoringProfile,
+      fit,
+      maxLineWidth: clamp(Math.min(scoringProfile.maxLineWidth || 28, absoluteMax), 6, 60),
     };
   }
   const baseMinLines = words.length <= 2 ? 1 : profile.minLines;
@@ -810,7 +936,14 @@ const generateTextShapeRVariants = (text, options = {}) => {
 
   const addShapeCandidates = (tokens, lineCount, hyphenCount) => {
     if (!shapeTargetSettings) return;
-    const targets = buildManualTargets(tokens, lineCount, shapeTargetSettings);
+    let targets = buildManualTargets(tokens, lineCount, shapeTargetSettings);
+    if (fit) {
+      // Proportional targets can exceed the bubble's real width where the
+      // outline narrows: cap each one so the DP aims at lines that fit
+      targets = targets.map((target, index) => (
+        Math.max(1, Math.min(target, getFitAvailableUnits(index, lineCount, fit)))
+      ));
+    }
     [-1, 0, 1].forEach((bias) => {
       const biasedTargets = bias === 0 ? targets : targets.map((target) => Math.max(1, target + bias));
       addCandidate(resultMap, seenTargets, tokens, lineCount, 0, 0, 0, hyphenCount, scoringProfile, biasedTargets);
@@ -864,6 +997,9 @@ const generateTextShapeRVariants = (text, options = {}) => {
     if (picked.length >= limit) return;
     const count = variant.lines.length;
     if (seenLineCounts.has(count)) return;
+    // Diversity must never resurrect a shape that escapes the bubble: those
+    // only reach the list through the score-ordered fill below, i.e. last
+    if (fit && !variantFitsBubble(variant.lines, fit)) return;
     seenLineCounts.add(count);
     picked.push(variant);
     pickedTexts.add(variant.text);

@@ -1618,8 +1618,15 @@ function getActiveLayerText() {
     idRef.putEnumerated(charID.Layer, charID.Ordinal, charID.Target);
     layerId = executeActionGet(idRef).getInteger(layerIdProp);
   } catch (idError) {}
+  // Rendered pixel bounds let the panel calibrate its text measurements
+  // against real pixels (TextShapeR bubble-fit)
+  var bounds = null;
+  try {
+    bounds = _getCurrentTextLayerBounds();
+  } catch (boundsError) {}
   return jamJSON.stringify({
     layerId: layerId,
+    bounds: bounds,
     textProps: jamText.getLayerText(),
     stroke: _getLayerStroke(),
   });

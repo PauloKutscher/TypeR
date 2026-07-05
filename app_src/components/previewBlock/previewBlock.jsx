@@ -9,7 +9,7 @@ import { FaMagic } from "react-icons/fa";
 import { csInterface, locale, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { buildStoredSelectionPayload, getScaledStyle } from "../../textLayerPayload";
-import { generateTextShapeRVariants } from "../../textShapeR";
+import { generateTextShapeRVariants, visibleWidth } from "../../textShapeR";
 import TextShapeRFitPreview from "../textShapeRFitPreview";
 
 const normalizeLayerText = (text) => String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
@@ -33,6 +33,7 @@ const getActiveTextLayerSource = (callback) => {
       const source = {
         text: normalizeLayerText(data.textProps.layerText.textKey),
         layerId: typeof data.layerId === "number" ? data.layerId : null,
+        bounds: data.bounds || null,
         style: {
           textProps: data.textProps,
           stroke: data.stroke || null,
@@ -81,6 +82,26 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const inlineTextStyle = inlineLayerSource.style?.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {};
   const inlineStyleObject = getStyleObject(inlineTextStyle);
   const markdownEnabled = context.state.interpretMarkdown !== false;
+  // Calibrate measure units against the layer's real rendered pixels: the
+  // current text and its bounds give px-per-unit and px-per-line, which lets
+  // the generator check candidates against the bubble in absolute pixels
+  const inlineCalibration = React.useMemo(() => {
+    const bounds = inlineLayerSource.bounds;
+    if (!bounds || !(bounds.width > 0) || !(bounds.height > 0)) return null;
+    const lines = String(inlineLayerSource.text || "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (!lines.length) return null;
+    const maxUnits = Math.max(...lines.map((line) => visibleWidth(line)));
+    if (!(maxUnits > 0)) return null;
+    return {
+      unitPx: bounds.width / maxUnits,
+      // A single line's bounds measure glyph extent, not leading: pad it so
+      // multi-line candidates aren't credited with less height than they use
+      linePx: lines.length === 1 ? bounds.height * 1.2 : bounds.height / lines.length,
+    };
+  }, [inlineLayerSource.text, inlineLayerSource.bounds]);
   const inlineTextShapeRVariants = React.useMemo(
     () => generateTextShapeRVariants(inlineLayerSource.text, {
       limit: 12,
@@ -89,8 +110,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       shapeProfile: inlineSelectionShape?.profile || null,
       width: inlineSelectionShape?.width,
       height: inlineSelectionShape?.height,
+      calibration: inlineCalibration,
     }),
-    [inlineLayerSource.text, inlineSelectionShape]
+    [inlineLayerSource.text, inlineSelectionShape, inlineCalibration]
   );
   const [inlineVariantPage, setInlineVariantPage] = React.useState(0);
   const inlinePageSize = 3;
@@ -157,6 +179,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         style: source.style,
         key: source.key,
         layerId: source.layerId,
+        bounds: source.bounds,
         loading: false,
         error: "",
       });
