@@ -1156,8 +1156,11 @@ const reducer = (state, action) => {
       newState.currentLineIndex = newIndex;
     }
     if (thenSelectStyle) {
-      if (newState.currentLine?.usedStyle || newState.currentLine?.style) {
-        newState.currentStyleId = (newState.currentLine.usedStyle || newState.currentLine.style).id;
+      // Only explicit prefix styles (and // continuations) drive the style
+      // picker on line change; recorded usedStyle must not override the
+      // user's manual selection when advancing in multi-bubble mode (#205)
+      if (newState.currentLine?.style) {
+        newState.currentStyleId = newState.currentLine.style.id;
       } else if (newState.defaultStyleId) {
         newState.currentStyleId = newState.defaultStyleId;
       }

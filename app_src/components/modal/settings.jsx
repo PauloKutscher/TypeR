@@ -963,7 +963,7 @@ const SettingsModal = React.memo(function SettingsModal() {
                         <b className="settings-new-badge">{locale.settingsNewBadge || "New"}</b>
                       </span>
                       <div className="settings-checkbox-hint">
-                        {locale.settingsInlineTextShapeRHint || "Shows text shape suggestions directly in the main panel."}
+                        {locale.settingsInlineTextShapeRHint || "Shows text shape suggestions directly in the main panel. This may impact performance."}
                       </div>
                     </div>
                   </label>
