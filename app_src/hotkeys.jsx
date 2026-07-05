@@ -10,6 +10,23 @@ const checkShortcut = (state, ref) => {
   return Array.isArray(ref) && ref.length > 0 && ref.every((key) => state.includes(key));
 };
 
+// Matching is subset-based, so a modifier-only binding (e.g. default add =
+// WIN+CTRL) would always shadow a longer custom binding built on the same
+// modifiers. Pick the most specific match instead of the first one.
+const bindingOrder = ["add", "apply", "center", "toggleMultiBubble", "next", "previous", "increase", "decrease", "insertText", "nextPage"];
+const matchBinding = (state, shortcut) => {
+  let best = null;
+  let bestLength = 0;
+  bindingOrder.forEach((name) => {
+    const ref = shortcut[name];
+    if (checkShortcut(state, ref) && ref.length > bestLength) {
+      best = name;
+      bestLength = ref.length;
+    }
+  });
+  return best;
+};
+
 const isFormFieldActive = () => {
   const active = document.activeElement;
   if (!active) return false;
@@ -41,7 +58,8 @@ const HotkeysListner = React.memo(function HotkeysListner() {
       const realState = state.split("a");
       realState.shift();
       realState.pop();
-      if (checkShortcut(realState, ctx.state.shortcut.add)) {
+      const matched = matchBinding(realState, ctx.state.shortcut);
+      if (matched === "add") {
         if (!checkRepeatTime()) return;
 
         const storedSelections = ctx.state.storedSelections || [];
@@ -76,39 +94,39 @@ const HotkeysListner = React.memo(function HotkeysListner() {
             if (ok) ctx.dispatch({ type: "nextLine", add: true });
           });
         }
-      } else if (checkShortcut(realState, ctx.state.shortcut.apply)) {
+      } else if (matched === "apply") {
         if (!checkRepeatTime()) return;
         const line = ctx.state.currentLine || { text: "" };
         const style = getScaledStyle(ctx.state.currentStyle, ctx.state.textScale);
         setActiveLayerText(line.text, style, ctx.state.direction, (ok) => {
           if (ok) ctx.dispatch({ type: "nextLine", add: true });
         });
-      } else if (checkShortcut(realState, ctx.state.shortcut.center)) {
+      } else if (matched === "center") {
         if (!checkRepeatTime()) return;
         const padding = ctx.state.internalPadding || 0;
         alignTextLayerToSelection(ctx.state.resizeTextBoxOnCenter, padding);
-      } else if (checkShortcut(realState, ctx.state.shortcut.toggleMultiBubble)) {
+      } else if (matched === "toggleMultiBubble") {
         if (!checkRepeatTime(300)) return;
         ctx.dispatch({ type: "setMultiBubbleMode", value: !ctx.state.multiBubbleMode });
-      } else if (checkShortcut(realState, ctx.state.shortcut.next)) {
+      } else if (matched === "next") {
         if (!checkRepeatTime(300)) return;
         ctx.dispatch({ type: "nextLine" });
-      } else if (checkShortcut(realState, ctx.state.shortcut.previous)) {
+      } else if (matched === "previous") {
         if (!checkRepeatTime(300)) return;
         ctx.dispatch({ type: "prevLine" });
-      } else if (checkShortcut(realState, ctx.state.shortcut.increase)) {
+      } else if (matched === "increase") {
         if (!checkRepeatTime(300)) return;
         changeActiveLayerTextSize(ctx.state.textSizeIncrement || 1);
-      } else if (checkShortcut(realState, ctx.state.shortcut.decrease)) {
+      } else if (matched === "decrease") {
         if (!checkRepeatTime(300)) return;
         changeActiveLayerTextSize(-(ctx.state.textSizeIncrement || 1));
-      } else if (checkShortcut(realState, ctx.state.shortcut.insertText)) {
+      } else if (matched === "insertText") {
         if (!checkRepeatTime()) return;
         const line = ctx.state.currentLine || { text: "" };
         setActiveLayerText(line.text, null, ctx.state.direction, (ok) => {
           if (ok) ctx.dispatch({ type: "nextLine", add: true });
         });
-      } else if (checkShortcut(realState, ctx.state.shortcut.nextPage)) {
+      } else if (matched === "nextPage") {
         if (!checkRepeatTime(300)) return;
         ctx.dispatch({ type: "nextPage" });
       } else {
