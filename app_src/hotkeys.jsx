@@ -1,8 +1,9 @@
 import React from "react";
 
-import { csInterface, setActiveLayerText, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, getHotkeyPressed, changeActiveLayerTextSize, isHostActionPending, deselectDocument } from "./utils";
+import { csInterface, setActiveLayerText, createTextLayersInStoredSelections, getHotkeyPressed, changeActiveLayerTextSize, isHostActionPending, deselectDocument } from "./utils";
 import { useContext } from "./context";
 import { buildStoredSelectionPayload, getScaledStyle } from "./textLayerPayload";
+import { pasteWithBubbleSplit, alignWithBubbleSplit } from "./bubbleActions";
 
 const intervalTime = 50;
 
@@ -86,13 +87,7 @@ const HotkeysListner = React.memo(function HotkeysListner() {
             }
           });
         } else {
-          const line = ctx.state.currentLine || { text: "" };
-          const style = getScaledStyle(ctx.state.currentStyle, ctx.state.textScale);
-          const pointText = ctx.state.pastePointText;
-          const padding = ctx.state.internalPadding || 0;
-          createTextLayerInSelection(line.text, style, pointText, padding, ctx.state.direction, (ok) => {
-            if (ok) ctx.dispatch({ type: "nextLine", add: true });
-          });
+          pasteWithBubbleSplit({ state: ctx.state, dispatch: ctx.dispatch });
         }
       } else if (matched === "apply") {
         if (!checkRepeatTime()) return;
@@ -103,8 +98,7 @@ const HotkeysListner = React.memo(function HotkeysListner() {
         });
       } else if (matched === "center") {
         if (!checkRepeatTime()) return;
-        const padding = ctx.state.internalPadding || 0;
-        alignTextLayerToSelection(ctx.state.resizeTextBoxOnCenter, padding);
+        alignWithBubbleSplit({ state: ctx.state });
       } else if (matched === "toggleMultiBubble") {
         if (!checkRepeatTime(300)) return;
         ctx.dispatch({ type: "setMultiBubbleMode", value: !ctx.state.multiBubbleMode });

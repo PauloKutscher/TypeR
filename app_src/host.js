@@ -63,6 +63,7 @@ var _DEFAULT_SELECTION_SCALE = 0.9;
 var _MIN_TEXTBOX_WIDTH = 10;
 var _TEMP_SELECTION_CHANNEL = "__TyperSelectionTemp__";
 var _DEFAULT_ADJUST_SEQUENCE = [-5, -5, -5, -5, -5, -5, 5, 5, 5, 5, 5, 5];
+var _MASK_EXPORT_CHANNEL = "__TyperMaskExport__";
 
 var _hostState = {
   fallbackTextSize: 20,
@@ -81,6 +82,12 @@ var _hostState = {
     padding: 0,
   },
   alignTextLayerToSelection: {
+    result: "",
+    resize: false,
+    padding: 0,
+  },
+  alignTextLayerToBounds: {
+    bounds: null,
     result: "",
     resize: false,
     padding: 0,
@@ -554,6 +561,138 @@ function _createMagicWandSelection(tolerance) {
   desc.putBoolean(stringIDToTypeID("antiAlias"), true);
   executeAction(charID.Set, desc, DialogModes.NO);
   } catch (e) {}
+}
+
+function _storeSelectionToChannel(doc, name) {
+  try {
+    doc.channels.getByName(name).remove();
+  } catch (existsError) {}
+  var channel = null;
+  try {
+    channel = doc.channels.add();
+    channel.name = name;
+    doc.selection.store(channel);
+    return channel;
+  } catch (storeError) {
+    if (channel) {
+      try {
+        channel.remove();
+      } catch (removeError) {}
+    }
+    return null;
+  }
+}
+
+function _removeChannelByName(doc, name) {
+  try {
+    doc.channels.getByName(name).remove();
+  } catch (removeError) {}
+}
+
+function _selectPixelRect(doc, left, top, right, bottom) {
+  doc.selection.select([
+    [left, top],
+    [right, top],
+    [right, bottom],
+    [left, bottom],
+  ], SelectionType.REPLACE, 0, false);
+}
+
+// Export the current selection (or the wand-detected bubble around the
+// active text layer) as a small grayscale PNG of its mask. The panel reads
+// the file and runs the merged-bubble analysis on real pixels — far more
+// reliable than approximating it with Photoshop selection operations.
+function getSelectionMaskForSplit(data) {
+  try {
+    if (!documents.length) return jamJSON.stringify({ error: "doc" });
+    var doc = app.activeDocument;
+    var maxSide = data && data.maxSide ? parseInt(data.maxSide, 10) : 220;
+    if (isNaN(maxSide) || maxSide < 32) maxSide = 220;
+    var tolerance = data && data.tolerance ? parseInt(data.tolerance, 10) : 20;
+    if (isNaN(tolerance)) tolerance = 20;
+
+    var layerBounds = null;
+    if (_layerIsTextLayer()) {
+      try {
+        layerBounds = _getCurrentTextLayerBounds();
+      } catch (layerBoundsError) {}
+    }
+
+    var bounds = _getCurrentSelectionBounds();
+    var hadSelection = !!bounds;
+    if (!bounds && data && data.useWand) {
+      if (!layerBounds) return jamJSON.stringify({ error: "layer" });
+      if (_getTargetLayerCount() > 1) return jamJSON.stringify({ error: "multi" });
+      _createMagicWandSelection(tolerance);
+      bounds = _getCurrentSelectionBounds();
+      // A wand escaping the bubble grabs a huge area: reject it
+      if (bounds && layerBounds.width > 0 && layerBounds.height > 0 &&
+          (bounds.width * bounds.height) / (layerBounds.width * layerBounds.height) > 60) {
+        _deselect();
+        return jamJSON.stringify({ error: "noBubble" });
+      }
+    }
+    if (!bounds) return jamJSON.stringify({ error: "noSelection" });
+    if (bounds.width * bounds.height < 200) return jamJSON.stringify({ error: "smallSelection" });
+
+    var oldUnits = app.preferences.rulerUnits;
+    var channel = null;
+    var maskDoc = null;
+    var filePath = null;
+    var scaledWidth = 0;
+    var scaledHeight = 0;
+    try {
+      app.preferences.rulerUnits = Units.PIXELS;
+      channel = _storeSelectionToChannel(doc, _MASK_EXPORT_CHANNEL);
+      if (channel) {
+        // Copy the mask pixels straight out of the alpha channel
+        doc.activeChannels = [channel];
+        _selectPixelRect(doc, bounds.left, bounds.top, bounds.right, bounds.bottom);
+        doc.selection.copy();
+        doc.activeChannels = doc.componentChannels;
+
+        maskDoc = app.documents.add(bounds.width, bounds.height, doc.resolution, "TyperMaskExport", NewDocumentMode.GRAYSCALE, DocumentFill.BLACK);
+        maskDoc.paste();
+        maskDoc.flatten();
+        var scale = Math.min(1, maxSide / Math.max(bounds.width, bounds.height));
+        scaledWidth = Math.max(8, Math.round(bounds.width * scale));
+        scaledHeight = Math.max(8, Math.round(bounds.height * scale));
+        if (scale < 1) maskDoc.resizeImage(scaledWidth, scaledHeight, null, ResampleMethod.BILINEAR);
+        var file = new File(Folder.temp.fsName + "/typer_mask_" + new Date().getTime() + ".png");
+        maskDoc.saveAs(file, new PNGSaveOptions(), true, Extension.LOWERCASE);
+        filePath = file.fsName;
+      }
+    } catch (exportError) {
+      filePath = null;
+    } finally {
+      try {
+        if (maskDoc) maskDoc.close(SaveOptions.DONOTSAVECHANGES);
+      } catch (closeError) {}
+      try {
+        app.activeDocument = doc;
+      } catch (activeDocError) {}
+      try {
+        doc.activeChannels = doc.componentChannels;
+      } catch (channelsError) {}
+      try {
+        if (channel && hadSelection) doc.selection.load(channel);
+        else if (!hadSelection) _deselect();
+      } catch (restoreError) {}
+      _removeChannelByName(doc, _MASK_EXPORT_CHANNEL);
+      app.preferences.rulerUnits = oldUnits;
+    }
+    if (!filePath) return jamJSON.stringify({ error: "export" });
+    return jamJSON.stringify({
+      file: filePath,
+      bounds: bounds,
+      scaledWidth: scaledWidth,
+      scaledHeight: scaledHeight,
+      layerBounds: layerBounds,
+      hadSelection: hadSelection,
+    });
+  } catch (maskError) {
+    return jamJSON.stringify({ error: "scriptError: " + (maskError && maskError.message ? maskError.message : maskError) });
+  }
 }
 
 function _moveLayer(offsetX, offsetY) {
@@ -1283,7 +1422,7 @@ function _createTextLayerInSelection() {
     textSize = style.textProps.layerText.textStyleRange[0].textStyle.size;
   }
   
-  var selection = _checkSelection({ 
+  var selection = _checkSelection({
     adjustSequence: _DEFAULT_ADJUST_SEQUENCE,
     preExpandAmount: textSize
   });
@@ -1657,6 +1796,53 @@ function alignTextLayerToSelection(data) {
   state.result = "";
   app.activeDocument.suspendHistory("TyperTools Align", "_alignTextLayerToSelection()");
   return state.result;
+}
+
+// Center (and optionally resize) the active text layer inside explicitly
+// provided bounds — used by the panel after it split a merged multi-bubble
+// selection and picked the bubble the layer belongs to
+function alignTextLayerToBounds(data) {
+  var state = _hostState.alignTextLayerToBounds;
+  state.bounds = data && data.bounds ? data.bounds : null;
+  state.resize = !!(data && data.resizeTextBox);
+  state.padding = (data && data.padding) || 0;
+  state.result = "";
+  app.activeDocument.suspendHistory("TyperTools Align", "_alignTextLayerToBounds()");
+  return state.result;
+}
+
+function _alignTextLayerToBounds() {
+  var state = _hostState.alignTextLayerToBounds;
+  if (!documents.length) {
+    state.result = "doc";
+    return;
+  }
+  if (!_layerIsTextLayer()) {
+    state.result = "layer";
+    return;
+  }
+  var target = state.bounds;
+  if (!target || !(target.width > 0) || !(target.height > 0)) {
+    state.result = "noSelection";
+    return;
+  }
+  var wasPoint = _textLayerIsPointText();
+  var bounds = _getCurrentTextLayerBounds();
+  if (state.resize && !wasPoint) {
+    var dimensions = _calculateSelectionDimensions(target, state.padding);
+    _setTextBoxSize(dimensions.width, dimensions.height);
+    var textBounds = _getCurrentTextLayerBounds();
+    _resizeTextBoxToContent(dimensions.width, textBounds);
+    bounds = _getCurrentTextLayerBounds();
+  }
+  try {
+    _deselect();
+  } catch (deselectError) {}
+  _positionLayerWithinSelection(target, bounds);
+  if (wasPoint) {
+    _changeToPointText();
+  }
+  state.result = "";
 }
 
 function changeActiveLayerTextSize(val) {

@@ -6,9 +6,10 @@ import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
 
-import { csInterface, locale, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
+import { csInterface, locale, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, createTextLayersInStoredSelections, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { buildStoredSelectionPayload, getScaledStyle } from "../../textLayerPayload";
+import { pasteWithBubbleSplit, alignWithBubbleSplit } from "../../bubbleActions";
 import { generateTextShapeRVariants, visibleWidth } from "../../textShapeR";
 import TextShapeRFitPreview from "../textShapeRFitPreview";
 
@@ -660,13 +661,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         }
       });
     } else {
-      const lineStyle = getScaledStyle(context.state.currentStyle, context.state.textScale);
-      const pointText = context.state.pastePointText;
-      const padding = context.state.internalPadding || 0;
-      const direction = context.state.direction;
-      createTextLayerInSelection(line.text, lineStyle, pointText, padding, direction, (ok) => {
-        if (ok) context.dispatch({ type: "nextLine", add: true });
-      });
+      pasteWithBubbleSplit({ state: context.state, dispatch: context.dispatch });
     }
   };
 
@@ -689,13 +684,15 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   }, [line.rawIndex]);
 
   const handleAlignLayer = React.useCallback(() => {
-    const padding = context.state.internalPadding || 0;
-    alignTextLayerToSelection(context.state.resizeTextBoxOnCenter, padding, () => {
-      if (context.state.multiBubbleMode && (context.state.storedSelections || []).length > 0) {
-        resetStoredSelections();
-      }
+    alignWithBubbleSplit({
+      state: context.state,
+      callback: () => {
+        if (context.state.multiBubbleMode && (context.state.storedSelections || []).length > 0) {
+          resetStoredSelections();
+        }
+      },
     });
-  }, [context.state.internalPadding, context.state.resizeTextBoxOnCenter, context.state.multiBubbleMode, context.state.storedSelections, resetStoredSelections]);
+  }, [context.state, resetStoredSelections]);
 
   const handleDecrease = React.useCallback(() => {
     changeActiveLayerTextSize(-(context.state.textSizeIncrement || 1));
