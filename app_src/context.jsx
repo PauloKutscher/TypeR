@@ -41,7 +41,6 @@ const storeFields = [
   "textShapeRBubbleAware",
   "dehyphenateTextShapeR",
   "internalPadding",
-  "splitMergedBubbles",
   "interpretMarkdown",
   "styleSizeStep",
   "resetLineCounterOnPage",
@@ -247,7 +246,6 @@ const initialState = {
   storedSelections: [],
   multiBubbleMode: false,
   internalPadding: 10,
-  splitMergedBubbles: storage.data?.splitMergedBubbles !== false,
   interpretMarkdown: storage.data?.interpretMarkdown === true,
   styleSizeStep: 1,
   resetLineCounterOnPage: storage.data?.resetLineCounterOnPage !== false,
@@ -747,11 +745,6 @@ const reducer = (state, action) => {
 
   case "setResizeTextBoxOnCenter": {
     newState.resizeTextBoxOnCenter = !!action.value;
-    break;
-  }
-
-  case "setSplitMergedBubbles": {
-    newState.splitMergedBubbles = !!action.value;
     break;
   }
 

@@ -59,9 +59,6 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [internalPadding, setInternalPadding] = React.useState(
     context.state.internalPadding !== undefined ? context.state.internalPadding : 10
   );
-  const [splitMergedBubbles, setSplitMergedBubbles] = React.useState(
-    context.state.splitMergedBubbles !== false
-  );
   const [interpretMarkdown, setInterpretMarkdown] = React.useState(
     context.state.interpretMarkdown !== false
   );
@@ -208,11 +205,6 @@ const SettingsModal = React.memo(function SettingsModal() {
       setInternalPadding(value);
       setEdited(true);
     }
-  };
-
-  const changeSplitMergedBubbles = (e) => {
-    setSplitMergedBubbles(e.target.checked);
-    setEdited(true);
   };
 
   const changeInterpretMarkdown = (e) => {
@@ -424,12 +416,6 @@ const SettingsModal = React.memo(function SettingsModal() {
       context.dispatch({
         type: "setInternalPadding",
         value: internalPadding,
-      });
-    }
-    if (splitMergedBubbles !== (context.state.splitMergedBubbles !== false)) {
-      context.dispatch({
-        type: "setSplitMergedBubbles",
-        value: splitMergedBubbles,
       });
     }
     if (interpretMarkdown !== context.state.interpretMarkdown) {
@@ -1153,18 +1139,6 @@ const SettingsModal = React.memo(function SettingsModal() {
                   />
                 </div>
                 <div className="field-descr">{locale.settingsInternalPaddingHint || "Internal space to prevent text from touching bubble edges (0-100 pixels)"}</div>
-              </div>
-              <div className="settings-checkbox-grid">
-                <div className="settings-checkbox-item">
-                  <label className="settings-checkbox-label">
-                    <input type="checkbox" checked={splitMergedBubbles} onChange={changeSplitMergedBubbles} />
-                    <div className="settings-checkbox-custom"></div>
-                    <div className="settings-checkbox-content">
-                      <span>{locale.settingsSplitMergedBubblesLabel || "Detect merged bubbles"}</span>
-                      <div className="settings-checkbox-hint">{locale.settingsSplitMergedBubblesHint || "When a selection covers joined double/triple bubbles, paste one line per bubble and center each text in its own bubble."}</div>
-                    </div>
-                  </label>
-                </div>
               </div>
             </div>
             <div className="settings-group">

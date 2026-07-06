@@ -1048,15 +1048,6 @@ const alignTextLayerToSelection = (resizeTextBox = false, padding = 0, callback 
   }));
 };
 
-const alignTextLayerToBounds = (bounds, resizeTextBox = false, padding = 0, callback = () => {}) => {
-  const data = JSON.stringify({ bounds, resizeTextBox: !!resizeTextBox, padding: padding || 0 });
-  csInterface.evalScript("alignTextLayerToBounds(" + data + ")", trackHostAction((error) => {
-    if (error === "noSelection") nativeAlert(locale.errorNoSelection, locale.errorTitle, true);
-    else if (error) nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
-    callback(!error);
-  }));
-};
-
 const changeActiveLayerTextSize = (val, callback = () => {}) => {
   csInterface.evalScript("changeActiveLayerTextSize(" + val + ")", trackHostAction((error) => {
     if (error) nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
@@ -1288,4 +1279,4 @@ const openFile = (path, autoClose = false) => {
   );
 };
 
-export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, getActiveLayerText, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, alignTextLayerToBounds, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
+export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, getActiveLayerText, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
