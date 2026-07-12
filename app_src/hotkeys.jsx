@@ -1,10 +1,14 @@
 import React from "react";
 
-import { csInterface, setActiveLayerText, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, getHotkeyPressed, changeActiveLayerTextSize, isHostActionPending, deselectDocument } from "./utils";
+import { csInterface, setActiveLayerText, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, getHotkeyPressed, changeActiveLayerTextSize, isHostActionPending, isPanelIdle, notePanelActivity, deselectDocument } from "./utils";
 import { useContext } from "./context";
 import { buildStoredSelectionPayload, getScaledStyle } from "./textLayerPayload";
 
 const intervalTime = 50;
+// After a few idle minutes the keyboard poll slows to this rate: 20 host
+// round-trips per second against an untouched Photoshop is what makes long
+// background sessions crawl. The first pressed key restores the fast rate.
+const idleIntervalTime = 500;
 
 const checkShortcut = (state, ref) => {
   return Array.isArray(ref) && ref.length > 0 && ref.every((key) => state.includes(key));
@@ -42,6 +46,7 @@ const HotkeysListner = React.memo(function HotkeysListner() {
   const keyUpRef = React.useRef(true);
   const lastActionRef = React.useRef(0);
   const hotkeyPollPendingRef = React.useRef(false);
+  const lastPollAtRef = React.useRef(0);
 
   React.useEffect(() => {
     const checkRepeatTime = (time = 0) => {
@@ -58,6 +63,9 @@ const HotkeysListner = React.memo(function HotkeysListner() {
       const realState = state.split("a");
       realState.shift();
       realState.pop();
+      // Pressed keys are activity: restore fast polling before matching so a
+      // hotkey burst after an idle period is never throttled
+      if (realState.length) notePanelActivity();
       const matched = matchBinding(realState, ctx.state.shortcut);
       if (matched === "add") {
         if (!checkRepeatTime()) return;
@@ -135,6 +143,8 @@ const HotkeysListner = React.memo(function HotkeysListner() {
       // Back off while a paste/align/apply runs: polling would queue behind it
       // in the ExtendScript engine and delay the action's completion
       if (contextRef.current.state.modalType || isFormFieldActive() || hotkeyPollPendingRef.current || isHostActionPending() || document.hidden) return;
+      if (isPanelIdle() && Date.now() - lastPollAtRef.current < idleIntervalTime) return;
+      lastPollAtRef.current = Date.now();
       hotkeyPollPendingRef.current = true;
       getHotkeyPressed((state) => {
         hotkeyPollPendingRef.current = false;

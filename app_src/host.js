@@ -102,7 +102,32 @@ var _hostState = {
     selections: [],
   },
   lastOpenedDocId: null,
+  suspendedRun: null,
 };
+
+// Bubble detection and outline sampling fire dozens of selection, channel
+// and modify operations, and Photoshop records every one of them as a
+// history state: on a full-resolution page each state holds a snapshot, so
+// repeated detections wipe the user's undo stack and keep the scratch file
+// churning until the whole session crawls. suspendHistory collapses each
+// scan into a single history state.
+function _withSuspendedHistory(name, fn) {
+  var result = null;
+  _hostState.suspendedRun = function () {
+    try {
+      result = fn();
+    } catch (runError) {
+      result = null;
+    }
+  };
+  try {
+    app.activeDocument.suspendHistory(name, "_hostState.suspendedRun()");
+  } catch (suspendError) {
+    _hostState.suspendedRun();
+  }
+  _hostState.suspendedRun = null;
+  return result;
+}
 
 function _clone(obj) {
   if (!obj || typeof obj !== "object") return obj;
@@ -1786,7 +1811,10 @@ function getCurrentSelectionShape(data) {
     return jamJSON.stringify({ error: "noSelection" });
   }
   var sampleCount = _normalizeShapeSampleCount(data && data.samples, 17);
-  return jamJSON.stringify(_sampleCurrentSelectionShape(bounds, sampleCount));
+  var shape = _withSuspendedHistory("TypeR Shape Scan", function () {
+    return _sampleCurrentSelectionShape(bounds, sampleCount);
+  });
+  return jamJSON.stringify(shape || _buildBoundsShapeRows(bounds, sampleCount));
 }
 
 function getActiveLayerBubbleShape(data) {
@@ -1809,40 +1837,46 @@ function getActiveLayerBubbleShape(data) {
   if (isNaN(tolerance)) tolerance = 20;
   var sampleCount = _normalizeShapeSampleCount(data && data.samples, 21);
 
-  var result = null;
-  try {
-    var textBounds = _getCurrentTextLayerBounds();
-    _createMagicWandSelection(tolerance);
-    var bounds = _getCurrentSelectionBounds();
-    if (!bounds || bounds.width * bounds.height < 200) {
-      _deselect();
-      return jamJSON.stringify({ error: "noBubble" });
-    }
-    // A wand escaping the bubble (open outline, plain page background) grabs
-    // a huge area: reject implausible bubbles instead of shaping to the page
-    if (textBounds && textBounds.width > 0 && textBounds.height > 0) {
-      var areaRatio = (bounds.width * bounds.height) / (textBounds.width * textBounds.height);
-      if (areaRatio > 60) {
+  var result = _withSuspendedHistory("TypeR Bubble Scan", function () {
+    var scanResult = null;
+    try {
+      var textBounds = _getCurrentTextLayerBounds();
+      _createMagicWandSelection(tolerance);
+      var bounds = _getCurrentSelectionBounds();
+      if (!bounds || bounds.width * bounds.height < 200) {
         _deselect();
-        return jamJSON.stringify({ error: "noBubble" });
+        return { error: "noBubble" };
       }
+      // A wand escaping the bubble (open outline, plain page background) grabs
+      // a huge area: reject implausible bubbles instead of shaping to the page
+      if (textBounds && textBounds.width > 0 && textBounds.height > 0) {
+        var areaRatio = (bounds.width * bounds.height) / (textBounds.width * textBounds.height);
+        if (areaRatio > 60) {
+          _deselect();
+          return { error: "noBubble" };
+        }
+      }
+      // Close the text holes and smooth the outline before sampling
+      var smoothAmount = Math.max(4, Math.round(_getTextLayerSize() / 2));
+      _modifySelectionBounds(smoothAmount);
+      var expanded = _getCurrentSelectionBounds();
+      var contractAmount = _clampAdjustAmount(expanded, -smoothAmount);
+      if (contractAmount !== 0) _modifySelectionBounds(contractAmount);
+      bounds = _getCurrentSelectionBounds() || bounds;
+      scanResult = _sampleCurrentSelectionShape(bounds, sampleCount);
+    } catch (bubbleError) {
+      scanResult = null;
     }
-    // Close the text holes and smooth the outline before sampling
-    var smoothAmount = Math.max(4, Math.round(_getTextLayerSize() / 2));
-    _modifySelectionBounds(smoothAmount);
-    var expanded = _getCurrentSelectionBounds();
-    var contractAmount = _clampAdjustAmount(expanded, -smoothAmount);
-    if (contractAmount !== 0) _modifySelectionBounds(contractAmount);
-    bounds = _getCurrentSelectionBounds() || bounds;
-    result = _sampleCurrentSelectionShape(bounds, sampleCount);
-  } catch (bubbleError) {
-    result = null;
-  }
-  try {
-    _deselect();
-  } catch (deselectError) {}
+    try {
+      _deselect();
+    } catch (deselectError) {}
+    return scanResult;
+  });
   if (!result) {
     return jamJSON.stringify({ error: "shape" });
+  }
+  if (result.error) {
+    return jamJSON.stringify({ error: result.error });
   }
   return jamJSON.stringify(result);
 }

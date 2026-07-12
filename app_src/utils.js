@@ -101,11 +101,32 @@ const safeJsonParse = (raw, fallback = {}) => {
   }
 };
 
+// Adaptive idle backoff: after a few minutes with no sign of activity
+// (Photoshop events, panel interaction, host actions, pressed hotkeys) every
+// poller drops to a slow keep-alive rate, so a Photoshop left open in the
+// background is not hammered with evalScript calls for hours — each one runs
+// on Photoshop's main thread and the constant churn degrades long sessions.
+// Any activity restores the fast rates instantly.
+const PANEL_IDLE_AFTER = 2 * 60 * 1000;
+let lastPanelActivityAt = Date.now();
+const notePanelActivity = () => {
+  lastPanelActivityAt = Date.now();
+};
+const isPanelIdle = () => Date.now() - lastPanelActivityAt > PANEL_IDLE_AFTER;
+
+if (window.addEventListener) {
+  window.addEventListener("pointerdown", notePanelActivity, true);
+  window.addEventListener("keydown", notePanelActivity, true);
+  window.addEventListener("wheel", notePanelActivity, { capture: true, passive: true });
+  window.addEventListener("focus", notePanelActivity);
+}
+
 // Tracks in-flight Photoshop actions so low-priority polling (hotkeys, inline
 // TextShapeR) can back off instead of contending in the ExtendScript queue
 let hostActionsPending = 0;
 const isHostActionPending = () => hostActionsPending > 0;
 const trackHostAction = (callback) => {
+  notePanelActivity();
   hostActionsPending++;
   let settled = false;
   const release = () => {
@@ -884,6 +905,8 @@ const registerPhotoshopEvents = () => {
   const extensionId = csInterface.getExtensionID();
   csInterface.addEventListener("com.adobe.PhotoshopJSONCallback" + extensionId, (event) => {
     photoshopEventsReceived = true;
+    // A real Photoshop event means the user is working: leave idle backoff
+    notePanelActivity();
     photoshopEventCallbacks.forEach((callback) => {
       try {
         callback(event);
@@ -1279,4 +1302,4 @@ const openFile = (path, autoClose = false) => {
   );
 };
 
-export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, getActiveLayerText, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
+export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, getActiveLayerText, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, notePanelActivity, isPanelIdle, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };

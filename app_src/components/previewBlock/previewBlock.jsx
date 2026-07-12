@@ -6,7 +6,7 @@ import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
 
-import { csInterface, locale, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
+import { csInterface, locale, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, isPanelIdle, notePanelActivity, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { buildStoredSelectionPayload, getScaledStyle } from "../../textLayerPayload";
 import { generateTextShapeRVariants, visibleWidth } from "../../textShapeR";
@@ -142,6 +142,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
 
   const selectionCheckInterval = React.useRef(null);
   const selectionCheckPending = React.useRef(false);
+  const selectionPollLastAt = React.useRef(0);
   const [shiftSelectionWarning, setShiftSelectionWarning] = React.useState(false);
   const shiftTipTimeout = React.useRef(null);
   const [textShapeRUndoDepth, setTextShapeRUndoDepth] = React.useState(0);
@@ -401,7 +402,10 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     const pollTimer = setInterval(() => {
       // Never queue refresh work behind a running paste/align action
       if (document.hidden || isHostActionPending()) return;
-      const idleDelay = hasReceivedPhotoshopEvents() ? 6000 : 1200;
+      // Panel idle for minutes (Photoshop probably in the background): drop
+      // to a slow keep-alive so the host is not polled for hours. Any event
+      // or interaction refreshes immediately through the other paths.
+      const idleDelay = isPanelIdle() ? 30000 : hasReceivedPhotoshopEvents() ? 6000 : 1200;
       if (Date.now() - inlineLastRefreshAt.current >= idleDelay) {
         refreshInlineLayerSource();
         refreshInlineSelectionShape();
@@ -525,11 +529,16 @@ const PreviewBlock = React.memo(function PreviewBlock() {
 
   const checkForSelectionChange = React.useCallback(() => {
     if (!context.state.multiBubbleMode || context.state.modalType || document.hidden || selectionCheckPending.current || isHostActionPending()) return;
+    // Idle backoff: 5 polls per second only while the user is actually
+    // working; a first selection after a long pause restores the fast rate
+    if (isPanelIdle() && Date.now() - selectionPollLastAt.current < 1000) return;
+    selectionPollLastAt.current = Date.now();
     selectionCheckPending.current = true;
 
     getSelectionChanged((selection) => {
       selectionCheckPending.current = false;
       if (selection) {
+        notePanelActivity();
         const getNextLineIndex = (lineIndex) => {
           const lines = context.state.lines || [];
           const currentLine = lines[lineIndex];
