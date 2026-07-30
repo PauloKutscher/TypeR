@@ -4,14 +4,15 @@ import React from "react";
 import deepClone from "../../deepClone";
 import PropTypes from "prop-types";
 import { ReactSortable } from "react-sortablejs";
-import { FiArrowRightCircle, FiPlus, FiFolderPlus, FiChevronDown, FiChevronUp, FiCopy, FiEye, FiEyeOff, FiMinus } from "react-icons/fi";
+import { FiArrowRightCircle, FiPlus, FiFolderPlus, FiChevronDown, FiChevronUp, FiCopy, FiEye, FiEyeOff, FiMinus, FiInfo, FiX } from "react-icons/fi";
 import { MdEdit, MdLock } from "react-icons/md";
 import { CiExport } from "react-icons/ci";
 
 import config from "../../config";
-import { locale, getActiveLayerText, setActiveLayerText, rgbToHex, getStyleObject } from "../../utils";
+import { locale, nativeAlert, getActiveLayerText, setActiveLayerText, rgbToHex, getStyleObject } from "../../utils";
 import { useContext } from "../../context";
 import { buildFolderTree } from "../../folderUtils";
+import { collectFontRefs, exportZipWithFonts } from "../../fontFileExport";
 
 const StylesBlock = React.memo(function StylesBlock() {
   const context = useContext();
@@ -27,8 +28,35 @@ const StylesBlock = React.memo(function StylesBlock() {
   const unsortedStyles = stylesByFolder.get("__unsorted__") || [];
   const folderTree = React.useMemo(() => buildFolderTree(context.state.folders), [context.state.folders]);
   const hasContent = context.state.folders.length || context.state.styles.length;
+  const showExportFontTip =
+    context.state.exportFolderFontTipVisible &&
+    !context.state.exportFolderFontTipDismissed &&
+    context.state.showTips !== false;
   return (
     <React.Fragment>
+      {showExportFontTip && (
+        <div className="export-font-tip hostBrdBotContrast">
+          <FiInfo size={14} className="export-font-tip-icon" />
+          <span className="export-font-tip-text">
+            {locale.exportFolderFontTip || "Tip: hold Ctrl while clicking Export folder to also bundle the fonts' .ttf/.otf files in a .zip."}
+          </span>
+          <button
+            type="button"
+            className="export-font-tip-dismiss"
+            onClick={() => context.dispatch({ type: "hideExportFolderFontTip", dismiss: true })}
+          >
+            {locale.dontShowAgain || "Don't show again"}
+          </button>
+          <button
+            type="button"
+            className="export-font-tip-close"
+            title={locale.close}
+            onClick={() => context.dispatch({ type: "hideExportFolderFontTip" })}
+          >
+            <FiX size={14} />
+          </button>
+        </div>
+      )}
       <div className="folders-list">
         {hasContent ? (
           <React.Fragment>
@@ -186,7 +214,10 @@ const FolderItem = React.memo(function FolderItem(props) {
 
   const exportFolder = React.useCallback((e) => {
     e.stopPropagation();
-    const pathSelect = window.cep.fs.showSaveDialogEx(false, false, ["json"], props.data.name + ".json");
+    // Ctrl/Cmd+Click also bundles the folder's font files into a .zip
+    const withFonts = e.ctrlKey || e.metaKey;
+    const ext = withFonts ? "zip" : "json";
+    const pathSelect = window.cep.fs.showSaveDialogEx(false, false, [ext], props.data.name + "." + ext);
     if (!pathSelect?.data) return false;
     const exportedFolder = {};
     exportedFolder.name = props.data.name;
@@ -198,8 +229,31 @@ const FolderItem = React.memo(function FolderItem(props) {
       stroke: style.stroke,
     }));
     exportedFolder.exportedStyles = exportedStyles;
+    if (withFonts) {
+      const result = exportZipWithFonts({
+        zipPath: pathSelect.data,
+        jsonFileName: props.data.name + ".json",
+        jsonString: JSON.stringify(exportedFolder),
+        fontRefs: collectFontRefs(styles),
+      });
+      if (!result.ok) {
+        nativeAlert(locale.exportFontFilesError || "Could not create the .zip archive.", locale.errorTitle, true);
+        return false;
+      }
+      if (result.missing.length) {
+        nativeAlert(
+          (locale.exportFontFilesMissing || "These fonts could not be found on this computer and were not added to the archive:") +
+            "\n" + result.missing.join("\n"),
+          locale.errorTitle,
+          true
+        );
+      }
+      return;
+    }
     window.cep.fs.writeFile(pathSelect.data, JSON.stringify(exportedFolder));
-  }, [props.data.name, styles]);
+    // Plain export done: surface the Ctrl+Click zip shortcut once in a while
+    context.dispatch({ type: "showExportFolderFontTip" });
+  }, [props.data.name, styles, context.dispatch]);
 
   const duplicateFolder = React.useCallback((e) => {
     e.stopPropagation();
@@ -237,7 +291,7 @@ const FolderItem = React.memo(function FolderItem(props) {
               <button className="topcoat-icon-button--large--quiet" title={locale.addSubfolder || "Add subfolder"} onClick={addSubfolder}>
                 <FiFolderPlus size={14} />
               </button>
-              <button className="topcoat-icon-button--large--quiet" title={locale.exportFolder} onClick={exportFolder}>
+              <button className="topcoat-icon-button--large--quiet" title={locale.exportFolder + " (" + (locale.exportFolderZipHint || "Ctrl+Click: .zip with font files") + ")"} onClick={exportFolder}>
                 <CiExport size={14} />
               </button>
               <button className="topcoat-icon-button--large--quiet" title={locale.editFolder} onClick={openFolder}>

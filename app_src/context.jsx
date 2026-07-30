@@ -37,6 +37,7 @@ const storeFields = [
   "storedSelections",
   "multiBubbleMode",
   "showTips",
+  "exportFolderFontTipDismissed",
   "showQuickStyleSize",
   "inlineTextShapeR",
   "textShapeRBubbleAware",
@@ -234,6 +235,8 @@ const initialState = {
   currentFolderTagPriority: storage.data?.currentFolderTagPriority !== false,
   resizeTextBoxOnCenter: false,
   showTips: storage.data?.showTips !== false,
+  exportFolderFontTipDismissed: storage.data?.exportFolderFontTipDismissed === true,
+  exportFolderFontTipVisible: false,
   showQuickStyleSize: storage.data?.showQuickStyleSize !== false,
   inlineTextShapeR: storage.data?.inlineTextShapeR !== false,
   textShapeRBubbleAware: storage.data?.textShapeRBubbleAware !== false,
@@ -789,6 +792,17 @@ const reducer = (state, action) => {
 
     case "setShowTips": {
       newState.showTips = !!action.value;
+      break;
+    }
+
+    case "showExportFolderFontTip": {
+      newState.exportFolderFontTipVisible = true;
+      break;
+    }
+
+    case "hideExportFolderFontTip": {
+      newState.exportFolderFontTipVisible = false;
+      if (action.dismiss) newState.exportFolderFontTipDismissed = true;
       break;
     }
 

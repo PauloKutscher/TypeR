@@ -3,15 +3,17 @@ import { FiCheckSquare, FiFolder, FiType, FiX } from "react-icons/fi";
 import { MdSave } from "react-icons/md";
 
 import config from "../../config";
-import { locale } from "../../utils";
+import { locale, nativeAlert } from "../../utils";
 import { useContext } from "../../context";
 import { buildFolderTree, collectDescendantIds } from "../../folderUtils";
+import { collectFontRefs, exportZipWithFonts } from "../../fontFileExport";
 
 const ExportModal = React.memo(function ExportModal() {
   const context = useContext();
   const [selected, setSelected] = React.useState([]);
   const [selectedFonts, setSelectedFonts] = React.useState([]);
   const [withSettings, setWithSettings] = React.useState(false);
+  const [withFontFiles, setWithFontFiles] = React.useState(false);
   const [allSelected, setAllSelected] = React.useState(false);
   const folderTree = React.useMemo(() => buildFolderTree(context.state.folders), [context.state.folders]);
   const allFolderIds = React.useMemo(() => context.state.folders.map((folder) => folder.id), [context.state.folders]);
@@ -90,11 +92,12 @@ const ExportModal = React.memo(function ExportModal() {
   const exportData = (e) => {
     e.preventDefault();
     if (!canExport) return;
+    const ext = withFontFiles ? "zip" : "json";
     const pathSelect = window.cep.fs.showSaveDialogEx(
       false,
       false,
-      ["json"],
-      config.exportFileName + ".json"
+      [ext],
+      config.exportFileName + "." + ext
     );
     if (!pathSelect?.data) return false;
     const folders = context.state.folders.filter((f) => selected.includes(f.id));
@@ -114,6 +117,28 @@ const ExportModal = React.memo(function ExportModal() {
       data.autoScrollStyle = context.state.autoScrollStyle;
       data.currentFolderTagPriority = context.state.currentFolderTagPriority;
       data.textItemKind = context.state.setTextItemKind;
+    }
+    if (withFontFiles) {
+      const result = exportZipWithFonts({
+        zipPath: pathSelect.data,
+        jsonFileName: config.exportFileName + ".json",
+        jsonString: JSON.stringify(data),
+        fontRefs: collectFontRefs(exportableStyles),
+      });
+      if (!result.ok) {
+        nativeAlert(locale.exportFontFilesError || "Could not create the .zip archive.", locale.errorTitle, true);
+        return false;
+      }
+      if (result.missing.length) {
+        nativeAlert(
+          (locale.exportFontFilesMissing || "These fonts could not be found on this computer and were not added to the archive:") +
+            "\n" + result.missing.join("\n"),
+          locale.errorTitle,
+          true
+        );
+      }
+      close();
+      return;
     }
     window.cep.fs.writeFile(pathSelect.data, JSON.stringify(data));
     close();
@@ -214,6 +239,21 @@ const ExportModal = React.memo(function ExportModal() {
                 <div className="export-settings-title">{locale.exportIncludeSettings}</div>
                 <div className="export-section-hint">
                   {locale.exportIncludeSettingsHint || "Keep this off when you only want to share style folders."}
+                </div>
+              </div>
+          </label>
+
+          <label className="topcoat-checkbox export-settings-item hostBrdContrast">
+              <input
+                type="checkbox"
+                checked={withFontFiles}
+                onChange={(e) => setWithFontFiles(e.target.checked)}
+              />
+              <div className="topcoat-checkbox__checkmark"></div>
+              <div className="export-settings-content">
+                <div className="export-settings-title">{locale.exportIncludeFontFiles || "Include font files (.zip)"}</div>
+                <div className="export-section-hint">
+                  {locale.exportIncludeFontFilesHint || "Bundle the matching .ttf/.otf files with the JSON in a .zip archive for easy install on another PC."}
                 </div>
               </div>
           </label>
