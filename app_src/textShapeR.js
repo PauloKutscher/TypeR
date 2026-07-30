@@ -439,6 +439,74 @@ const buildCandidate = (tokens, lineCount, targets) => {
   return lines;
 };
 
+// Aesthetic silhouette rules shared by generic and bubble-aware scoring:
+// the widest line belongs in the middle, the top/bottom edges stay short,
+// widths rise to the peak then fall, and neighbouring lines keep close widths
+const scoreSilhouetteAesthetics = (lengths, profile) => {
+  const lineCount = lengths.length;
+  const maxLength = Math.max.apply(null, lengths);
+  const minLength = Math.min.apply(null, lengths);
+  if (!(maxLength > 0) || lineCount < 2) return 0;
+  const smoothnessWeight = profile.smoothnessWeight == null ? 160 : profile.smoothnessWeight;
+
+  if (lineCount === 2) {
+    const adjacentSlack = profile.adjacentSlack == null ? 0.24 : profile.adjacentSlack;
+    const difference = Math.abs(lengths[0] - lengths[1]) / maxLength;
+    const excess = Math.max(0, difference - adjacentSlack);
+    return excess * excess * smoothnessWeight;
+  }
+
+  const adjacentSlack = profile.adjacentSlack == null ? 0.3 : profile.adjacentSlack;
+  const minLineRatio = profile.minLineRatio == null ? 0.34 : profile.minLineRatio;
+  const minRatio = minLength / maxLength;
+  const interiorLengths = lengths.slice(1, lineCount - 1);
+  const interiorMax = Math.max.apply(null, interiorLengths);
+  let score = 0;
+
+  // The widest line must sit in the middle of the shape, not on an edge
+  const edgeMax = Math.max(lengths[0], lengths[lineCount - 1]);
+  if (edgeMax > interiorMax) {
+    score += Math.pow((edgeMax - interiorMax) / maxLength, 2) * 420 + 20;
+  }
+
+  // Edge lines should stay clearly below the interior peak (graded, not binary)
+  if (interiorMax > 0) {
+    [lengths[0], lengths[lineCount - 1]].forEach((edgeLength) => {
+      const edgeExcess = Math.max(0, edgeLength / interiorMax - 0.9);
+      score += edgeExcess * edgeExcess * 320;
+    });
+  }
+
+  // Bubble profile: lengths should rise toward the peak then fall after it;
+  // every dip before the peak or bump after it breaks the convex silhouette
+  const peakIndex = lengths.indexOf(maxLength);
+  for (let index = 1; index <= peakIndex; index++) {
+    const drop = lengths[index - 1] - lengths[index];
+    if (drop > 0) score += Math.pow(drop / maxLength, 2) * 300;
+  }
+  for (let index = peakIndex + 1; index < lineCount; index++) {
+    const rise = lengths[index] - lengths[index - 1];
+    if (rise > 0) score += Math.pow(rise / maxLength, 2) * 300;
+  }
+
+  // Neighbouring lines must keep close widths for a smooth outline
+  for (let index = 1; index < lengths.length; index++) {
+    const difference = Math.abs(lengths[index] - lengths[index - 1]) / maxLength;
+    const excess = Math.max(0, difference - adjacentSlack);
+    score += excess * excess * smoothnessWeight;
+    score += Math.max(0, difference - 0.45) * 160;
+  }
+
+  // First and last lines may differ, but a lopsided pair reads badly
+  const edgeDifference = Math.abs(lengths[0] - lengths[lineCount - 1]) / maxLength;
+  score += Math.pow(Math.max(0, edgeDifference - 0.22), 2) * 240;
+
+  if (minRatio < minLineRatio) {
+    score += Math.pow(minLineRatio - minRatio, 2) * 260;
+  }
+  return score;
+};
+
 const scoreCandidate = (lines, hyphenCount, profile) => {
   const lengths = lines.map((line) => lineLength(line));
   const lineCount = lines.length;
@@ -446,10 +514,14 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
   const shapeRows = profile.shapeRows && profile.shapeRows.length ? profile.shapeRows : null;
   let targets;
   if (shapeRows) {
-    // Targets follow the sampled bubble outline instead of a generic curve
-    const rowWeights = lengths.map((_, index) => (
-      Math.max(0.12, getProfileWidthAt(shapeRows, (index + 0.5) / lineCount) || 0)
-    ));
+    // Targets follow the bubble outline at each line's real rendered height
+    // (pixel-calibrated when available) instead of a generic curve
+    const rowWeights = lengths.map((_, index) => {
+      if (profile.fit) {
+        return Math.max(0.12, getFitAvailableUnits(index, lineCount, profile.fit));
+      }
+      return Math.max(0.12, getProfileWidthAt(shapeRows, (index + 0.5) / lineCount) || 0);
+    });
     const rowTotal = rowWeights.reduce((sum, weight) => sum + weight, 0) || 1;
     targets = rowWeights.map((weight) => (totalLength * weight) / rowTotal);
   } else {
@@ -496,81 +568,26 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
   });
 
   if (shapeRows && maxLength > 0 && lineCount > 1) {
-    // With a real outline the silhouette rules are replaced by outline
-    // following: each width step should match the outline's step
+    // With a real outline each width step should match the outline's step...
     const smoothnessWeight = profile.smoothnessWeight == null ? 160 : profile.smoothnessWeight;
-    const minLineRatio = profile.minLineRatio == null ? 0.34 : profile.minLineRatio;
     for (let index = 1; index < lengths.length; index++) {
       const stepError = ((lengths[index] - lengths[index - 1]) - (targets[index] - targets[index - 1])) / maxLength;
       score += stepError * stepError * smoothnessWeight;
-      score += Math.max(0, Math.abs(lengths[index] - lengths[index - 1]) / maxLength - 0.5) * 120;
     }
-    const shapeMinRatio = minLineRatio * 0.8;
-    const minRatio = minLength / maxLength;
-    if (minRatio < shapeMinRatio) {
-      score += Math.pow(shapeMinRatio - minRatio, 2) * 200;
-    }
+    // ...but outline following alone lets a noisy wand scan produce lopsided
+    // blocks: the shared silhouette aesthetics still apply so the result
+    // stays harmonious (peak centered, short edges, no abrupt width jumps).
+    // The min-line floor is relaxed a little: a genuinely narrow bubble tip
+    // legitimately asks for a shorter edge line than the generic silhouette.
+    score += scoreSilhouetteAesthetics(lengths, {
+      adjacentSlack: profile.adjacentSlack,
+      smoothnessWeight: profile.smoothnessWeight,
+      minLineRatio: (profile.minLineRatio == null ? 0.34 : profile.minLineRatio) * 0.85,
+    });
     return score;
   }
 
-  if (maxLength > 0 && lineCount === 2) {
-    const adjacentSlack = profile.adjacentSlack == null ? 0.24 : profile.adjacentSlack;
-    const smoothnessWeight = profile.smoothnessWeight == null ? 160 : profile.smoothnessWeight;
-    const difference = Math.abs(lengths[0] - lengths[1]) / maxLength;
-    const excess = Math.max(0, difference - adjacentSlack);
-    score += excess * excess * smoothnessWeight;
-  }
-
-  if (maxLength > 0 && lineCount > 2) {
-    const adjacentSlack = profile.adjacentSlack == null ? 0.3 : profile.adjacentSlack;
-    const smoothnessWeight = profile.smoothnessWeight == null ? 160 : profile.smoothnessWeight;
-    const minLineRatio = profile.minLineRatio == null ? 0.34 : profile.minLineRatio;
-    const minRatio = minLength / maxLength;
-    const interiorLengths = lengths.slice(1, lineCount - 1);
-    const interiorMax = Math.max.apply(null, interiorLengths);
-
-    // The widest line must sit in the middle of the shape, not on an edge
-    const edgeMax = Math.max(lengths[0], lengths[lineCount - 1]);
-    if (edgeMax > interiorMax) {
-      score += Math.pow((edgeMax - interiorMax) / maxLength, 2) * 420 + 20;
-    }
-
-    // Edge lines should stay clearly below the interior peak (graded, not binary)
-    if (interiorMax > 0) {
-      [lengths[0], lengths[lineCount - 1]].forEach((edgeLength) => {
-        const edgeExcess = Math.max(0, edgeLength / interiorMax - 0.9);
-        score += edgeExcess * edgeExcess * 320;
-      });
-    }
-
-    // Bubble profile: lengths should rise toward the peak then fall after it;
-    // every dip before the peak or bump after it breaks the convex silhouette
-    const peakIndex = lengths.indexOf(maxLength);
-    for (let index = 1; index <= peakIndex; index++) {
-      const drop = lengths[index - 1] - lengths[index];
-      if (drop > 0) score += Math.pow(drop / maxLength, 2) * 300;
-    }
-    for (let index = peakIndex + 1; index < lineCount; index++) {
-      const rise = lengths[index] - lengths[index - 1];
-      if (rise > 0) score += Math.pow(rise / maxLength, 2) * 300;
-    }
-
-    // Neighbouring lines must keep close widths for a smooth outline
-    for (let index = 1; index < lengths.length; index++) {
-      const difference = Math.abs(lengths[index] - lengths[index - 1]) / maxLength;
-      const excess = Math.max(0, difference - adjacentSlack);
-      score += excess * excess * smoothnessWeight;
-      score += Math.max(0, difference - 0.45) * 160;
-    }
-
-    // First and last lines may differ, but a lopsided pair reads badly
-    const edgeDifference = Math.abs(lengths[0] - lengths[lineCount - 1]) / maxLength;
-    score += Math.pow(Math.max(0, edgeDifference - 0.22), 2) * 240;
-
-    if (minRatio < minLineRatio) {
-      score += Math.pow(minLineRatio - minRatio, 2) * 260;
-    }
-  }
+  score += scoreSilhouetteAesthetics(lengths, profile);
   return score;
 };
 
@@ -636,12 +653,26 @@ const getFitLineY = (index, lineCount, fit) => (
   0.5 + (index + 0.5 - lineCount / 2) * (fit.linePx / fit.height)
 );
 
-// Width (in measure units) actually available inside the bubble outline at
-// the height this line will render at
+// Fraction of a line's leading actually covered by its glyphs: the band the
+// outline must accommodate around the line's center
+const FIT_GLYPH_BAND = 0.8;
+
+// Width (in measure units) actually available inside the bubble outline over
+// the vertical band this line renders in. Sampling only the band center
+// overestimates what a convex outline offers to the top and bottom lines
+// (their far edge sits on a narrower part of the curve) — exactly where text
+// used to escape the bubble: keep the minimum across the band instead.
 const getFitAvailableUnits = (index, lineCount, fit) => {
-  const y = clamp(getFitLineY(index, lineCount, fit), 0, 1);
-  const rowWidth = fit.rows ? Math.max(0, getProfileWidthAt(fit.rows, y) || 0) : 1;
-  return (fit.width * rowWidth * FIT_MARGIN) / fit.unitPx;
+  if (!fit.rows) return (fit.width * FIT_MARGIN) / fit.unitPx;
+  const yCenter = getFitLineY(index, lineCount, fit);
+  const halfBand = (fit.linePx / fit.height) * (FIT_GLYPH_BAND / 2);
+  let rowWidth = Infinity;
+  [yCenter - halfBand, yCenter, yCenter + halfBand].forEach((y) => {
+    const width = getProfileWidthAt(fit.rows, clamp(y, 0, 1));
+    if (width != null && width < rowWidth) rowWidth = width;
+  });
+  if (!Number.isFinite(rowWidth)) rowWidth = 0;
+  return (fit.width * Math.max(0, rowWidth) * FIT_MARGIN) / fit.unitPx;
 };
 
 // True when every line of a variant physically stays inside the bubble
@@ -654,19 +685,26 @@ const variantFitsBubble = (lines, fit) => {
   ));
 };
 
-// Smallest line count whose stacked rows offer enough width for the whole
-// text while the block still fits the bubble height
+// Lines packed at 100% of their row capacity overflow on the slightest
+// measurement error: the estimated line count must leave headroom
+const FIT_CAPACITY_SLACK = 1.12;
+
+// Smallest line count whose stacked rows offer enough width (with headroom)
+// for the whole text while the block still fits the bubble height; a count
+// with exact-but-tight capacity is only a fallback when none has headroom
 const estimateFitLineCount = (totalUnits, fit) => {
   const maxByHeight = Math.max(1, Math.floor((fit.height * FIT_MARGIN) / fit.linePx));
   const limit = Math.min(8, maxByHeight);
+  let exactFit = 0;
   for (let lineCount = 1; lineCount <= limit; lineCount++) {
     let capacity = 0;
     for (let index = 0; index < lineCount; index++) {
       capacity += getFitAvailableUnits(index, lineCount, fit);
     }
-    if (capacity >= totalUnits) return lineCount;
+    if (capacity >= totalUnits * FIT_CAPACITY_SLACK) return lineCount;
+    if (!exactFit && capacity >= totalUnits) exactFit = lineCount;
   }
-  return limit;
+  return exactFit || limit;
 };
 
 const buildManualTargets = (tokens, lineCount, settings) => {
@@ -917,6 +955,11 @@ const generateTextShapeRVariants = (text, options = {}) => {
   }
   const baseMinLines = words.length <= 2 ? 1 : profile.minLines;
   let minLines = Math.min(Math.max(1, baseMinLines), Math.max(1, words.length));
+  if (shapeRows.length > 1 && fit) {
+    // The calibrated estimate knows how much text the bubble really holds:
+    // allow shorter blocks than the preset minimum when the bubble asks
+    minLines = Math.min(minLines, Math.max(1, scoringProfile.lineTarget));
+  }
   const profileMaxLines = shapeRows.length > 1 ? Math.max(profile.maxLines, Math.min(8, scoringProfile.lineTarget + 1)) : profile.maxLines;
   let maxLines = Math.min(options.maxLines || profileMaxLines, Math.max(1, words.length));
   // Stretch the explored line range toward the bubble ratio so a tall bubble
@@ -936,13 +979,21 @@ const generateTextShapeRVariants = (text, options = {}) => {
 
   const addShapeCandidates = (tokens, lineCount, hyphenCount) => {
     if (!shapeTargetSettings) return;
-    let targets = buildManualTargets(tokens, lineCount, shapeTargetSettings);
+    let targets;
     if (fit) {
-      // Proportional targets can exceed the bubble's real width where the
-      // outline narrows: cap each one so the DP aims at lines that fit
-      targets = targets.map((target, index) => (
-        Math.max(1, Math.min(target, getFitAvailableUnits(index, lineCount, fit)))
-      ));
+      // Aim the DP straight at the width the bubble physically offers at each
+      // line's rendered height, scaled down to the amount of text: the block
+      // then mirrors the outline instead of a generic curve capped afterwards
+      const available = [];
+      for (let index = 0; index < lineCount; index++) {
+        available.push(Math.max(1, getFitAvailableUnits(index, lineCount, fit)));
+      }
+      const total = tokens.reduce((sum, token) => sum + tokenLength(token), 0) + Math.max(0, tokens.length - lineCount) * 0.45;
+      const availableTotal = available.reduce((sum, units) => sum + units, 0) || 1;
+      const scale = Math.min(1, total / availableTotal);
+      targets = available.map((units) => Math.max(1, units * scale));
+    } else {
+      targets = buildManualTargets(tokens, lineCount, shapeTargetSettings);
     }
     [-1, 0, 1].forEach((bias) => {
       const biasedTargets = bias === 0 ? targets : targets.map((target) => Math.max(1, target + bias));
@@ -984,8 +1035,19 @@ const generateTextShapeRVariants = (text, options = {}) => {
   }
 
   const limit = options.limit || MAX_VARIANTS;
-  const sorted = Array.from(resultMap.values())
-    .sort((a, b) => a.score - b.score || a.text.localeCompare(b.text));
+  const variants = Array.from(resultMap.values());
+  // A variant that physically stays inside the bubble must always outrank
+  // one that escapes it, whatever their aesthetic scores say
+  if (fit) {
+    variants.forEach((variant) => {
+      variant.fits = variantFitsBubble(variant.lines, fit);
+    });
+  }
+  const compareVariants = (a, b) => {
+    if (fit && a.fits !== b.fits) return a.fits ? -1 : 1;
+    return a.score - b.score || a.text.localeCompare(b.text);
+  };
+  const sorted = variants.sort(compareVariants);
 
   // Guarantee line-count diversity: the best candidate of each line count is
   // kept first so taller and shorter alternatives always reach the list,
@@ -999,7 +1061,7 @@ const generateTextShapeRVariants = (text, options = {}) => {
     if (seenLineCounts.has(count)) return;
     // Diversity must never resurrect a shape that escapes the bubble: those
     // only reach the list through the score-ordered fill below, i.e. last
-    if (fit && !variantFitsBubble(variant.lines, fit)) return;
+    if (fit && !variant.fits) return;
     seenLineCounts.add(count);
     picked.push(variant);
     pickedTexts.add(variant.text);
@@ -1011,7 +1073,7 @@ const generateTextShapeRVariants = (text, options = {}) => {
   });
 
   const result = picked
-    .sort((a, b) => a.score - b.score || a.text.localeCompare(b.text))
+    .sort(compareVariants)
     .map((variant, index) => ({ ...variant, id: `shape-${index + 1}` }));
 
   if (variantCache.size >= VARIANT_CACHE_LIMIT) {

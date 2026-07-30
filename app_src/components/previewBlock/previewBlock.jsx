@@ -95,11 +95,15 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     if (!lines.length) return null;
     const maxUnits = Math.max(...lines.map((line) => visibleWidth(line)));
     if (!(maxUnits > 0)) return null;
+    // Bounds measure glyph extent, not leading: an n-line block spans
+    // (n - 1) * leading + glyphHeight where glyphHeight is ~0.62 of the
+    // leading for all-caps text (the manga default) and ~0.8 with
+    // descenders. Underestimating the leading here let too-tall blocks pass
+    // the fit check and pushed their edge lines out of the bubble curve.
+    const glyphRatio = /[gjpqyç()]/.test(lines.join("")) ? 0.8 : 0.62;
     return {
       unitPx: bounds.width / maxUnits,
-      // A single line's bounds measure glyph extent, not leading: pad it so
-      // multi-line candidates aren't credited with less height than they use
-      linePx: lines.length === 1 ? bounds.height * 1.2 : bounds.height / lines.length,
+      linePx: bounds.height / (lines.length - 1 + glyphRatio),
     };
   }, [inlineLayerSource.text, inlineLayerSource.bounds]);
   const inlineTextShapeRVariants = React.useMemo(

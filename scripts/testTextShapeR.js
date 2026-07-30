@@ -141,4 +141,57 @@ const selectionManual = generateManualTextShapeRVariant(manualText, {
 assert.ok(selectionManual.targets[2] > selectionManual.targets[0]);
 assert.ok(selectionManual.targets[2] > selectionManual.targets[4]);
 
+// Bubble-aware mode: a round outline plus pixel calibration must yield
+// variants that stay inside the bubble and keep a harmonious convex shape
+const ellipseRows = [];
+for (let i = 0; i <= 12; i++) {
+  const y = i / 12;
+  const width = Math.sqrt(Math.max(0, 1 - Math.pow(2 * y - 1, 2)));
+  ellipseRows.push({ y, left: 0.5 - width / 2, right: 0.5 + width / 2, width });
+}
+const bubbleWidth = 300;
+const bubbleHeight = 300;
+const bubbleCalibration = { unitPx: 10, linePx: 40 };
+const bubbleText = "Je crois que nous devrions vraiment partir avant que la nuit tombe sur la ville.";
+const bubbleVariants = generateTextShapeRVariants(bubbleText, {
+  limit: 12,
+  profile: "balanced",
+  shapeProfile: { rows: ellipseRows },
+  width: bubbleWidth,
+  height: bubbleHeight,
+  calibration: bubbleCalibration,
+});
+assert.ok(bubbleVariants.length > 0);
+
+const ellipseWidthAt = (y) => {
+  const clamped = Math.max(0, Math.min(1, y));
+  return Math.sqrt(Math.max(0, 1 - Math.pow(2 * clamped - 1, 2)));
+};
+const bubbleBest = bubbleVariants[0];
+const bestWidths = bubbleBest.lines.map(visibleWidth);
+assert.ok(bestWidths.length > 1, `expected a multi-line bubble variant:\n${bubbleBest.text}`);
+// Block height must fit the bubble
+assert.ok(bestWidths.length * bubbleCalibration.linePx <= bubbleHeight, `too many lines for the bubble:\n${bubbleBest.text}`);
+// Every line must stay inside the outline over its whole vertical band
+bubbleBest.lines.forEach((line, index) => {
+  const yCenter = 0.5 + (index + 0.5 - bestWidths.length / 2) * (bubbleCalibration.linePx / bubbleHeight);
+  const halfBand = (bubbleCalibration.linePx / bubbleHeight) * 0.4;
+  const rowWidth = Math.min(ellipseWidthAt(yCenter - halfBand), ellipseWidthAt(yCenter + halfBand));
+  const availablePx = bubbleWidth * rowWidth;
+  const linePx = visibleWidth(line) * bubbleCalibration.unitPx;
+  assert.ok(linePx <= availablePx * 1.05, `line escapes the bubble: "${line}" (${linePx}px > ${availablePx}px) in\n${bubbleBest.text}`);
+});
+// Harmonious convex silhouette: widest line in the interior, edges shorter,
+// and no abrupt jump between neighbouring lines
+if (bestWidths.length > 2) {
+  const interiorMax = Math.max(...bestWidths.slice(1, -1));
+  assert.ok(interiorMax >= bestWidths[0], `top line wider than interior:\n${bubbleBest.text}`);
+  assert.ok(interiorMax >= bestWidths[bestWidths.length - 1], `bottom line wider than interior:\n${bubbleBest.text}`);
+}
+const bubbleMax = Math.max(...bestWidths);
+bestWidths.forEach((width, index) => {
+  if (!index) return;
+  assert.ok(Math.abs(width - bestWidths[index - 1]) / bubbleMax <= 0.6, `abrupt width jump in\n${bubbleBest.text}`);
+});
+
 console.log("TextShapeR tests passed");
