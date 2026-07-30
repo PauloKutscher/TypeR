@@ -5,6 +5,7 @@ import { FaKeyboard, FaFileExport, FaFileImport } from "react-icons/fa";
 
 import config from "../../config";
 import { locale, nativeAlert, nativeConfirm, checkUpdate, readStorage, writeToStorage, deleteStorageFile, openFile } from "../../utils";
+import { clearDebugLog, revealDebugLog } from "../../debugLogger";
 import { useContext, defaultUiLayout, normalizeUiLayout } from "../../context";
 import { EDITOR_THEME_PRESETS, getEditorThemePreviewColors } from "../../themePresets";
 import Shortcut from "./shortCut";
@@ -69,6 +70,7 @@ const SettingsModal = React.memo(function SettingsModal() {
     context.state.multiTabEnabled !== false
   );
   const [editorTheme, setEditorTheme] = React.useState(context.state.editorTheme || "system");
+  const [debugLogger, setDebugLogger] = React.useState(context.state.debugLogger === true);
   const [multiTabConfirmOpen, setMultiTabConfirmOpen] = React.useState(false);
   const [edited, setEdited] = React.useState(false);
 
@@ -225,6 +227,22 @@ const SettingsModal = React.memo(function SettingsModal() {
   const changeEditorTheme = (theme) => {
     setEditorTheme(theme);
     setEdited(true);
+  };
+
+  const changeDebugLogger = (e) => {
+    setDebugLogger(e.target.checked);
+    setEdited(true);
+  };
+
+  const clearDebugLogFile = () => {
+    const success = clearDebugLog();
+    nativeAlert(
+      success
+        ? locale.settingsDebugLogClearSuccess || "Debug log cleared."
+        : locale.settingsDebugLogClearError || "Unable to clear the debug log.",
+      success ? locale.successTitle : locale.errorTitle,
+      !success
+    );
   };
 
   const toggleUiElement = (key) => {
@@ -437,6 +455,9 @@ const SettingsModal = React.memo(function SettingsModal() {
       context.dispatch({ type: "setEditorTheme", theme: editorTheme });
     }
     const layoutToSave = buildUiLayoutToSave();
+    if (debugLogger !== (context.state.debugLogger === true)) {
+      context.dispatch({ type: "setDebugLogger", value: debugLogger });
+    }
     if (JSON.stringify(layoutToSave) !== JSON.stringify(normalizeUiLayout(context.state.uiLayout))) {
       context.dispatch({ type: "setUiLayout", layout: layoutToSave });
     }
@@ -1276,6 +1297,33 @@ const SettingsModal = React.memo(function SettingsModal() {
                   </div>
                 </div>
               )}
+            </div>
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupDebug || "Debugging"}</div>
+              <div className="settings-checkbox-grid">
+                <div className="settings-checkbox-item">
+                  <label className="settings-checkbox-label">
+                    <input type="checkbox" checked={debugLogger} onChange={changeDebugLogger} />
+                    <div className="settings-checkbox-custom"></div>
+                    <div className="settings-checkbox-content">
+                      <span>{locale.settingsDebugLoggerLabel || "Debug logging"}</span>
+                      <div className="settings-checkbox-hint">
+                        {locale.settingsDebugLoggerHint || "Writes a detailed log of every Photoshop action TypeR performs (calls, payloads, results, timings, events) to typer_debug.log in the extension folder."}
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+              <div className="field">
+                <button type="button" className="topcoat-button--large" onClick={revealDebugLog}>
+                  {locale.settingsDebugLogReveal || "Open log folder"}
+                </button>
+              </div>
+              <div className="field">
+                <button type="button" className="topcoat-button--large" onClick={clearDebugLogFile}>
+                  {locale.settingsDebugLogClear || "Clear log file"}
+                </button>
+              </div>
             </div>
             <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupImportExport || "Import/Export"}</div>
