@@ -18,6 +18,7 @@ import config from "../../config";
 import { locale, nativeAlert, nativeConfirm, getUserFonts, getActiveLayerText, rgbToHex, getDefaultStyle, getDefaultStroke } from "../../utils";
 import { useContext } from "../../context";
 import { buildFolderTree, flattenFolderTree } from "../../folderUtils";
+import FontScanPromo from "./fontScanPromo";
 
 const EditStyleModal = React.memo(function EditStyleModal() {
   const context = useContext();
@@ -170,6 +171,7 @@ const EditStyleModal = React.memo(function EditStyleModal() {
       </div>
       <div className="app-modal-body">
         <form className="app-modal-body-inner" onSubmit={saveStyle}>
+          {currentData.create && <FontScanPromo />}
           <div className="fields">
             <div className="field">
               <div className="field-label">{locale.editStyleNameLabel}</div>

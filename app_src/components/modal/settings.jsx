@@ -9,6 +9,7 @@ import { clearDebugLog, revealDebugLog } from "../../debugLogger";
 import { useContext, defaultUiLayout, normalizeUiLayout } from "../../context";
 import { EDITOR_THEME_PRESETS, getEditorThemePreviewColors } from "../../themePresets";
 import Shortcut from "./shortCut";
+import FontScanPromo from "./fontScanPromo";
 
 const SettingsModal = React.memo(function SettingsModal() {
   const context = useContext();
@@ -454,10 +455,10 @@ const SettingsModal = React.memo(function SettingsModal() {
     if (editorTheme !== context.state.editorTheme) {
       context.dispatch({ type: "setEditorTheme", theme: editorTheme });
     }
-    const layoutToSave = buildUiLayoutToSave();
     if (debugLogger !== (context.state.debugLogger === true)) {
       context.dispatch({ type: "setDebugLogger", value: debugLogger });
     }
+    const layoutToSave = buildUiLayoutToSave();
     if (JSON.stringify(layoutToSave) !== JSON.stringify(normalizeUiLayout(context.state.uiLayout))) {
       context.dispatch({ type: "setUiLayout", layout: layoutToSave });
     }
@@ -1324,6 +1325,9 @@ const SettingsModal = React.memo(function SettingsModal() {
                   {locale.settingsDebugLogClear || "Clear log file"}
                 </button>
               </div>
+            </div>
+            <div className="settings-group">
+              <FontScanPromo />
             </div>
             <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupImportExport || "Import/Export"}</div>

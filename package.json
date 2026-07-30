@@ -10,7 +10,7 @@
     "build": "node clean.js app && webpack --mode=production && node copyThemes.js",
     "build_dev": "node clean.js app && webpack --mode=development && node copyThemes.js",
     "build_watch": "node clean.js app && node copyThemes.js && webpack --mode=development --watch",
-    "test": "node scripts/testTextLayerPayload.js && node scripts/testLineNumbering.js && node scripts/testLocales.js && node scripts/testTextShapeR.js",
+    "test": "node scripts/testTextLayerPayload.js && node scripts/testLineNumbering.js && node scripts/testLocales.js && node scripts/testTextShapeR.js && node scripts/testFontScan.js",
     "test:build": "node scripts/testBuildArtifacts.js",
     "verify": "npm test && npm run build && npm run test:build"
   },

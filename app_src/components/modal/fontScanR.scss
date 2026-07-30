@@ -1,0 +1,321 @@
+// FontScanR modal — designed for small panels (~500x700) first
+.fsr-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    SVG {
+        flex: 0 0 auto;
+        opacity: .75;
+    }
+}
+.fsr-body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+    box-sizing: border-box;
+}
+
+// Pick step
+.fsr-pick {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex-grow: 2;
+    text-align: center;
+    padding: 24px 12px;
+}
+.fsr-pick-icon {
+    opacity: .45;
+    margin-bottom: 12px;
+}
+.fsr-pick-text {
+    max-width: 340px;
+    margin: 0 0 16px;
+    font-size: 13px;
+    line-height: 1.45;
+    opacity: .85;
+}
+.fsr-pick-btn {
+    min-width: 200px;
+}
+.fsr-pick-hint {
+    margin: 12px 0 0;
+    font-size: 11px;
+    opacity: .5;
+}
+
+// Scanning step
+.fsr-scanning {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex-grow: 2;
+    text-align: center;
+    padding: 24px 12px;
+}
+.fsr-scanning-icon {
+    opacity: .6;
+    margin-bottom: 14px;
+    animation: fsr-pulse 1.2s ease-in-out infinite;
+}
+@keyframes fsr-pulse {
+    0%, 100% { opacity: .35; }
+    50% { opacity: .85; }
+}
+.fsr-scanning-file {
+    max-width: 90%;
+    font-size: 13px;
+    font-weight: bold;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    margin-bottom: 10px;
+}
+.fsr-progress {
+    width: 80%;
+    max-width: 320px;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(#000, .3);
+    overflow: hidden;
+    margin-bottom: 8px;
+    .light-theme & {
+        background: rgba(#000, .12);
+    }
+}
+.fsr-progress-bar {
+    height: 100%;
+    border-radius: 3px;
+    background: #3a8ee6;
+    transition: width .25s ease;
+}
+.fsr-scanning-count {
+    font-size: 11px;
+    opacity: .6;
+    margin-bottom: 18px;
+}
+
+// Results step
+.fsr-results {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 2;
+    min-height: 0;
+}
+.fsr-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+.fsr-summary-chip {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 10px;
+    opacity: .85;
+}
+.fsr-errors {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 11px;
+    color: #e6a23c;
+    margin-bottom: 8px;
+    SVG {
+        flex: 0 0 auto;
+        margin-top: 1px;
+    }
+}
+.fsr-toolbar {
+    display: flex;
+    align-items: center;
+    margin-bottom: 6px;
+}
+.fsr-toolbar-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    padding: 4px 6px;
+    cursor: pointer;
+}
+.fsr-toolbar-count {
+    flex-grow: 2;
+    text-align: right;
+    margin-right: 8px;
+    font-size: 11px;
+    opacity: .6;
+}
+.fsr-list {
+    background: rgba(#000, .2);
+    overflow-y: auto;
+    max-height: 315px;
+    padding: 4px;
+    .light-theme & {
+        background: rgba(#000, .06);
+    }
+}
+.fsr-item {
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    padding: 5px 6px 5px 4px;
+    opacity: .72;
+    &.m-selected {
+        opacity: 1;
+    }
+    &:hover {
+        outline: 1px solid rgba(#fff, .4);
+    }
+    .light-theme &:hover {
+        outline: 1px solid rgba(#000, .4);
+    }
+    & + & {
+        margin-top: 3px;
+    }
+}
+.fsr-item-cbx {
+    flex: 0 0 auto;
+    margin-right: 6px;
+}
+.fsr-item-preview {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 46px;
+    height: 34px;
+    margin-right: 8px;
+    border-radius: 2px;
+    background: rgba(#000, .28);
+    box-shadow: inset 0 0 0 1px rgba(#fff, .08);
+    overflow: hidden;
+    cursor: pointer;
+    SPAN {
+        display: block;
+        max-width: 100%;
+        font-size: 19px;
+        line-height: 30px;
+        white-space: nowrap;
+        overflow: hidden;
+    }
+    .light-theme & {
+        background: rgba(#fff, .45);
+        box-shadow: inset 0 0 0 1px rgba(#000, .08);
+    }
+}
+.fsr-item-main {
+    min-width: 0;
+    flex-grow: 2;
+}
+.fsr-item-name {
+    width: 100%;
+    box-sizing: border-box;
+    height: 22px;
+    font-size: 12px;
+    padding: 1px 6px;
+    margin-bottom: 3px;
+}
+.fsr-item-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
+.fsr-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    line-height: 1;
+    padding: 3px 6px;
+    border-radius: 8px;
+    background: rgba(#fff, .1);
+    white-space: nowrap;
+    .light-theme & {
+        background: rgba(#000, .08);
+    }
+    I {
+        display: block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        box-shadow: 0 0 0 1px rgba(#fff, .25);
+    }
+}
+.fsr-chip-warn {
+    background: rgba(#e6a23c, .22);
+    color: #e6a23c;
+}
+
+// Destination
+.fsr-dest {
+    margin-top: 10px;
+    padding-top: 10px;
+}
+.fsr-dest-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .3px;
+    opacity: .58;
+    margin-bottom: 6px;
+}
+.fsr-dest-option {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+    cursor: pointer;
+    font-size: 12px;
+    &.m-disabled {
+        opacity: .4;
+        cursor: default;
+    }
+    SVG {
+        flex: 0 0 auto;
+        opacity: .7;
+    }
+}
+.fsr-dest-input {
+    width: 100%;
+    box-sizing: border-box;
+    margin: 2px 0 6px;
+}
+select.fsr-dest-input {
+    height: 28px;
+    padding: 2px 6px;
+}
+
+// Empty state
+.fsr-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex-grow: 2;
+    text-align: center;
+    padding: 20px 12px;
+    P {
+        margin: 0 0 14px;
+        font-size: 13px;
+        opacity: .7;
+    }
+}
+
+// Footer
+.fsr-footer {
+    display: flex;
+    gap: 8px;
+}
+.fsr-footer-cta {
+    flex-grow: 2;
+}
+
+@media (max-height: 560px) {
+    .fsr-list {
+        max-height: 190px;
+    }
+}

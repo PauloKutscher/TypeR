@@ -2312,6 +2312,105 @@ function openFolder(folderPath) {
   }
 }
 
+/**
+ * Collect font data from every text layer of a document (recursively).
+ * Returns an array of {layerName, antiAlias, typeUnit, paragraphStyle, stroke, runs}.
+ */
+function _collectDocumentFontData(doc) {
+  var results = [];
+  var walk = function (container) {
+    for (var i = 0; i < container.layers.length; i++) {
+      var layer = container.layers[i];
+      if (layer.typename === "LayerSet") {
+        walk(layer);
+        continue;
+      }
+      try {
+        if (layer.kind !== LayerKind.TEXT) continue;
+        doc.activeLayer = layer;
+        var textParams = jamText.getLayerText();
+        if (!textParams || !textParams.layerText) continue;
+        var layerText = textParams.layerText;
+        var ranges = layerText.textStyleRange || [];
+        var runs = [];
+        for (var r = 0; r < ranges.length; r++) {
+          if (ranges[r] && ranges[r].textStyle) runs.push(ranges[r].textStyle);
+        }
+        if (!runs.length) continue;
+        var paragraphStyle = null;
+        if (layerText.paragraphStyleRange && layerText.paragraphStyleRange[0]) {
+          paragraphStyle = layerText.paragraphStyleRange[0].paragraphStyle || null;
+        }
+        var stroke = null;
+        try {
+          stroke = _getLayerStroke();
+        } catch (strokeError) {}
+        results.push({
+          layerName: layer.name,
+          antiAlias: layerText.antiAlias || "antiAliasSmooth",
+          typeUnit: textParams.typeUnit || "pixelsUnit",
+          paragraphStyle: paragraphStyle,
+          stroke: stroke,
+          runs: runs,
+        });
+      } catch (layerError) {}
+    }
+  };
+  walk(doc);
+  return results;
+}
+
+/**
+ * FontScanR: open a .psd file, extract font/style data from all its text
+ * layers, then close it (unless it was already open in Photoshop).
+ * Called once per file so the panel can show per-file progress.
+ */
+function scanPsdFonts(path) {
+  if (!path) return jamJSON.stringify({ error: "badPath" });
+  var file = new File(path);
+  if (!file.exists) return jamJSON.stringify({ error: "notFound", file: path });
+  var doc = null;
+  var wasOpen = false;
+  for (var i = 0; i < app.documents.length; i++) {
+    try {
+      // Unsaved documents throw on fullName access
+      if (app.documents[i].fullName && app.documents[i].fullName.fsName === file.fsName) {
+        doc = app.documents[i];
+        wasOpen = true;
+        break;
+      }
+    } catch (fullNameError) {}
+  }
+  var previousDoc = null;
+  try {
+    previousDoc = app.activeDocument;
+  } catch (noDocError) {}
+  try {
+    if (doc) {
+      app.activeDocument = doc;
+    } else {
+      doc = app.open(file);
+    }
+    var layers = _collectDocumentFontData(doc);
+    if (!wasOpen) {
+      doc.close(SaveOptions.DONOTSAVECHANGES);
+      if (previousDoc) {
+        try {
+          app.activeDocument = previousDoc;
+        } catch (restoreError) {}
+      }
+    }
+    return jamJSON.stringify({ file: file.fsName, layers: layers });
+  } catch (scanError) {
+    if (doc && !wasOpen) {
+      try {
+        doc.close(SaveOptions.DONOTSAVECHANGES);
+      } catch (closeError) {}
+    }
+    return jamJSON.stringify({ error: "scanFailed", file: path, message: scanError && scanError.message ? scanError.message : String(scanError) });
+  }
+}
+
 function makeExecutable(filePath) {
   try {
     var os = $.os.toLowerCase();

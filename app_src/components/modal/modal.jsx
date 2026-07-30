@@ -10,6 +10,7 @@ const SettingsModal = React.lazy(() => import(/* webpackChunkName: "modal-settin
 const EditStyleModal = React.lazy(() => import(/* webpackChunkName: "modal-edit-style" */ './editStyle'));
 const EditFolderModal = React.lazy(() => import(/* webpackChunkName: "modal-edit-folder" */ './editFolder'));
 const ExportModal = React.lazy(() => import(/* webpackChunkName: "modal-export" */ './export'));
+const FontScanRModal = React.lazy(() => import(/* webpackChunkName: "modal-font-scan" */ './fontScanR'));
 const UpdateModal = React.lazy(() => import(/* webpackChunkName: "modal-update" */ './update'));
 
 class ModalErrorBoundary extends React.Component {
@@ -62,6 +63,7 @@ const Modal = React.memo(function Modal() {
     else if (modalType === 'editStyle') modalContent = <EditStyleModal />;
     else if (modalType === 'editFolder') modalContent = <EditFolderModal />;
     else if (modalType === 'export') modalContent = <ExportModal />;
+    else if (modalType === 'fontScanR') modalContent = <FontScanRModal />;
     else if (modalType === 'update') modalContent = <UpdateModal />;
 
     React.useEffect(() => {

@@ -8,6 +8,7 @@ import {MdDelete, MdCancel, MdSave} from "react-icons/md";
 import {locale, nativeAlert, nativeConfirm, getStyleObject, rgbToHex} from '../../utils';
 import {useContext} from '../../context';
 import {buildFolderTree, flattenFolderTree, collectDescendantIds} from '../../folderUtils';
+import FontScanPromo from './fontScanPromo';
 
 const EditFolderModal = React.memo(function EditFolderModal() {
     const context = useContext();
@@ -149,6 +150,7 @@ const EditFolderModal = React.memo(function EditFolderModal() {
             </div>
             <div className="app-modal-body">
                 <form className="app-modal-body-inner" onSubmit={saveFolder}>
+                    {currentData.create && <FontScanPromo />}
                     <div className="fields">
                         <div className="field">
                             <div className="field-label">

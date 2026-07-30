@@ -59,6 +59,51 @@
     flex: 0 0 auto;
 }
 
+// FontScanR promo block (create-style/create-folder modals + settings)
+.fsr-promo {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 10px;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    border-radius: 4px;
+}
+.fsr-promo-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 200px;
+    flex: 2 1 0;
+    B {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+    }
+    SPAN {
+        font-size: 11px;
+        line-height: 1.4;
+        opacity: .7;
+    }
+}
+.fsr-promo-badge {
+    font-style: normal;
+    font-size: 9px;
+    font-weight: bold;
+    letter-spacing: .5px;
+    line-height: 1;
+    padding: 3px 5px;
+    border-radius: 7px;
+    background: #3a8ee6;
+    color: #fff;
+}
+.fsr-promo-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
 .export-folder-item,
 .export-settings-item {
     display: flex;
