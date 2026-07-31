@@ -215,8 +215,17 @@ Every binding is customizable in **Settings → Shortcuts**. `Win` is TypeR's la
 | Insert text into the active layer without changing its style | `Win + V` |
 | Jump to the next page marker | `Shift + X` |
 | Toggle multi-bubble mode | `Ctrl + Alt + M` |
+| Jump to the previous page marker | Not assigned |
+| Select the previous style | Not assigned |
+| Select the next style | Not assigned |
+| Apply only the active style to the selected text layer | Not assigned |
+| Remove the last multi-bubble selection | Not assigned |
+| Clear all multi-bubble selections | Not assigned |
+| Toggle TextShapeR | Not assigned |
+| Switch to the previous tab | Not assigned |
+| Switch to the next tab | Not assigned |
 
-Shortcut behavior can vary with keyboard layouts and operating-system bindings. If a combination conflicts with another application, assign a different one in TypeR.
+Shortcut behavior can vary with keyboard layouts and operating-system bindings. If a combination conflicts with another application, assign a different one in TypeR. Settings warns when the same combination is assigned to more than one TypeR action.
 
 ## More productivity features
 
