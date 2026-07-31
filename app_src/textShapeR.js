@@ -459,8 +459,8 @@ const getSilhouetteBadness = (lengths, widthCap) => {
   if (lineCount < 2 || !(maxLength > 0)) return badness;
   // Steps measured against the longer of the two neighbours: a 2-unit line
   // beside a 10-unit line reads terribly even when the block peak is 20
-  const stepSlack = lineCount === 2 ? 0.32 : 0.55;
-  const stepWeight = lineCount === 2 ? 6 : 4;
+  const stepSlack = lineCount === 2 ? 0.32 : 0.48;
+  const stepWeight = lineCount === 2 ? 6 : 5;
   for (let index = 1; index < lineCount; index++) {
     const longer = Math.max(lengths[index], lengths[index - 1], 1);
     const step = Math.abs(lengths[index] - lengths[index - 1]) / longer;
@@ -603,7 +603,10 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
   // 1-2 line blocks are exactly what escapes bubble outlines
   const lineDelta = lineCount - profile.lineTarget;
   const lineDeltaFactor = lineDelta < 0 ? 3 : 1;
-  let score = hyphenCount * 34 + Math.pow(Math.abs(lineDelta), 1.5) * lineTargetWeight * lineDeltaFactor;
+  // Hyphenation is a last resort: the penalty must outweigh moderate shape
+  // gains so hyphen-free layouts rank first unless breaking a word is the
+  // only way to reach a pleasant silhouette
+  let score = hyphenCount * 130 + Math.pow(Math.abs(lineDelta), 1.5) * lineTargetWeight * lineDeltaFactor;
 
   const fit = profile.fit;
   if (fit) {
