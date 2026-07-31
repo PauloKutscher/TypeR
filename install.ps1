@@ -1,4 +1,4 @@
-# Encodage pour les accents dans la console
+﻿# Encodage pour les accents dans la console
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 $OutputEncoding = New-Object System.Text.UTF8Encoding
