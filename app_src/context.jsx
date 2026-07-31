@@ -4,7 +4,6 @@ import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, check
 import config from "./config";
 import { getNextLineNumberState } from "./lineNumbering";
 import { setDehyphenationEnabled } from "./textShapeR";
-import { setDebugLoggerEnabled, debugLog } from "./debugLogger";
 import { normalizeEditorTheme } from "./themePresets";
 import { applyEditorTheme } from "./lib/themeManager";
 
@@ -51,7 +50,6 @@ const storeFields = [
   "multiTabEnabled",
   "uiLayout",
   "editorTheme",
-  "debugLogger",
 ];
 
 // Fields that belong to each tab (text script + PSD sync)
@@ -255,7 +253,6 @@ const initialState = {
   styleSizeStep: 1,
   resetLineCounterOnPage: storage.data?.resetLineCounterOnPage !== false,
   multiTabEnabled: storage.data?.multiTabEnabled !== false,
-  debugLogger: storage.data?.debugLogger === true,
   ...storage.data,
   shortcut: { ...defaultShortcut, ...(storage.data?.shortcut || {}) },
   uiLayout: normalizeUiLayout(storage.data?.uiLayout),
@@ -278,7 +275,6 @@ if (!Array.isArray(initialState.tabs) || !initialState.tabs.length) {
 const reducer = (state, action) => {
   let thenScroll = false;
   let thenSelectStyle = false;
-  if (action && action.type) debugLog("action", action.type);
   const newState = Object.assign({}, state);
   switch (action.type) {
     case "removeFirstTime": {
@@ -740,11 +736,6 @@ const reducer = (state, action) => {
     break;
   }
 
-  case "setDebugLogger": {
-    newState.debugLogger = !!action.value;
-    break;
-  }
-
   case "setAutoScrollStyle": {
     newState.autoScrollStyle = !!action.value;
     break;
@@ -913,8 +904,9 @@ const reducer = (state, action) => {
 
     case "addTab": {
       const name = action.name || (locale.tabDefaultName || "Tab") + " " + (state.tabs.length + 1);
-      const tab = createTab(name);
+      const tab = createTab(name, action.data);
       newState.tabs = state.tabs.concat(tab);
+      newState.multiTabEnabled = true;
       loadTabIntoState(newState, tab);
       break;
     }
@@ -1280,9 +1272,6 @@ const ContextProvider = React.memo(function ContextProvider(props) {
   React.useEffect(() => {
     setDehyphenationEnabled(state.dehyphenateTextShapeR === true);
   }, [state.dehyphenateTextShapeR]);
-  React.useEffect(() => {
-    setDebugLoggerEnabled(state.debugLogger === true);
-  }, [state.debugLogger]);
   React.useEffect(() => {
     const direction = state.direction === "rtl" ? "rtl" : "ltr";
     document.documentElement.setAttribute("dir", direction);

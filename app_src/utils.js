@@ -1,13 +1,8 @@
 import "./lib/CSInterface";
-import { initDebugLogger, setDebugLoggerEnabled, debugLog } from "./debugLogger";
 
 const csInterface = new window.CSInterface();
 const path = csInterface.getSystemPath(window.SystemPath.EXTENSION);
 const storagePath = path + "/storage";
-
-// Install the evalScript/dispatchEvent hooks before any host call is made;
-// the enabled flag is restored from storage right after initLocale()
-initDebugLogger(csInterface, path);
 
 let locale = {};
 
@@ -575,8 +570,6 @@ const initLocale = () => {
 
 initLocale();
 
-setDebugLoggerEnabled(readStorage("debugLogger") === true);
-
 const nativeAlert = (text, title, isError) => {
   const data = JSON.stringify({ text, title, isError });
   csInterface.evalScript("nativeAlert(" + data + ")");
@@ -919,11 +912,6 @@ const registerPhotoshopEvents = () => {
   const extensionId = csInterface.getExtensionID();
   csInterface.addEventListener("com.adobe.PhotoshopJSONCallback" + extensionId, (event) => {
     photoshopEventsReceived = true;
-    debugLog(
-      "ps-event",
-      isPhotoshopSelectEvent(event) ? "layer select (slct)" : "edit (setd)",
-      event && event.data
-    );
     // A real Photoshop event means the user is working: leave idle backoff
     notePanelActivity();
     photoshopEventCallbacks.forEach((callback) => {
