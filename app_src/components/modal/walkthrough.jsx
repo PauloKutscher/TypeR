@@ -84,6 +84,7 @@ const WalkthroughModal = React.memo(function WalkthroughModal() {
   }, [context.dispatch]);
 
   const previous = () => setStepIndex((index) => Math.max(0, index - 1));
+  const skip = () => setStepIndex((index) => Math.min(steps.length - 1, index + 1));
   const next = () => {
     if (!canContinue) return;
     if (isLast) close();
@@ -103,8 +104,13 @@ const WalkthroughModal = React.memo(function WalkthroughModal() {
   );
 
   const loadSampleScript = () => {
-    context.dispatch({ type: "setText", text: SAMPLE_SCRIPT });
-    context.dispatch({ type: "setCurrentLineIndex", index: 1 });
+    context.dispatch({
+      type: "addTab",
+      data: {
+        text: SAMPLE_SCRIPT,
+        currentLineIndex: 1,
+      },
+    });
   };
 
   const currentWalkthroughStyle = React.useMemo(() => {
@@ -229,8 +235,8 @@ const WalkthroughModal = React.memo(function WalkthroughModal() {
             <span>{locale.walkthroughTaskSelection || "In Photoshop, draw a selection around a bubble, then click the button below to create a real text layer."}</span>
             {renderDone(completed.selection)}
           </div>
-          <button type="button" className={completed.selection ? "topcoat-button--large--cta" : "topcoat-button--large"} onClick={createPhotoshopTextLayer}>
-            {completed.selection ? locale.walkthroughPhotoshopLayerCreated || "Text layer created" : locale.walkthroughCreateInPhotoshop || "Create text layer in Photoshop"}
+          <button type="button" className="topcoat-button--large--cta" onClick={createPhotoshopTextLayer}>
+            {completed.selection ? locale.walkthroughPhotoshopLayerCreated || "Text layer created" : locale.walkthroughCreateInPhotoshop || "Paste text layer"}
           </button>
           {completed.selection && (
             <div className="walkthrough-result">
@@ -313,7 +319,7 @@ const WalkthroughModal = React.memo(function WalkthroughModal() {
         </div>
       </div>
       <div className="app-modal-footer hostBrdTopContrast walkthrough-footer">
-        <button type="button" className="topcoat-button--large" onClick={close}>
+        <button type="button" className="topcoat-button--large" onClick={skip} disabled={isLast}>
           <FiSkipForward size={16} /> {locale.walkthroughSkip || "Skip"}
         </button>
         <div className="walkthrough-footer-nav">

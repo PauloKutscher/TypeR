@@ -339,10 +339,151 @@
 // Settings content
 .settings-content {
     min-height: 250px;
+}
 
-    // Breathing room between consecutive shortcut rows
-    .shortcut-field + .field-mini-label {
-        margin-top: 12px;
+// Shortcuts tab: one card per shortcut with clickable keycap recorder
+.shortcut-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.shortcut-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 6px 7px 10px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.15);
+    transition: outline-color 0.15s ease;
+
+    &:hover {
+        outline: 1px solid rgba(255, 255, 255, 0.3);
+    }
+
+    .light-theme & {
+        background: rgba(0, 0, 0, 0.06);
+
+        &:hover {
+            outline: 1px solid rgba(0, 0, 0, 0.3);
+        }
+    }
+}
+
+.shortcut-row-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 12px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.shortcut-capture {
+    position: relative;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 96px;
+    max-width: 60%;
+    min-height: 26px;
+    padding: 3px 8px;
+    box-sizing: border-box;
+    border: 1px dashed rgba(255, 255, 255, 0.28);
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.2);
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+    // The real input stays invisible on top: clicking focuses it,
+    // and key presses are recorded through its onKeyDown
+    input {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        border: none;
+        opacity: 0;
+        cursor: pointer;
+    }
+
+    &.m-recording {
+        border-style: solid;
+        border-color: #288edf;
+        box-shadow: 0 0 0 1px rgba(40, 142, 223, 0.45);
+    }
+
+    .light-theme & {
+        border-color: rgba(0, 0, 0, 0.28);
+        background: rgba(0, 0, 0, 0.06);
+
+        &.m-recording {
+            border-color: #1976d2;
+            box-shadow: 0 0 0 1px rgba(25, 118, 210, 0.4);
+        }
+    }
+}
+
+.shortcut-keys {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 3px;
+    pointer-events: none;
+}
+
+.shortcut-key {
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1;
+    padding: 4px 5px;
+    border-radius: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    border-bottom-width: 2px;
+    background: rgba(255, 255, 255, 0.12);
+    white-space: nowrap;
+
+    .light-theme & {
+        border-color: rgba(0, 0, 0, 0.3);
+        background: rgba(255, 255, 255, 0.65);
+    }
+}
+
+.shortcut-plus {
+    font-size: 9px;
+    opacity: 0.55;
+}
+
+.shortcut-empty {
+    font-size: 10px;
+    font-style: italic;
+    opacity: 0.55;
+}
+
+.shortcut-clear {
+    flex: 0 0 auto;
+}
+
+// Narrow panels: stack the label above the recorder
+@media (max-width: 420px) {
+    .shortcut-row {
+        flex-wrap: wrap;
+    }
+
+    .shortcut-row-label {
+        flex: 1 1 100%;
+        white-space: normal;
+    }
+
+    .shortcut-capture {
+        flex: 1 1 auto;
+        max-width: none;
     }
 }
 
