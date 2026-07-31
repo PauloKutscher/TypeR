@@ -23,9 +23,9 @@
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    box-shadow: 0 0 6px 2px rgba(#000, .4);
+    box-shadow: 0 12px 32px rgba(#000, .4), 0 2px 8px rgba(#000, .28);
     position: absolute;
-    border-radius: 6px;
+    border-radius: 8px;
     bottom: 20px;
     right: 8px;
     left: 8px;
@@ -431,12 +431,11 @@
     transition: all 0.15s ease;
     
     &:hover {
-        outline: 1px solid rgba(255, 255, 255, 0.5);
-        opacity: 0.8;
+        outline: 1px solid rgba(255, 255, 255, 0.25);
     }
-    
+
     .light-theme &:hover {
-        outline: 1px solid rgba(0, 0, 0, 0.5);
+        outline: 1px solid rgba(0, 0, 0, 0.28);
     }
 }
 

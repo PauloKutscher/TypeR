@@ -95,6 +95,7 @@
 
 .folder-item {
   background: rgba(#000, 0.15);
+  border-radius: 5px;
   margin-bottom: 8px;
   &.m-nested {
     margin-bottom: 6px;
@@ -110,14 +111,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  border-radius: 4px;
   padding: 2px 4px;
   opacity: 0.6;
   &:hover {
-    outline: 1px solid rgba(#fff, 0.5);
+    outline: 1px solid rgba(#fff, 0.28);
     opacity: 0.8;
   }
   .light-theme &:hover {
-    outline: 1px solid rgba(#000, 0.5);
+    outline: 1px solid rgba(#000, 0.3);
   }
   .folder-item.m-open & {
     opacity: 1;
@@ -194,21 +196,23 @@
   align-items: center;
   display: flex;
   box-sizing: border-box;
+  border-radius: 3px;
   padding: 4px 4px 4px 6px;
   margin-bottom: 4px;
   opacity: 0.8;
   width: 100%;
   cursor: pointer;
   position: relative;
+  transition: background-color 0.12s ease, opacity 0.12s ease;
   &:hover {
-    outline: 1px solid rgba(#fff, 0.5);
+    outline: 1px solid rgba(#fff, 0.28);
     opacity: 1;
   }
   .light-theme &:hover {
-    outline: 1px solid rgba(#000, 0.5);
+    outline: 1px solid rgba(#000, 0.3);
   }
   &.m-current {
-    outline: 1px solid #134f7f !important;
+    outline: none !important;
     background: #288edf;
     color: #fff;
     opacity: 1;

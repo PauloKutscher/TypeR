@@ -1,0 +1,246 @@
+// Modern skin layer: flattens the legacy Topcoat widgets so the panel
+// matches current Photoshop UI (flat surfaces, soft borders, no
+// text-shadows or inset bevels). Kept subtle: same layout, same accent.
+// Custom editor themes (index.scss data-editor-theme block) still win
+// because they override with !important further down the cascade.
+
+$accent: #288edf;
+$accent-hover: #3d9ae7;
+$accent-active: #1e7dc8;
+
+// ---------------------------------------------------------------------------
+// Buttons: drop bevels, gradients and text-shadows; add micro-transitions
+// ---------------------------------------------------------------------------
+.topcoat-button,
+.topcoat-button--quiet,
+.topcoat-button--large,
+.topcoat-button--large--quiet,
+.topcoat-button--cta,
+.topcoat-button--large--cta,
+.topcoat-icon-button,
+.topcoat-icon-button--quiet,
+.topcoat-icon-button--large,
+.topcoat-icon-button--large--quiet {
+  border-radius: 4px;
+  box-shadow: none;
+  text-shadow: none;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease,
+    color 0.12s ease;
+
+  &:hover,
+  &:active,
+  &:focus {
+    box-shadow: none;
+    text-shadow: none;
+  }
+
+  &:focus-visible {
+    outline: 1px solid rgba($accent, 0.85);
+    outline-offset: 1px;
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+}
+
+// Standard buttons: translucent fills adapt to whatever panel gray
+// Photoshop is currently using, like native PS controls do.
+.dark-theme {
+  .topcoat-button,
+  .topcoat-button--large,
+  .topcoat-icon-button,
+  .topcoat-icon-button--large {
+    background: rgba(#fff, 0.09);
+    border-color: rgba(#000, 0.28);
+    color: #d9dadb;
+
+    &:hover:not(:disabled) {
+      background: rgba(#fff, 0.14);
+      border-color: rgba(#000, 0.34);
+    }
+    &:active:not(:disabled) {
+      background: rgba(#fff, 0.05);
+    }
+  }
+
+  .topcoat-button--quiet,
+  .topcoat-button--large--quiet,
+  .topcoat-icon-button--quiet,
+  .topcoat-icon-button--large--quiet {
+    background: transparent;
+    border-color: transparent;
+    color: inherit;
+
+    &:hover:not(:disabled) {
+      background: rgba(#fff, 0.08);
+      border-color: rgba(#fff, 0.12);
+    }
+    &:active:not(:disabled) {
+      background: rgba(#fff, 0.04);
+      border-color: rgba(#fff, 0.1);
+    }
+  }
+}
+
+.light-theme {
+  .topcoat-button,
+  .topcoat-button--large,
+  .topcoat-icon-button,
+  .topcoat-icon-button--large {
+    background: rgba(#fff, 0.6);
+    border-color: rgba(#000, 0.2);
+    color: #333;
+
+    &:hover:not(:disabled) {
+      background: rgba(#fff, 0.9);
+      border-color: rgba(#000, 0.28);
+    }
+    &:active:not(:disabled) {
+      background: rgba(#000, 0.05);
+    }
+  }
+
+  .topcoat-button--quiet,
+  .topcoat-button--large--quiet,
+  .topcoat-icon-button--quiet,
+  .topcoat-icon-button--large--quiet {
+    background: transparent;
+    border-color: transparent;
+    color: inherit;
+
+    &:hover:not(:disabled) {
+      background: rgba(#000, 0.07);
+      border-color: rgba(#000, 0.12);
+    }
+    &:active:not(:disabled) {
+      background: rgba(#000, 0.11);
+    }
+  }
+}
+
+// Primary (CTA) buttons: flat accent, both themes
+.topcoat-button--cta,
+.topcoat-button--large--cta,
+.topcoat-icon-button--large--cta {
+  background: $accent;
+  border-color: rgba(#000, 0.25);
+  color: #fff;
+  font-weight: 500;
+
+  &:hover:not(:disabled) {
+    background: $accent-hover;
+    border-color: rgba(#000, 0.25);
+  }
+  &:active:not(:disabled) {
+    background: $accent-active;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Inputs, textareas and selects (selects reuse .topcoat-textarea)
+// ---------------------------------------------------------------------------
+.topcoat-textarea,
+.topcoat-text-input,
+.topcoat-text-input--large {
+  border-radius: 3px;
+  box-shadow: none;
+  text-shadow: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+
+  &:focus {
+    box-shadow: 0 0 0 1px rgba($accent, 0.35);
+    border-color: $accent;
+  }
+}
+
+.dark-theme {
+  .topcoat-textarea,
+  .topcoat-text-input,
+  .topcoat-text-input--large {
+    background: rgba(#000, 0.22);
+    border-color: rgba(#000, 0.35);
+    color: #e3e4e4;
+
+    &::placeholder {
+      color: rgba(#fff, 0.35);
+      text-shadow: none;
+    }
+  }
+}
+
+.light-theme {
+  .topcoat-textarea,
+  .topcoat-text-input,
+  .topcoat-text-input--large {
+    background: #fff;
+    border-color: rgba(#000, 0.25);
+    color: #333;
+
+    &::placeholder {
+      color: rgba(#000, 0.4);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Checkboxes: accent fill when checked instead of a bare check mark
+// ---------------------------------------------------------------------------
+.settings-checkbox-custom {
+  border-radius: 3px;
+}
+
+.settings-checkbox-label input:checked + .settings-checkbox-custom,
+.settings-layout-element input:checked + .settings-checkbox-custom {
+  background: $accent;
+  border-color: $accent;
+  opacity: 1;
+
+  &::after {
+    border-color: #fff;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Scrollbars: thin rounded thumbs for the system (host) theme; custom
+// editor themes define their own further down the cascade.
+// ---------------------------------------------------------------------------
+body.dark-theme,
+body.light-theme {
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 6px;
+    background-clip: padding-box;
+  }
+}
+
+body.dark-theme ::-webkit-scrollbar-thumb {
+  background-color: rgba(#fff, 0.22);
+  background-clip: padding-box;
+
+  &:hover {
+    background-color: rgba(#fff, 0.32);
+    background-clip: padding-box;
+  }
+}
+
+body.light-theme ::-webkit-scrollbar-thumb {
+  background-color: rgba(#000, 0.25);
+  background-clip: padding-box;
+
+  &:hover {
+    background-color: rgba(#000, 0.38);
+    background-clip: padding-box;
+  }
+}
