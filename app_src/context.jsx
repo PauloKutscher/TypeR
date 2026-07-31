@@ -3,7 +3,7 @@ import PropTypes from "prop-types";
 import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, checkUpdate } from "./utils";
 import config from "./config";
 import { getNextLineNumberState } from "./lineNumbering";
-import { setDehyphenationEnabled } from "./textShapeR";
+import { setDehyphenationEnabled, setTextShapeRTuning } from "./textShapeR";
 import { normalizeEditorTheme } from "./themePresets";
 import { applyEditorTheme } from "./lib/themeManager";
 import { getDefaultShortcuts } from "./shortcutCommands";
@@ -41,8 +41,10 @@ const storeFields = [
   "exportFolderFontTipDismissed",
   "showQuickStyleSize",
   "inlineTextShapeR",
+  "textShapeRPerformanceTipShown",
   "textShapeRBubbleAware",
   "dehyphenateTextShapeR",
+  "textShapeRTuning",
   "internalPadding",
   "interpretMarkdown",
   "styleSizeStep",
@@ -228,8 +230,11 @@ const initialState = {
   exportFolderFontTipVisible: false,
   showQuickStyleSize: storage.data?.showQuickStyleSize !== false,
   inlineTextShapeR: storage.data?.inlineTextShapeR !== false,
+  textShapeRPerformanceTipShown: storage.data?.textShapeRPerformanceTipShown === true,
+  textShapeRPerformanceTipVisible: false,
   textShapeRBubbleAware: storage.data?.textShapeRBubbleAware !== false,
   dehyphenateTextShapeR: storage.data?.dehyphenateTextShapeR === true,
+  textShapeRTuning: storage.data?.textShapeRTuning || null,
   modalType: null,
   modalData: {},
   images: [],
@@ -806,6 +811,16 @@ const reducer = (state, action) => {
 
     case "setShowTips": {
       newState.showTips = !!action.value;
+      if (!newState.showTips) {
+        newState.textShapeRPerformanceTipVisible = false;
+      } else if (
+        newState.inlineTextShapeR &&
+        newState.uiLayout?.visible?.preview !== false &&
+        !newState.textShapeRPerformanceTipShown
+      ) {
+        newState.textShapeRPerformanceTipShown = true;
+        newState.textShapeRPerformanceTipVisible = true;
+      }
       break;
     }
 
@@ -829,12 +844,40 @@ const reducer = (state, action) => {
       newState.inlineTextShapeR = !!action.value;
       if (newState.inlineTextShapeR) {
         newState.textShapeRBubbleAware = true;
+        if (
+          state.showTips !== false &&
+          state.uiLayout?.visible?.preview !== false &&
+          !state.textShapeRPerformanceTipShown
+        ) {
+          newState.textShapeRPerformanceTipShown = true;
+          newState.textShapeRPerformanceTipVisible = true;
+        }
+      } else {
+        newState.textShapeRPerformanceTipVisible = false;
       }
+      break;
+    }
+
+    case "showTextShapeRPerformanceTip": {
+      if (newState.inlineTextShapeR && newState.showTips !== false && !newState.textShapeRPerformanceTipShown) {
+        newState.textShapeRPerformanceTipShown = true;
+        newState.textShapeRPerformanceTipVisible = true;
+      }
+      break;
+    }
+
+    case "hideTextShapeRPerformanceTip": {
+      newState.textShapeRPerformanceTipVisible = false;
       break;
     }
 
     case "setTextShapeRBubbleAware": {
       newState.textShapeRBubbleAware = !!action.value;
+      break;
+    }
+
+    case "setTextShapeRTuning": {
+      newState.textShapeRTuning = action.value || null;
       break;
     }
 
@@ -1336,6 +1379,9 @@ const ContextProvider = React.memo(function ContextProvider(props) {
   React.useEffect(() => {
     setDehyphenationEnabled(state.dehyphenateTextShapeR === true);
   }, [state.dehyphenateTextShapeR]);
+  React.useEffect(() => {
+    setTextShapeRTuning(state.textShapeRTuning);
+  }, [state.textShapeRTuning]);
   React.useEffect(() => {
     const direction = state.direction === "rtl" ? "rtl" : "ltr";
     document.documentElement.setAttribute("dir", direction);

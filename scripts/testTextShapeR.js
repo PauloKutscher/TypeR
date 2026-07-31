@@ -36,6 +36,8 @@ const {
   estimateManualLineCount,
   generateManualTextShapeRVariant,
   generateTextShapeRVariants,
+  recordTextShapeRFeedback,
+  setTextShapeRTuning,
   visibleLength,
   visibleWidth,
 } = loadAppModule("app_src/textShapeR.js");
@@ -193,5 +195,129 @@ bestWidths.forEach((width, index) => {
   if (!index) return;
   assert.ok(Math.abs(width - bestWidths[index - 1]) / bubbleMax <= 0.6, `abrupt width jump in\n${bubbleBest.text}`);
 });
+
+// Feedback learning: marking a hand-typeset shape as ideal must return
+// bounded tuning knobs, bias future suggestions toward that style, and be
+// fully reversible by resetting the tuning
+const feedbackText = "Je crois que nous devrions vraiment partir avant que la nuit tombe sur la ville.";
+const baselineTop = generateTextShapeRVariants(feedbackText, { limit: 12, profile: "balanced" })[0];
+const chosenShape = "Je crois que\nnous devrions\nvraiment partir\navant que la\nnuit tombe\nsur la ville.";
+const feedback = recordTextShapeRFeedback(chosenShape, { limit: 12, profile: "balanced" }, null);
+assert.ok(feedback, "feedback should be recorded");
+assert.strictEqual(feedback.tuning.samples, 1);
+assert.strictEqual(feedback.chosenLineCount, 6);
+// The chosen shape is taller than the baseline top: the bias must lean up
+assert.ok(feedback.tuning.lineTargetBias > 0);
+// The chosen shape uses no hyphen: the hyphen penalty must not decrease
+assert.ok(feedback.tuning.hyphenPenaltyScale >= 1);
+// The rich style profile captures the shape's signature, not just its count
+assert.ok(feedback.tuning.style, "a style profile should be learned");
+assert.strictEqual(feedback.tuning.style.silhouette.length, 7);
+assert.ok(feedback.tuning.style.density > 0, "density (text per line) should be learned");
+assert.ok(feedback.tuning.style.stepMean >= 0, "neighbour step preference should be learned");
+// One click stores the shape itself as a contextual exemplar and trains the
+// pairwise ranking weights on interpretable features
+assert.ok(feedback.tuning.weights, "ranking weights should be learned from the first click");
+assert.strictEqual(feedback.tuning.exemplars.length, 1, "the validated shape should be stored as an exemplar");
+assert.strictEqual(feedback.tuning.exemplars[0].lineCount, 6);
+assert.ok(feedback.tuning.exemplars[0].units > 0);
+assert.strictEqual(feedback.tuning.exemplars[0].curve.length, 7);
+setTextShapeRTuning(feedback.tuning);
+const tunedVariants = generateTextShapeRVariants(feedbackText, { limit: 12, profile: "balanced" });
+const tunedTop = tunedVariants[0];
+assert.ok(tunedTop.lines.length >= baselineTop.lines.length, "tuned top should not get shorter");
+// The exemplar is injected into the candidate list for its own text: the
+// user's shape always competes, even when the generator would never build it
+assert.ok(tunedVariants.some((variant) => variant.text === chosenShape),
+  "the validated shape must appear among candidates after one click");
+// A second feedback pass accumulates instead of restarting
+const secondFeedback = recordTextShapeRFeedback(chosenShape, { limit: 12, profile: "balanced" }, feedback.tuning);
+assert.strictEqual(secondFeedback.tuning.samples, 2);
+// Repeated feedback on the same style converges: the exact hand-made shape
+// must climb the ranking until it sits at (or right next to) the top
+let convergedTuning = null;
+for (let pass = 0; pass < 3; pass++) {
+  const step = recordTextShapeRFeedback(chosenShape, { limit: 12, profile: "balanced" }, convergedTuning);
+  convergedTuning = step.tuning;
+  setTextShapeRTuning(convergedTuning);
+}
+const convergedVariants = generateTextShapeRVariants(feedbackText, { limit: 12, profile: "balanced" });
+const convergedRank = convergedVariants.findIndex((variant) => variant.text === chosenShape);
+assert.ok(convergedRank >= 0 && convergedRank <= 2,
+  `hand-made shape should rank in the top 3 after convergence, got ${convergedRank + 1}\n${convergedVariants[0].text}`);
+// Re-learning the same shape must update its exemplar, not duplicate it
+assert.strictEqual(convergedTuning.exemplars.length, 1, "same shape must not duplicate exemplars");
+// The learned density generalizes: another text of similar volume should
+// also lean toward the same text-per-line budget rather than a fixed count
+const transferVariants = generateTextShapeRVariants(
+  "Il faudra bien finir par leur dire ce qui est arrivé cette nuit-là dans la forêt.",
+  { limit: 12, profile: "balanced" }
+);
+assert.ok(transferVariants[0].lines.length >= 5,
+  `learned density should transfer to other texts, got ${transferVariants[0].lines.length} lines`);
+// Batch learning (Alt-click): several layers learned in sequence accumulate
+// samples and exemplars, each feeding the next generation pass
+setTextShapeRTuning(null);
+let batchTuning = null;
+[
+  "On ne peut pas\nrester ici toute la nuit\nsans savoir ce qui\nnous attend dehors.",
+  "Tu devrais lui parler\navant qu'il ne soit trop tard\npour changer d'avis.",
+  "Personne n'avait remarqué\nla porte entrouverte\nau fond du couloir sombre.",
+].forEach((layerTextSample) => {
+  const step = recordTextShapeRFeedback(layerTextSample, { limit: 12, profile: "balanced" }, batchTuning);
+  assert.ok(step, "batch feedback should record every layer");
+  batchTuning = step.tuning;
+});
+assert.strictEqual(batchTuning.samples, 3);
+assert.strictEqual(batchTuning.exemplars.length, 3, "each distinct layer should add an exemplar");
+// Bubble-aware learning: the exemplar records the outline signature of the
+// selection it was validated in, so same-shaped bubbles recall it first
+setTextShapeRTuning(null);
+const bubbleFeedback = recordTextShapeRFeedback(chosenShape, {
+  limit: 12,
+  profile: "balanced",
+  shapeProfile: { rows: ellipseRows },
+  width: 300,
+  height: 340,
+}, null);
+assert.strictEqual(bubbleFeedback.tuning.exemplars.length, 1);
+assert.strictEqual(bubbleFeedback.tuning.exemplars[0].bubble.length, 7,
+  "the bubble outline signature should be stored with the exemplar");
+assert.ok(Math.abs(bubbleFeedback.tuning.exemplars[0].aspect - 340 / 300) < 1e-6,
+  "the bubble aspect should be stored with the exemplar");
+// Without a selection the exemplar simply carries no bubble context
+assert.strictEqual(batchTuning.exemplars[0].bubble, null);
+setTextShapeRTuning(null);
+// Hyphenated feedback lowers the hyphen penalty and records the habit
+const hyphenFeedback = recordTextShapeRFeedback("CLYDE, JE PEUX UTI-\nLISER UN MÉDAILLON ?", { limit: 10 }, null);
+assert.ok(hyphenFeedback.tuning.hyphenPenaltyScale < 1);
+assert.strictEqual(hyphenFeedback.chosenHyphens, 1);
+assert.ok(hyphenFeedback.tuning.style.hyphenRate > 0, "hyphen habit should be learned");
+assert.ok(hyphenFeedback.tuning.style.hyphenLineY != null, "hyphen height should be learned");
+// Reset restores the exact untuned behaviour
+setTextShapeRTuning(null);
+const restoredTop = generateTextShapeRVariants(feedbackText, { limit: 12, profile: "balanced" })[0];
+assert.strictEqual(restoredTop.text, baselineTop.text);
+// Garbage tuning input must sanitize instead of breaking generation
+setTextShapeRTuning({
+  lineTargetBias: 99, hyphenPenaltyScale: -5, stepSlackDelta: "x", curveDelta: null, samples: -3,
+  style: { silhouette: "x", density: -4, stepMean: 9, hyphenRate: "y", hyphenLineY: [], punctEndRate: NaN },
+});
+assert.ok(generateTextShapeRVariants(feedbackText, { limit: 12 }).length > 0);
+setTextShapeRTuning({ samples: 5, style: { silhouette: [0.5, "a", 0.7, 0.9, 0.7, 0.5, 0.4], density: 12 } });
+assert.ok(generateTextShapeRVariants(feedbackText, { limit: 12 }).length > 0);
+// Garbage weights and exemplars must sanitize instead of breaking generation
+setTextShapeRTuning({
+  samples: 4,
+  weights: { hyphens: 9999, bogus: 5, stepMean: "x", convexity: -Infinity },
+  exemplars: [
+    { lines: "not-an-array" },
+    { lines: ["une ligne valide", "et une seconde"], units: -5, lineCount: 99, curve: [1, 2] },
+    null,
+    { lines: ["texte correct ici", "sur deux lignes"], units: 30, lineCount: 2, aspect: 1.2, hyphens: 0, curve: [0.5, 0.6, 0.8, 1, 0.8, 0.6, 0.4] },
+  ],
+});
+assert.ok(generateTextShapeRVariants(feedbackText, { limit: 12 }).length > 0);
+setTextShapeRTuning(null);
 
 console.log("TextShapeR tests passed");

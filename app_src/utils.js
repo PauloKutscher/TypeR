@@ -997,6 +997,27 @@ const undoLastTextChange = (callback = () => {}) => {
   }));
 };
 
+// Text of the active layer with its rendered line breaks: box text wraps
+// automatically and those wraps are invisible in textKey, so the host reads
+// them off a throwaway point-text copy of the layer
+const getActiveLayerRenderedText = (callback = () => {}) => {
+  csInterface.evalScript("getRenderedTextLines()", trackHostAction((result) => {
+    const data = safeJsonParse(result);
+    callback(typeof data.text === "string" && data.text ? data.text : null);
+  }));
+};
+
+// Rendered text of every visible text layer in the document, for the "learn
+// my style from the whole page" batch feedback. scanBubbles re-detects the
+// bubble outline around each layer (slower but context-precise).
+const getAllLayersRenderedTexts = (scanBubbles, callback = () => {}) => {
+  csInterface.evalScript(`getAllRenderedTextLines(${JSON.stringify({ scanBubbles: !!scanBubbles })})`, trackHostAction((result) => {
+    const data = safeJsonParse(result);
+    const entries = Array.isArray(data.entries) ? data.entries : [];
+    callback(entries.filter((entry) => entry && typeof entry.text === "string" && entry.text));
+  }));
+};
+
 const getSelectionChanged = (callback = () => {}) => {
   csInterface.evalScript("getSelectionChanged()", (result) => {
     const data = safeJsonParse(result);
@@ -1334,4 +1355,4 @@ const scanPsdFonts = (path, callback) => {
   );
 };
 
-export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, notePanelActivity, isPanelIdle, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
+export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, notePanelActivity, isPanelIdle, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };

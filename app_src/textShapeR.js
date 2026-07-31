@@ -85,6 +85,150 @@ const setDehyphenationEnabled = (enabled) => {
   dehyphenationEnabled = enabled === true;
 };
 
+// "This shape is the best" feedback nudges a few bounded scoring knobs so the
+// generator drifts toward the silhouettes the user actually keeps. Every knob
+// is clamped: feedback fine-tunes the ranking, it can never break generation.
+const TUNING_DEFAULTS = {
+  samples: 0,
+  lineTargetBias: 0, // EMA of (chosen line count - top suggestion's), [-2, 2]
+  hyphenPenaltyScale: 1, // scales the per-hyphen score penalty, [0.4, 2.5]
+  stepSlackDelta: 0, // extra tolerance on neighbour width steps, [0, 0.15]
+  curveDelta: 0, // sharper (+) or flatter (-) silhouette curve, [-0.25, 0.3]
+  style: null, // rich learned style profile, see sanitizeStyle
+};
+
+// The rich style profile goes beyond scalar knobs: each feedback sample
+// accumulates a signature of the shape the user actually kept — silhouette
+// curve, text quantity per line, neighbour contrast, hyphen and punctuation
+// habits — and scoring then measures every candidate against that signature.
+// Every field is an EMA over samples; null means "never observed yet".
+const STYLE_RESOLUTION = 7;
+
+const sanitizeStyle = (raw) => {
+  if (!raw || typeof raw !== "object") return null;
+  const pick = (key, min, max) => {
+    const value = Number(raw[key]);
+    return Number.isFinite(value) ? clamp(value, min, max) : null;
+  };
+  const silhouette = Array.isArray(raw.silhouette) && raw.silhouette.length === STYLE_RESOLUTION
+    && raw.silhouette.every((value) => Number.isFinite(Number(value)))
+    ? raw.silhouette.map((value) => clamp(Number(value), 0.02, 1))
+    : null;
+  const style = {
+    silhouette, // normalized width curve resampled at STYLE_RESOLUTION heights
+    density: pick("density", 2, 80), // preferred text per line, measure units
+    stepMean: pick("stepMean", 0, 0.8), // preferred neighbour width contrast
+    hyphenRate: pick("hyphenRate", 0, 1), // fraction of breaks hyphenated
+    hyphenLineY: pick("hyphenLineY", 0, 1), // preferred hyphen height in block
+    punctEndRate: pick("punctEndRate", 0, 1), // breaks landing on punctuation
+  };
+  const hasSignal = style.silhouette || style.density != null || style.stepMean != null
+    || style.hyphenRate != null || style.hyphenLineY != null || style.punctEndRate != null;
+  return hasSignal ? style : null;
+};
+
+// Pairwise learning-to-rank: every candidate maps to this fixed vector of
+// normalized (~0..1) interpretable features, and feedback adjusts one bounded
+// weight per feature so the shapes the user actually keeps rank first. Caps
+// keep any single learned weight below the physical-fit penalties.
+const FEATURE_CAPS = {
+  hyphens: 110, // presence of hyphenated breaks (0..1, /2 scale)
+  lineSurplus: 45, // lines above the context target
+  lineDeficit: 55, // lines below the context target
+  stepMean: 260, // mean relative width difference between neighbours
+  stepMax: 200, // worst neighbour width jump
+  edgeTop: 170, // first line width / peak
+  edgeBottom: 170, // last line width / peak
+  peakOffset: 100, // distance of the widest line from the vertical center
+  convexity: 200, // dips before the peak + bumps after it
+  minRatio: 130, // narrowest line / peak
+  punctEnds: 50, // fraction of internal breaks landing on punctuation
+  wideLines: 130, // fraction of lines close to the width cap
+};
+
+const sanitizeWeights = (raw) => {
+  if (!raw || typeof raw !== "object") return null;
+  const weights = {};
+  let hasSignal = false;
+  Object.keys(FEATURE_CAPS).forEach((key) => {
+    const value = Number(raw[key]);
+    if (Number.isFinite(value) && value !== 0) {
+      weights[key] = clamp(value, -FEATURE_CAPS[key], FEATURE_CAPS[key]);
+      hasSignal = true;
+    }
+  });
+  return hasSignal ? weights : null;
+};
+
+// Exemplar memory: the actual shapes the user validated, kept verbatim with
+// their context (text volume, bubble aspect). Scoring measures candidates
+// against the exemplars whose context matches instead of a global average —
+// that is what makes suggestions follow the user's style case by case.
+// Sliding window of validated shapes. Cheap to hold (a few hundred bytes
+// each, matched by one linear scan per generation, scoring only ever uses
+// the 3 nearest) — the cap only bounds how far back the memory reaches, and
+// batch learning fills ~15 per page, so keep room for a dozen pages or so
+const MAX_EXEMPLARS = 200;
+
+const sanitizeExemplars = (raw) => {
+  if (!Array.isArray(raw)) return null;
+  const exemplars = [];
+  raw.forEach((entry) => {
+    if (exemplars.length >= MAX_EXEMPLARS || !entry || typeof entry !== "object") return;
+    const lines = Array.isArray(entry.lines)
+      ? entry.lines.map((line) => String(line || "").slice(0, 160).trim()).filter(Boolean).slice(0, 12)
+      : null;
+    if (!lines || !lines.length) return;
+    const units = Number(entry.units);
+    if (!Number.isFinite(units) || units <= 0) return;
+    const aspect = Number(entry.aspect);
+    const sanitizeCurve = (value) => (
+      Array.isArray(value) && value.length === STYLE_RESOLUTION
+        && value.every((sample) => Number.isFinite(Number(sample)))
+        ? value.map((sample) => clamp(Number(sample), 0, 1))
+        : null
+    );
+    exemplars.push({
+      lines,
+      units: clamp(units, 1, 4000),
+      lineCount: clamp(Math.round(Number(entry.lineCount)) || lines.length, 1, 12),
+      aspect: Number.isFinite(aspect) ? clamp(aspect, 0.1, 10) : null,
+      hyphens: Math.max(0, Math.round(Number(entry.hyphens) || 0)),
+      curve: sanitizeCurve(entry.curve),
+      // Outline signature of the bubble the shape was validated in: lets the
+      // matcher pick exemplars from same-shaped bubbles, not just same ratio
+      bubble: sanitizeCurve(entry.bubble),
+    });
+  });
+  return exemplars.length ? exemplars : null;
+};
+
+const sanitizeTuning = (raw) => {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const pick = (key, min, max) => {
+    const value = Number(source[key]);
+    return Number.isFinite(value) ? clamp(value, min, max) : TUNING_DEFAULTS[key];
+  };
+  return {
+    samples: Math.max(0, Math.floor(Number(source.samples) || 0)),
+    lineTargetBias: pick("lineTargetBias", -2, 2),
+    hyphenPenaltyScale: pick("hyphenPenaltyScale", 0.4, 2.5),
+    stepSlackDelta: pick("stepSlackDelta", 0, 0.15),
+    curveDelta: pick("curveDelta", -0.25, 0.3),
+    style: sanitizeStyle(source.style),
+    weights: sanitizeWeights(source.weights),
+    exemplars: sanitizeExemplars(source.exemplars),
+  };
+};
+
+let tuning = { ...TUNING_DEFAULTS };
+// Bumped on every tuning change so cached variant lists never survive it
+let tuningRevision = 0;
+const setTextShapeRTuning = (next) => {
+  tuning = sanitizeTuning(next);
+  tuningRevision++;
+};
+
 const dehyphenate = (text) => {
   if (!dehyphenationEnabled || text.indexOf("- ") === -1) return text;
   return text.replace(DEHYPHENATE_PATTERN, (match, before, after) => {
@@ -459,7 +603,7 @@ const getSilhouetteBadness = (lengths, widthCap) => {
   if (lineCount < 2 || !(maxLength > 0)) return badness;
   // Steps measured against the longer of the two neighbours: a 2-unit line
   // beside a 10-unit line reads terribly even when the block peak is 20
-  const stepSlack = lineCount === 2 ? 0.32 : 0.48;
+  const stepSlack = (lineCount === 2 ? 0.32 : 0.48) + tuning.stepSlackDelta;
   const stepWeight = lineCount === 2 ? 6 : 5;
   for (let index = 1; index < lineCount; index++) {
     const longer = Math.max(lengths[index], lengths[index - 1], 1);
@@ -571,6 +715,208 @@ const scoreSilhouetteAesthetics = (lengths, profile) => {
   return score;
 };
 
+// Normalized width curve of a block, resampled at fixed relative heights so
+// silhouettes of different line counts become directly comparable signatures
+const resampleSilhouette = (lengths) => {
+  const lineCount = lengths.length;
+  const peak = Math.max.apply(null, lengths);
+  if (!(peak > 0) || lineCount < 1) return null;
+  const curve = new Array(STYLE_RESOLUTION);
+  for (let index = 0; index < STYLE_RESOLUTION; index++) {
+    const position = ((index + 0.5) / STYLE_RESOLUTION) * lineCount - 0.5;
+    const low = clamp(Math.floor(position), 0, lineCount - 1);
+    const high = Math.min(low + 1, lineCount - 1);
+    const ratio = clamp(position - low, 0, 1);
+    const width = lengths[low] + (lengths[high] - lengths[low]) * ratio;
+    curve[index] = clamp(width / peak, 0, 1);
+  }
+  return curve;
+};
+
+const meanAdjacentStep = (lengths) => {
+  if (lengths.length < 2) return 0;
+  let sum = 0;
+  for (let index = 1; index < lengths.length; index++) {
+    sum += Math.abs(lengths[index] - lengths[index - 1]) / Math.max(lengths[index], lengths[index - 1], 1);
+  }
+  return sum / (lengths.length - 1);
+};
+
+// Learned terms fade in over the first few feedbacks: one sample nudges the
+// ranking, four or more make the style a first-class scoring signal
+const getStyleConfidence = () => (tuning.style ? Math.min(1, tuning.samples / 4) : 0);
+
+const HYPHEN_LINE_END = /[A-Za-zÀ-ÖØ-öø-ÿ]-$/;
+
+// Mean relative height (0..1) of the hyphenated lines in a block; the last
+// line can't end with a césure so it never counts
+const getHyphenLineY = (lineTexts) => {
+  let positionSum = 0;
+  let hyphenLines = 0;
+  for (let index = 0; index < lineTexts.length - 1; index++) {
+    if (HYPHEN_LINE_END.test(lineTexts[index])) {
+      positionSum += (index + 0.5) / lineTexts.length;
+      hyphenLines++;
+    }
+  }
+  return hyphenLines ? positionSum / hyphenLines : null;
+};
+
+// Normalized (~0..1) interpretable features of a shape, shared between live
+// scoring and the pairwise ranking updates so both speak the same language
+const extractShapeFeatures = (lengths, lineTexts, hyphenCount, profile) => {
+  const lineCount = lengths.length;
+  const peak = Math.max.apply(null, lengths) || 1;
+  const target = profile.lineTarget || 4;
+  const maxLineWidth = profile.maxLineWidth || 28;
+  let stepMax = 0;
+  let stepSum = 0;
+  for (let index = 1; index < lineCount; index++) {
+    const step = Math.abs(lengths[index] - lengths[index - 1]) / Math.max(lengths[index], lengths[index - 1], 1);
+    stepSum += step;
+    if (step > stepMax) stepMax = step;
+  }
+  const peakIndex = lengths.indexOf(Math.max.apply(null, lengths));
+  const center = (lineCount - 1) / 2;
+  let convexity = 0;
+  for (let index = 1; index <= peakIndex; index++) {
+    const drop = lengths[index - 1] - lengths[index];
+    if (drop > 0) convexity += drop / peak;
+  }
+  for (let index = peakIndex + 1; index < lineCount; index++) {
+    const rise = lengths[index] - lengths[index - 1];
+    if (rise > 0) convexity += rise / peak;
+  }
+  let punctuationEnds = 0;
+  let wideLines = 0;
+  for (let index = 0; index < lineCount; index++) {
+    if (index < lineCount - 1 && endsWithBreakPunctuation(lineTexts[index])) punctuationEnds++;
+    if (lengths[index] > maxLineWidth * 0.92) wideLines++;
+  }
+  return {
+    hyphens: Math.min(1, hyphenCount / 2),
+    lineSurplus: clamp((lineCount - target) / 3, 0, 1),
+    lineDeficit: clamp((target - lineCount) / 3, 0, 1),
+    stepMean: lineCount > 1 ? clamp(stepSum / (lineCount - 1), 0, 1) : 0,
+    stepMax: clamp(stepMax, 0, 1),
+    edgeTop: clamp(lengths[0] / peak, 0, 1),
+    edgeBottom: clamp(lengths[lineCount - 1] / peak, 0, 1),
+    peakOffset: center > 0 ? clamp(Math.abs(peakIndex - center) / center, 0, 1) : 0,
+    convexity: clamp(convexity, 0, 1),
+    minRatio: clamp(Math.min.apply(null, lengths) / peak, 0, 1),
+    punctEnds: lineCount > 1 ? punctuationEnds / (lineCount - 1) : 0,
+    wideLines: wideLines / lineCount,
+  };
+};
+
+const dotFeatures = (weights, features) => {
+  let sum = 0;
+  for (const key in weights) {
+    if (features[key]) sum += weights[key] * features[key];
+  }
+  return sum;
+};
+
+const curveDistance = (a, b) => {
+  let distance = 0;
+  for (let index = 0; index < STYLE_RESOLUTION; index++) {
+    const diff = a[index] - b[index];
+    distance += diff * diff;
+  }
+  return distance / STYLE_RESOLUTION;
+};
+
+// Exemplars whose context (text volume, bubble aspect, bubble outline)
+// resembles the current request: preferences are conditioned on context
+// instead of averaged globally — a squat wide bubble, a tall narrow one and
+// a pointed one each keep their own learned style
+const getMatchedExemplars = (units, aspect, bubble) => {
+  const exemplars = tuning.exemplars;
+  if (!exemplars || !exemplars.length) return [];
+  const scored = exemplars.map((exemplar) => {
+    let distance = Math.abs(Math.log(exemplar.units / Math.max(1, units)));
+    if (aspect != null && exemplar.aspect != null) {
+      distance += Math.abs(Math.log(exemplar.aspect / aspect)) * 0.8;
+    } else {
+      distance += 0.25;
+    }
+    if (bubble && exemplar.bubble) {
+      // Same-shaped bubbles (round vs oval vs pointed) call for the same
+      // text shape: outline distance outweighs the coarse ratio term
+      distance += Math.sqrt(curveDistance(bubble, exemplar.bubble)) * 2.2;
+    } else if (bubble || exemplar.bubble) {
+      distance += 0.2;
+    }
+    return { exemplar, distance };
+  });
+  scored.sort((a, b) => a.distance - b.distance);
+  return scored.slice(0, 3).filter((entry) => entry.distance < 1.4).map((entry) => entry.exemplar);
+};
+
+const getExemplarConfidence = () => (
+  tuning.exemplars && tuning.exemplars.length ? Math.min(1, tuning.exemplars.length / 5) : 0
+);
+
+// Learned ranking weights: the linear term the pairwise updates trained so
+// the user's kept shapes outrank the generator's own favourites
+const scoreLearnedWeights = (lengths, lineTexts, hyphenCount, profile) => {
+  const weights = tuning.weights;
+  if (!weights) return 0;
+  return dotFeatures(weights, extractShapeFeatures(lengths, lineTexts, hyphenCount, profile));
+};
+
+// Exemplar affinity: silhouette distance to the closest context-matched
+// exemplar. This is what "propose shapes in my style" means concretely.
+const scoreExemplarAffinity = (lengths, profile) => {
+  const curves = profile.exemplarCurves;
+  if (!curves || !curves.length || lengths.length < 2) return 0;
+  const confidence = getExemplarConfidence();
+  if (confidence <= 0) return 0;
+  const curve = resampleSilhouette(lengths);
+  if (!curve) return 0;
+  let best = Infinity;
+  curves.forEach((exemplarCurve) => {
+    const distance = curveDistance(curve, exemplarCurve);
+    if (distance < best) best = distance;
+  });
+  return Number.isFinite(best) ? best * 700 * confidence : 0;
+};
+
+// Style affinity: distance between a candidate and the learned profile.
+// Bounded weights keep it below the physical-fit penalties, but decisive
+// between shapes of comparable geometric quality.
+const scoreStyleAffinity = (lengths, lines, hyphenCount) => {
+  const style = tuning.style;
+  const confidence = getStyleConfidence();
+  if (!style || confidence <= 0) return 0;
+  let score = 0;
+  if (style.silhouette && lengths.length >= 2) {
+    const curve = resampleSilhouette(lengths);
+    if (curve) {
+      let distance = 0;
+      for (let index = 0; index < STYLE_RESOLUTION; index++) {
+        const diff = curve[index] - style.silhouette[index];
+        distance += diff * diff;
+      }
+      score += (distance / STYLE_RESOLUTION) * 420 * confidence;
+    }
+  }
+  if (style.stepMean != null && lengths.length >= 2) {
+    // The user keeps a consistent contrast between neighbouring lines:
+    // both flatter and steppier candidates drift away from their style
+    const excess = Math.abs(meanAdjacentStep(lengths) - style.stepMean) - 0.05;
+    if (excess > 0) score += excess * excess * 520 * confidence;
+  }
+  if (style.hyphenLineY != null && hyphenCount > 0) {
+    const candidateY = getHyphenLineY(lines.map((line) => lineText(line)));
+    if (candidateY != null) {
+      const offset = Math.abs(candidateY - style.hyphenLineY);
+      score += Math.max(0, offset - 0.12) * 90 * confidence;
+    }
+  }
+  return score;
+};
+
 const scoreCandidate = (lines, hyphenCount, profile) => {
   const lengths = lines.map((line) => lineLength(line));
   const lineCount = lines.length;
@@ -589,7 +935,7 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
     const rowTotal = rowWeights.reduce((sum, weight) => sum + weight, 0) || 1;
     targets = rowWeights.map((weight) => (totalLength * weight) / rowTotal);
   } else {
-    const weights = buildWeights(lineCount, profile.scoreCurve || 0.65, 0, profile.minWeight);
+    const weights = buildWeights(lineCount, (profile.scoreCurve || 0.65) + tuning.curveDelta, 0, profile.minWeight);
     const weightTotal = weights.reduce((sum, weight) => sum + weight, 0) || 1;
     targets = weights.map((weight) => (totalLength * weight) / weightTotal);
   }
@@ -606,7 +952,7 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
   // Hyphenation is a last resort: the penalty must outweigh moderate shape
   // gains so hyphen-free layouts rank first unless breaking a word is the
   // only way to reach a pleasant silhouette
-  let score = hyphenCount * 130 + Math.pow(Math.abs(lineDelta), 1.5) * lineTargetWeight * lineDeltaFactor;
+  let score = hyphenCount * 130 * tuning.hyphenPenaltyScale + Math.pow(Math.abs(lineDelta), 1.5) * lineTargetWeight * lineDeltaFactor;
 
   const fit = profile.fit;
   if (fit) {
@@ -624,6 +970,14 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
       if (excess > 0) score += 60 + excess * excess * 1600;
     });
   }
+  // Learned punctuation habit scales the break-at-punctuation reward toward
+  // how often the user's own shapes actually end lines on punctuation
+  let punctuationBonus = profile.punctuationBreakBonus || 0;
+  const styleConfidence = getStyleConfidence();
+  if (styleConfidence > 0 && tuning.style.punctEndRate != null) {
+    const preferredScale = 0.4 + tuning.style.punctEndRate * 1.6;
+    punctuationBonus *= 1 + (preferredScale - 1) * styleConfidence;
+  }
   lengths.forEach((length, index) => {
     const target = targets[index] || 1;
     const relative = (length - target) / target;
@@ -635,9 +989,17 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
     if (lineCount > 3 && visibleLength(lineText(lines[index])) <= 4) score += 8;
     if (/^[.,;:!?]+$/.test(serializeLines([lines[index]]))) score += 40;
     if (index < lineCount - 1 && endsWithBreakPunctuation(lineText(lines[index]))) {
-      score -= profile.punctuationBreakBonus || 0;
+      score -= punctuationBonus;
     }
   });
+
+  score += scoreStyleAffinity(lengths, lines, hyphenCount);
+
+  if (tuning.weights || (profile.exemplarCurves && profile.exemplarCurves.length)) {
+    const lineTexts = lines.map((line) => lineText(line));
+    if (tuning.weights) score += scoreLearnedWeights(lengths, lineTexts, hyphenCount, profile);
+    score += scoreExemplarAffinity(lengths, profile);
+  }
 
   if (shapeRows && maxLength > 0 && lineCount > 1) {
     // With a real outline each width step should match the outline's step...
@@ -714,6 +1076,22 @@ const getProfileWidthAt = (rows, y) => {
     return prev.width + (next.width - prev.width) * ratio;
   }
   return last.width;
+};
+
+// Normalized outline signature of a bubble selection: widths sampled at
+// STYLE_RESOLUTION heights, peak-normalized so bubbles of any size compare —
+// this is what "round bubble" vs "pointed bubble" looks like to the matcher
+const getBubbleSignature = (rows) => {
+  if (!rows || rows.length < 2) return null;
+  const samples = [];
+  let peak = 0;
+  for (let index = 0; index < STYLE_RESOLUTION; index++) {
+    const width = getProfileWidthAt(rows, (index + 0.5) / STYLE_RESOLUTION) || 0;
+    samples.push(width);
+    if (width > peak) peak = width;
+  }
+  if (peak <= 0) return null;
+  return samples.map((value) => clamp(value / peak, 0.02, 1));
 };
 
 // Fraction of the bubble kept as breathing room between text and outline
@@ -958,6 +1336,8 @@ const variantCache = new Map();
 const getVariantCacheKey = (text, options) => JSON.stringify([
   // The toggle changes normalization, so cached entries must not cross it
   dehyphenationEnabled,
+  // Feedback tuning changes scoring: cached lists must not survive it
+  tuningRevision,
   text,
   options.profile || null,
   options.limit || null,
@@ -1013,6 +1393,10 @@ const generateTextShapeRVariants = (text, options = {}) => {
   const isWideBubble = aspect != null && aspect <= 0.85;
   // Tall bubbles want narrower lines, wide ones can afford longer lines
   const aspectStretch = aspect == null ? 1 : clamp(Math.sqrt(aspect), 0.7, 1.45);
+  // Exemplars validated in a similar context (text volume, bubble ratio and
+  // outline): their silhouettes and densities carry the user's style here
+  const bubbleSignature = getBubbleSignature(shapeRows);
+  const matchedExemplars = getMatchedExemplars(totalUnits, aspect, bubbleSignature);
   let scoringProfile = profile;
   let shapeTargetSettings = null;
   if (aspect == null && shapeRows.length <= 1) {
@@ -1057,6 +1441,40 @@ const generateTextShapeRVariants = (text, options = {}) => {
       floor: 0.14,
     };
   }
+  const styleConfidence = getStyleConfidence();
+  let learnedDensity = styleConfidence > 0 && tuning.style.density ? tuning.style.density : null;
+  let densityConfidence = styleConfidence;
+  if (matchedExemplars.length) {
+    // Context-matched exemplars know this case better than the global EMA:
+    // their own text-per-line density dominates the blend
+    const localDensity = matchedExemplars.reduce((sum, exemplar) => sum + exemplar.units / exemplar.lineCount, 0) / matchedExemplars.length;
+    learnedDensity = learnedDensity ? localDensity * 0.7 + learnedDensity * 0.3 : localDensity;
+    densityConfidence = Math.max(densityConfidence, getExemplarConfidence());
+  }
+  if (tuning.lineTargetBias || learnedDensity) {
+    // Learned preference: the coarse taller/shorter bias shifts the target,
+    // and the learned density (text quantity per line) derives the count the
+    // user's own shapes would give this exact text — it generalizes across
+    // texts of any length instead of replaying a fixed line-count delta
+    let learnedTarget = scoringProfile.lineTarget + tuning.lineTargetBias;
+    if (learnedDensity) {
+      const densityLines = totalUnits / learnedDensity;
+      learnedTarget += (densityLines - learnedTarget) * 0.65 * densityConfidence;
+    }
+    if (fit) {
+      // The bubble's physical capacity keeps the upper hand: style can move
+      // the calibrated estimate by one line, never further
+      learnedTarget = clamp(learnedTarget, scoringProfile.lineTarget - 1, scoringProfile.lineTarget + 1);
+    }
+    const biasedTarget = clamp(
+      Math.round(learnedTarget),
+      1,
+      Math.max(1, Math.min(8, granularityMaxLines))
+    );
+    if (biasedTarget !== scoringProfile.lineTarget) {
+      scoringProfile = { ...scoringProfile, lineTarget: biasedTarget };
+    }
+  }
   if (fit) {
     // Cap line width by what the widest part of the bubble physically holds
     const widestRow = fit.rows
@@ -1068,6 +1486,12 @@ const generateTextShapeRVariants = (text, options = {}) => {
       fit,
       maxLineWidth: clamp(Math.min(scoringProfile.maxLineWidth || 28, absoluteMax), 6, 60),
     };
+  }
+  // Candidates are scored against the matched exemplars' silhouettes: "in my
+  // style" becomes "close to a shape I actually kept in a similar context"
+  const exemplarCurves = matchedExemplars.map((exemplar) => exemplar.curve).filter(Boolean);
+  if (exemplarCurves.length) {
+    scoringProfile = { ...scoringProfile, exemplarCurves };
   }
   const baseMinLines = words.length <= 2 ? 1 : profile.minLines;
   let minLines = Math.min(Math.max(1, baseMinLines), Math.max(1, words.length));
@@ -1160,13 +1584,39 @@ const generateTextShapeRVariants = (text, options = {}) => {
     });
   }
 
+  // The user's own validated shapes for this exact text always compete: the
+  // DP grid may never produce them, and a shape that never appears in the
+  // list is a shape the ranking can never learn from
+  if (tuning.exemplars && tuning.exemplars.length) {
+    tuning.exemplars.forEach((exemplar) => {
+      if (normalizeText(exemplar.lines.join(" ")) !== normalized) return;
+      const exemplarText = exemplar.lines.join("\n");
+      if (resultMap.has(exemplarText)) {
+        resultMap.get(exemplarText).injected = true;
+        return;
+      }
+      const tokenLines = exemplar.lines.map((line) => makeBaseTokens(mergePunctuationWords(splitWordsPreservingMarkdown(line))));
+      if (tokenLines.some((tokens) => !tokens.length)) return;
+      resultMap.set(exemplarText, {
+        id: `shape-${resultMap.size + 1}`,
+        text: exemplarText,
+        lines: exemplar.lines.slice(),
+        score: scoreCandidate(tokenLines, exemplar.hyphens, scoringProfile),
+        hyphenCount: exemplar.hyphens,
+        injected: true,
+      });
+    });
+  }
+
   const limit = options.limit || MAX_VARIANTS;
   let variants = Array.from(resultMap.values());
   // A variant that physically stays inside the bubble must always outrank
   // one that escapes it, whatever their aesthetic scores say
   if (fit) {
     variants.forEach((variant) => {
-      variant.fits = variantFitsBubble(variant.lines, fit);
+      // An injected exemplar physically existed as a rendered layer in this
+      // bubble: trust that over the calibration estimate
+      variant.fits = variant.injected || variantFitsBubble(variant.lines, fit);
     });
     // Escaping the bubble is disqualifying, not just penalizing: overflowing
     // variants never reach the list while at least two alternatives fit
@@ -1178,8 +1628,27 @@ const generateTextShapeRVariants = (text, options = {}) => {
   // a shorter list of good shapes beats a full list padded with ugly ones
   const widthCap = (scoringProfile.maxLineWidth || 28) * 1.05;
   variants.forEach((variant) => {
-    variant.badness = getSilhouetteBadness(variant.lines.map(visibleWidth), widthCap);
+    variant.badness = variant.injected
+      ? 0
+      : getSilhouetteBadness(variant.lines.map(visibleWidth), widthCap);
   });
+  // Shapes close to a context-matched exemplar ARE the user's style: soften
+  // the generic quality gates instead of letting them censor that style
+  if (exemplarCurves.length) {
+    variants.forEach((variant) => {
+      if (variant.injected || variant.lines.length < 2 || variant.badness <= CLEAN_SILHOUETTE_BADNESS) return;
+      const curve = resampleSilhouette(variant.lines.map(visibleWidth));
+      if (!curve) return;
+      let best = Infinity;
+      exemplarCurves.forEach((exemplarCurve) => {
+        const distance = curveDistance(curve, exemplarCurve);
+        if (distance < best) best = distance;
+      });
+      if (best < 0.03) {
+        variant.badness *= 0.35 + 0.65 * (best / 0.03);
+      }
+    });
+  }
   const bearable = variants.filter((variant) => variant.badness <= BEARABLE_SILHOUETTE_BADNESS);
   if (bearable.length) variants = bearable;
   const clean = variants.filter((variant) => variant.badness <= CLEAN_SILHOUETTE_BADNESS);
@@ -1274,4 +1743,151 @@ const generateManualTextShapeRVariant = (text, options = {}) => {
   };
 };
 
-export { generateTextShapeRVariants, generateManualTextShapeRVariant, estimateManualLineCount, setDehyphenationEnabled, visibleLength, visibleWidth };
+// Learn from a hand-typeset layer: compare the user's final line breaks with
+// what the generator would have proposed for the same text in the same bubble
+// context, and nudge the tuning knobs toward the user's choice. Returns the
+// updated tuning (to persist) plus a small summary for the UI, or null when
+// the layer holds nothing usable.
+const recordTextShapeRFeedback = (layerText, options = {}, currentTuning = null) => {
+  const chosenLines = String(layerText || "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!chosenLines.length) return null;
+  const flatText = chosenLines.join(" ");
+  if (!normalizeText(flatText)) return null;
+  const variants = generateTextShapeRVariants(flatText, options);
+  if (!variants.length) return null;
+  const top = variants[0];
+  const next = sanitizeTuning(currentTuning || tuning);
+  // Early feedback moves the knobs fast, later feedback stabilises them
+  const alpha = 1 / Math.min(next.samples + 1, 5);
+
+  // Line count preference, relative to what the generator ranked first
+  const lineDelta = clamp(chosenLines.length - top.lines.length, -2, 2);
+  next.lineTargetBias = clamp(next.lineTargetBias + alpha * (lineDelta - next.lineTargetBias), -2, 2);
+
+  // Hyphenation preference: the user broke a word themselves, or kept their
+  // shape hyphen-free while the top suggestions used hyphens
+  const chosenHyphens = chosenLines.slice(0, -1).filter((line) => /[A-Za-zÀ-ÖØ-öø-ÿ]-$/.test(line)).length;
+  const suggestedHyphens = variants.slice(0, 3).some((variant) => variant.hyphenCount > 0);
+  if (chosenHyphens > 0) {
+    next.hyphenPenaltyScale = clamp(next.hyphenPenaltyScale * 0.85, 0.4, 2.5);
+  } else if (suggestedHyphens) {
+    next.hyphenPenaltyScale = clamp(next.hyphenPenaltyScale * 1.15, 0.4, 2.5);
+  }
+
+  const lengths = chosenLines.map(visibleWidth);
+  if (chosenLines.length >= 2) {
+    // Neighbour step tolerance: relax when the user's own shape steps harder
+    // than the quality gate allows, decay back toward strict otherwise
+    let maxStep = 0;
+    for (let index = 1; index < lengths.length; index++) {
+      const step = Math.abs(lengths[index] - lengths[index - 1]) / Math.max(lengths[index], lengths[index - 1], 1);
+      if (step > maxStep) maxStep = step;
+    }
+    const neededDelta = clamp(maxStep + 0.02 - (chosenLines.length === 2 ? 0.32 : 0.48), 0, 0.15);
+    next.stepSlackDelta = neededDelta > next.stepSlackDelta
+      ? neededDelta
+      : clamp(next.stepSlackDelta * (1 - 0.25 * alpha), 0, 0.15);
+  }
+  if (chosenLines.length >= 3) {
+    // Silhouette sharpness: how much shorter the user keeps the edge lines
+    // relative to the peak translates into a preferred target curve
+    const peak = Math.max.apply(null, lengths);
+    const edgeRatio = ((lengths[0] + lengths[lengths.length - 1]) / 2) / Math.max(peak, 1);
+    const profile = PROFILE_PRESETS[options.profile] || PROFILE_PRESETS.balanced;
+    const desiredCurve = clamp(1 - edgeRatio, 0.2, 1.1);
+    const sampleDelta = clamp(desiredCurve - (profile.scoreCurve || 0.65), -0.25, 0.3);
+    next.curveDelta = clamp(next.curveDelta + alpha * (sampleDelta - next.curveDelta), -0.25, 0.3);
+  }
+
+  // Rich style profile: every sample folds the signature of the kept shape
+  // into an EMA — later scoring compares candidates against this signature
+  const style = next.style || {};
+  const emaValue = (previous, sample) => (
+    previous == null || !Number.isFinite(previous) ? sample : previous + alpha * (sample - previous)
+  );
+  const totalUnits = visibleWidth(normalizeText(flatText));
+  style.density = clamp(emaValue(style.density, totalUnits / chosenLines.length), 2, 80);
+  if (chosenLines.length >= 2) {
+    const curve = resampleSilhouette(lengths);
+    if (curve) {
+      style.silhouette = style.silhouette && style.silhouette.length === STYLE_RESOLUTION
+        ? style.silhouette.map((value, index) => clamp(emaValue(value, curve[index]), 0.02, 1))
+        : curve;
+    }
+    style.stepMean = clamp(emaValue(style.stepMean, meanAdjacentStep(lengths)), 0, 0.8);
+    const breaks = chosenLines.length - 1;
+    style.hyphenRate = clamp(emaValue(style.hyphenRate, chosenHyphens / breaks), 0, 1);
+    const chosenHyphenY = getHyphenLineY(chosenLines);
+    if (chosenHyphenY != null) {
+      style.hyphenLineY = clamp(emaValue(style.hyphenLineY, chosenHyphenY), 0, 1);
+    }
+    // Punctuation habit only means something when the text offers internal
+    // punctuation to break on — never let punctuation-free texts erode it
+    const hasInternalPunctuation = /[.,;:!?…]/.test(stripMarkdownForMeasure(flatText).trim().slice(0, -1));
+    if (hasInternalPunctuation) {
+      const punctuationEnds = chosenLines.slice(0, -1).filter(endsWithBreakPunctuation).length;
+      style.punctEndRate = clamp(emaValue(style.punctEndRate, punctuationEnds / breaks), 0, 1);
+    }
+  }
+  next.style = sanitizeStyle(style);
+
+  // Pairwise learning-to-rank: the kept shape must score better (lower
+  // penalty) than every shape the generator proposed instead. Each violated
+  // pair pushes the interpretable feature weights toward the user's choice,
+  // bounded per feature so no learned habit can outweigh physical fit
+  const chosenText = chosenLines.join("\n");
+  const rankProfile = {
+    lineTarget: top.lines.length,
+    maxLineWidth: (PROFILE_PRESETS[options.profile] || PROFILE_PRESETS.balanced).maxLineWidth || 28,
+  };
+  const weights = { ...(next.weights || {}) };
+  const chosenFeatures = extractShapeFeatures(lengths, chosenLines, chosenHyphens, rankProfile);
+  variants.slice(0, 5).forEach((variant) => {
+    if (variant.text === chosenText) return;
+    const variantFeatures = extractShapeFeatures(variant.lines.map(visibleWidth), variant.lines, variant.hyphenCount, rankProfile);
+    let separation = 0;
+    for (const key in FEATURE_CAPS) {
+      separation += (weights[key] || 0) * ((variantFeatures[key] || 0) - (chosenFeatures[key] || 0));
+    }
+    // Already ranked correctly with margin: leave the weights alone
+    if (separation >= 8) return;
+    for (const key in FEATURE_CAPS) {
+      const diff = (variantFeatures[key] || 0) - (chosenFeatures[key] || 0);
+      if (!diff) continue;
+      weights[key] = clamp((weights[key] || 0) + 10 * diff, -FEATURE_CAPS[key], FEATURE_CAPS[key]);
+    }
+  });
+  next.weights = sanitizeWeights(weights);
+
+  // Exemplar memory: keep the shape itself with its context, so similar
+  // future requests are scored against it instead of a global average
+  const exemplars = (next.exemplars || []).filter((exemplar) => exemplar.lines.join("\n") !== chosenText);
+  exemplars.push({
+    lines: chosenLines.slice(),
+    units: totalUnits,
+    lineCount: chosenLines.length,
+    aspect: options.width > 0 && options.height > 0 ? clamp(options.height / options.width, 0.1, 10) : null,
+    hyphens: chosenHyphens,
+    curve: chosenLines.length >= 2 ? resampleSilhouette(lengths) : null,
+    // Bubble-aware context: the outline of the selection this shape was
+    // validated in, so same-shaped bubbles recall it first
+    bubble: getBubbleSignature(normalizeShapeRows(options.shapeProfile).filter((row) => row.width > 0)),
+  });
+  next.exemplars = sanitizeExemplars(exemplars.slice(-MAX_EXEMPLARS));
+
+  next.samples += 1;
+  const matchedRank = variants.findIndex((variant) => variant.text === chosenLines.join("\n"));
+  return {
+    tuning: next,
+    chosenLineCount: chosenLines.length,
+    topLineCount: top.lines.length,
+    matchedRank: matchedRank >= 0 ? matchedRank + 1 : null,
+    chosenHyphens,
+  };
+};
+
+export { generateTextShapeRVariants, generateManualTextShapeRVariant, estimateManualLineCount, setDehyphenationEnabled, setTextShapeRTuning, sanitizeTuning as sanitizeTextShapeRTuning, recordTextShapeRFeedback, visibleLength, visibleWidth };

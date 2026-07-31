@@ -1,7 +1,7 @@
 import React from "react";
 
 // Scales a TextShapeR variant preview down so the whole shape stays visible
-// inside its card instead of being clipped by overflow
+// inside its card, and grows it when the user gives the preview more room
 const TextShapeRFitPreview = ({ outerClassName, innerClassName, contentKey, style, children }) => {
   const outerRef = React.useRef(null);
   const innerRef = React.useRef(null);
@@ -15,7 +15,13 @@ const TextShapeRFitPreview = ({ outerClassName, innerClassName, contentKey, styl
       const width = inner.offsetWidth;
       const height = inner.offsetHeight;
       if (!width || !height) return;
-      const next = Math.min(1, outer.clientWidth / width, outer.clientHeight / height);
+      // Keep compact suggestions visually consistent: a short variant should
+      // not become much larger than a longer sibling just because it fits.
+      // The ceiling grows with the card, so expanded previews remain unbounded.
+      const breathingRoom = 0.9 + Math.min(0.1, outer.clientHeight / 4000);
+      const fittedScale = Math.min(outer.clientWidth / width, outer.clientHeight / height) * breathingRoom;
+      const compactScaleCeiling = Math.max(1.5, outer.clientHeight / 36);
+      const next = Math.min(fittedScale, compactScaleCeiling);
       setScale((current) => (Math.abs(current - next) > 0.02 ? next : current));
     };
     fit();
@@ -37,7 +43,7 @@ const TextShapeRFitPreview = ({ outerClassName, innerClassName, contentKey, styl
       <span
         ref={innerRef}
         className={innerClassName}
-        style={{ ...style, transform: scale < 1 ? `scale(${scale})` : undefined }}
+        style={{ ...style, transform: Math.abs(scale - 1) > 0.02 ? `scale(${scale})` : undefined }}
       >
         {children}
       </span>

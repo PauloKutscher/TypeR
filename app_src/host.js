@@ -81,6 +81,13 @@ var _hostState = {
     data: null,
     result: "",
   },
+  getRenderedTextLines: {
+    result: "",
+  },
+  getAllRenderedTextLines: {
+    result: "",
+    scanBubbles: false,
+  },
   createTextLayerInSelection: {
     data: null,
     result: "",
@@ -268,6 +275,38 @@ function _changeToBoxText() {
 function _layerIsTextLayer() {
   var layer = _getCurrent(charID.Layer, charID.Text);
   return layer.hasKey(charID.Text);
+}
+
+function _getActiveLayerId() {
+  var layerIdProp = stringIDToTypeID("layerID");
+  var reference = new ActionReference();
+  reference.putProperty(charID.Property, layerIdProp);
+  reference.putEnumerated(charID.Layer, charID.Ordinal, charID.Target);
+  return executeActionGet(reference).getInteger(layerIdProp);
+}
+
+function _duplicateActiveLayer() {
+  var reference = new ActionReference();
+  reference.putEnumerated(charID.Layer, charID.Ordinal, charID.Target);
+  var descriptor = new ActionDescriptor();
+  descriptor.putReference(charID.Null, reference);
+  executeAction(stringIDToTypeID("duplicate"), descriptor, DialogModes.NO);
+}
+
+function _deleteActiveLayer() {
+  var reference = new ActionReference();
+  reference.putEnumerated(charID.Layer, charID.Ordinal, charID.Target);
+  var descriptor = new ActionDescriptor();
+  descriptor.putReference(charID.Null, reference);
+  executeAction(charID.Delete, descriptor, DialogModes.NO);
+}
+
+function _selectLayerById(layerId) {
+  var reference = new ActionReference();
+  reference.putIdentifier(charID.Layer, layerId);
+  var descriptor = new ActionDescriptor();
+  descriptor.putReference(charID.Null, reference);
+  executeAction(charID.Select, descriptor, DialogModes.NO);
 }
 
 function _textLayerIsPointText() {
@@ -619,14 +658,20 @@ function _moveLayer(offsetX, offsetY) {
  * Retrieve stroke information from the active layer.
  * Returns null if no stroke is found.
  */
-function _getLayerStroke() {
+function _getLayerStroke(layerIndex) {
   // Must never throw: getActiveLayerText() serializes its result straight to
   // the panel, and an exception here would make the whole call fail and show
   // "select a text layer" even though a text layer is active.
+  // When layerIndex is provided, the layer is addressed by index so callers
+  // (FontScanR) never have to change the active layer.
   try {
     var ref = new ActionReference();
     ref.putProperty(charIDToTypeID("Prpr"), charIDToTypeID("Lefx"));
-    ref.putEnumerated(charIDToTypeID("Lyr "), charIDToTypeID("Ordn"), charIDToTypeID("Trgt"));
+    if (typeof layerIndex === "number") {
+      ref.putIndex(charIDToTypeID("Lyr "), layerIndex);
+    } else {
+      ref.putEnumerated(charIDToTypeID("Lyr "), charIDToTypeID("Ordn"), charIDToTypeID("Trgt"));
+    }
     var desc = executeActionGet(ref);
     if (!desc.hasKey(charIDToTypeID("Lefx"))) return null;
 
@@ -1752,6 +1797,151 @@ function getActiveLayerText() {
   });
 }
 
+function _getRenderedTextLines() {
+  var state = _hostState.getRenderedTextLines;
+  var originalId = null;
+  try {
+    originalId = _getActiveLayerId();
+  } catch (idError) {}
+  var duplicated = false;
+  try {
+    // Converting box text to point text makes Photoshop materialize its
+    // automatic wraps as hard returns — the only scriptable way to read the
+    // rendered line breaks. Done on a throwaway duplicate so the original
+    // layer is never modified.
+    _duplicateActiveLayer();
+    duplicated = true;
+    _changeToPointText();
+    var textParams = jamText.getLayerText();
+    if (textParams && textParams.layerText && typeof textParams.layerText.textKey === "string") {
+      state.result = textParams.layerText.textKey;
+    }
+  } catch (readError) {}
+  if (duplicated) {
+    try {
+      _deleteActiveLayer();
+    } catch (deleteError) {}
+  }
+  if (originalId !== null) {
+    try {
+      _selectLayerById(originalId);
+    } catch (selectError) {}
+  }
+}
+
+// Text of the active layer with the line breaks it actually renders with:
+// point text already holds every break in textKey, while box (paragraph)
+// text needs the duplicate-and-convert pass above to expose its wraps
+function getRenderedTextLines() {
+  if (!documents.length || !_layerIsTextLayer()) {
+    return jamJSON.stringify({ error: "layer" });
+  }
+  if (_textLayerIsPointText()) {
+    var textParams = jamText.getLayerText();
+    var text = textParams && textParams.layerText ? textParams.layerText.textKey : "";
+    return jamJSON.stringify({ text: text || "" });
+  }
+  var state = _hostState.getRenderedTextLines;
+  state.result = "";
+  app.activeDocument.suspendHistory("TyperTools Read Shape", "_getRenderedTextLines()");
+  return jamJSON.stringify({ text: state.result });
+}
+
+function _collectTextLayerIds(container, ids, limit) {
+  for (var index = 0; index < container.layers.length; index++) {
+    if (ids.length >= limit) return;
+    var layer = container.layers[index];
+    if (layer.typename === "LayerSet") {
+      _collectTextLayerIds(layer, ids, limit);
+    } else if (layer.kind === LayerKind.TEXT && layer.visible) {
+      ids.push(layer.id);
+    }
+  }
+}
+
+function _getAllRenderedTextLines() {
+  var state = _hostState.getAllRenderedTextLines;
+  var originalId = null;
+  try {
+    originalId = _getActiveLayerId();
+  } catch (idError) {}
+  // Bubble scans only run in the precise mode, and they destroy the current
+  // selection: never sacrifice one the user drew — without a selection at
+  // batch start, scans are free to run
+  var canScanBubbles = false;
+  if (state.scanBubbles) {
+    try {
+      canScanBubbles = !_getCurrentSelectionBounds();
+    } catch (selectionError) {}
+  }
+  var ids = [];
+  try {
+    _collectTextLayerIds(app.activeDocument, ids, 80);
+  } catch (collectError) {}
+  var entries = [];
+  for (var index = 0; index < ids.length; index++) {
+    try {
+      _selectLayerById(ids[index]);
+      if (!_layerIsTextLayer()) continue;
+      // Re-detect the bubble around this layer (same wand scan as the
+      // bubble-aware mode) so each learned exemplar keeps its outline context
+      var bubble = null;
+      if (canScanBubbles) {
+        try {
+          var scan = _scanActiveLayerBubble(20, 17);
+          if (scan && !scan.error && scan.bounds && scan.rows && scan.rows.length) {
+            bubble = { rows: scan.rows, width: scan.bounds.width, height: scan.bounds.height };
+          }
+        } catch (bubbleScanError) {}
+      }
+      var text = "";
+      if (_textLayerIsPointText()) {
+        var textParams = jamText.getLayerText();
+        text = textParams && textParams.layerText ? textParams.layerText.textKey : "";
+      } else {
+        // Same duplicate-and-convert trick as the single-layer read: box
+        // text only exposes its automatic wraps once converted to point text
+        var duplicated = false;
+        try {
+          _duplicateActiveLayer();
+          duplicated = true;
+          _changeToPointText();
+          var dupParams = jamText.getLayerText();
+          if (dupParams && dupParams.layerText && typeof dupParams.layerText.textKey === "string") {
+            text = dupParams.layerText.textKey;
+          }
+        } catch (readError) {}
+        if (duplicated) {
+          try {
+            _deleteActiveLayer();
+          } catch (deleteError) {}
+        }
+      }
+      if (text) entries.push({ text: text, bubble: bubble });
+    } catch (layerError) {}
+  }
+  if (originalId !== null) {
+    try {
+      _selectLayerById(originalId);
+    } catch (selectError) {}
+  }
+  state.result = jamJSON.stringify({ entries: entries });
+}
+
+// Rendered text of every visible text layer in the document, automatic box
+// wraps included: fuels the "learn from the whole page" batch feedback.
+// data.scanBubbles re-detects each layer's bubble outline (slower, precise).
+function getAllRenderedTextLines(data) {
+  if (!documents.length) {
+    return jamJSON.stringify({ error: "document" });
+  }
+  var state = _hostState.getAllRenderedTextLines;
+  state.scanBubbles = !!(data && data.scanBubbles);
+  state.result = jamJSON.stringify({ entries: [] });
+  app.activeDocument.suspendHistory("TyperTools Read Shapes", "_getAllRenderedTextLines()");
+  return state.result;
+}
+
 function setActiveLayerText(data) {
   var state = _hostState.setActiveLayerText;
   state.data = data;
@@ -2173,28 +2363,11 @@ function getCurrentSelectionShape(data) {
   return jamJSON.stringify(out);
 }
 
-function getActiveLayerBubbleShape(data) {
-  if (!documents.length) {
-    return jamJSON.stringify({ error: "doc" });
-  }
-  if (!_layerIsTextLayer()) {
-    return jamJSON.stringify({ error: "layer" });
-  }
-  if (_getCurrentSelectionBounds()) {
-    return jamJSON.stringify({ error: "hasSelection" });
-  }
-  // With several layers targeted the wand origin is ambiguous, and the user
-  // is probably lining up a batch: leave the selection alone
-  if (_getTargetLayerCount() > 1) {
-    return jamJSON.stringify({ error: "multi" });
-  }
-
-  var tolerance = data && data.tolerance ? parseInt(data.tolerance, 10) : 20;
-  if (isNaN(tolerance)) tolerance = 20;
-  var sampleCount = _normalizeShapeSampleCount(data && data.samples, 21);
-
-  var result = _withSuspendedHistory("TypeR Bubble Scan", function () {
-    return _withDialogsSuppressed(function () {
+// Core wand scan around the active text layer, shared by the interactive
+// bubble-aware mode and the batch learning pass. Destroys any selection:
+// callers must ensure none exists, or accept losing it.
+function _scanActiveLayerBubble(tolerance, sampleCount) {
+  return _withDialogsSuppressed(function () {
     var scanResult = null;
     try {
       var textBounds = _getCurrentTextLayerBounds();
@@ -2232,7 +2405,31 @@ function getActiveLayerBubbleShape(data) {
       _deselect();
     } catch (deselectError) {}
     return scanResult;
-    });
+  });
+}
+
+function getActiveLayerBubbleShape(data) {
+  if (!documents.length) {
+    return jamJSON.stringify({ error: "doc" });
+  }
+  if (!_layerIsTextLayer()) {
+    return jamJSON.stringify({ error: "layer" });
+  }
+  if (_getCurrentSelectionBounds()) {
+    return jamJSON.stringify({ error: "hasSelection" });
+  }
+  // With several layers targeted the wand origin is ambiguous, and the user
+  // is probably lining up a batch: leave the selection alone
+  if (_getTargetLayerCount() > 1) {
+    return jamJSON.stringify({ error: "multi" });
+  }
+
+  var tolerance = data && data.tolerance ? parseInt(data.tolerance, 10) : 20;
+  if (isNaN(tolerance)) tolerance = 20;
+  var sampleCount = _normalizeShapeSampleCount(data && data.samples, 21);
+
+  var result = _withSuspendedHistory("TypeR Bubble Scan", function () {
+    return _scanActiveLayerBubble(tolerance, sampleCount);
   });
   if (!result) {
     return jamJSON.stringify({ error: "shape" });
@@ -2687,18 +2884,62 @@ function openFolder(folderPath) {
  * Returns an array of {layerName, antiAlias, typeUnit, paragraphStyle, stroke, runs}.
  */
 function _collectDocumentFontData(doc) {
+  // Flat ActionManager iteration over layer indexes: no DOM tree walk and no
+  // activeLayer switching (both are very slow on layer-heavy documents).
+  // Groups (kind 7) and section bounders (kind 13) fail the kind === 3 check,
+  // so recursion is unnecessary — the index space already covers nested layers.
   var results = [];
-  var walk = function (container) {
-    for (var i = 0; i < container.layers.length; i++) {
-      var layer = container.layers[i];
-      if (layer.typename === "LayerSet") {
-        walk(layer);
-        continue;
-      }
+  var propId = charIDToTypeID("Prpr");
+  var layerId = charIDToTypeID("Lyr ");
+  var docId = charIDToTypeID("Dcmn");
+  var ordinalId = charIDToTypeID("Ordn");
+  var targetId = charIDToTypeID("Trgt");
+  var nameId = charIDToTypeID("Nm  ");
+  var layerKindId = stringIDToTypeID("layerKind");
+  var layerCountId = stringIDToTypeID("numberOfLayers");
+  var hasBackgroundId = stringIDToTypeID("hasBackgroundLayer");
+
+  var getDocProperty = function (id) {
+    var ref = new ActionReference();
+    ref.putProperty(propId, id);
+    ref.putEnumerated(docId, ordinalId, targetId);
+    return executeActionGet(ref);
+  };
+  var getLayerProperty = function (id, index) {
+    var ref = new ActionReference();
+    ref.putProperty(propId, id);
+    ref.putIndex(layerId, index);
+    return executeActionGet(ref);
+  };
+
+  var layerCount = 0;
+  try {
+    layerCount = getDocProperty(layerCountId).getInteger(layerCountId);
+  } catch (countError) {
+    return results;
+  }
+  var hasBackground = false;
+  try {
+    hasBackground = getDocProperty(hasBackgroundId).getBoolean(hasBackgroundId);
+  } catch (backgroundError) {}
+  // Layer indexes are 0-based when a background layer exists, 1-based otherwise
+  var firstIndex = hasBackground ? 0 : 1;
+  var lastIndex = hasBackground ? layerCount - 1 : layerCount;
+
+  var saveMeaningfulIds = jamEngine.meaningfulIds;
+  var saveParseFriendly = jamEngine.parseFriendly;
+  jamEngine.meaningfulIds = true;
+  jamEngine.parseFriendly = true;
+  try {
+    for (var i = firstIndex; i <= lastIndex; i++) {
       try {
-        if (layer.kind !== LayerKind.TEXT) continue;
-        doc.activeLayer = layer;
-        var textParams = jamText.getLayerText();
+        if (getLayerProperty(layerKindId, i).getInteger(layerKindId) !== 3) continue;
+        var resultObj = jamEngine.jsonGet([
+          { "property": { "<property>": "textKey" } },
+          { "layer": { "<index>": i } },
+        ]);
+        if (!("textKey" in resultObj)) continue;
+        var textParams = jamText.fromLayerTextObject(resultObj["textKey"]);
         if (!textParams || !textParams.layerText) continue;
         var layerText = textParams.layerText;
         var ranges = layerText.textStyleRange || [];
@@ -2713,10 +2954,14 @@ function _collectDocumentFontData(doc) {
         }
         var stroke = null;
         try {
-          stroke = _getLayerStroke();
+          stroke = _getLayerStroke(i);
         } catch (strokeError) {}
+        var layerName = "";
+        try {
+          layerName = getLayerProperty(nameId, i).getString(nameId);
+        } catch (nameError) {}
         results.push({
-          layerName: layer.name,
+          layerName: layerName,
           antiAlias: layerText.antiAlias || "antiAliasSmooth",
           typeUnit: textParams.typeUnit || "pixelsUnit",
           paragraphStyle: paragraphStyle,
@@ -2725,8 +2970,10 @@ function _collectDocumentFontData(doc) {
         });
       } catch (layerError) {}
     }
-  };
-  walk(doc);
+  } finally {
+    jamEngine.meaningfulIds = saveMeaningfulIds;
+    jamEngine.parseFriendly = saveParseFriendly;
+  }
   return results;
 }
 
@@ -2755,6 +3002,10 @@ function scanPsdFonts(path) {
   try {
     previousDoc = app.activeDocument;
   } catch (noDocError) {}
+  // Suppress missing-font / text-update prompts: they block the scan and every
+  // dialog Photoshop prepares slows the open down
+  var saveDialogs = app.displayDialogs;
+  app.displayDialogs = DialogModes.NO;
   try {
     if (doc) {
       app.activeDocument = doc;
@@ -2778,6 +3029,8 @@ function scanPsdFonts(path) {
       } catch (closeError) {}
     }
     return jamJSON.stringify({ error: "scanFailed", file: path, message: scanError && scanError.message ? scanError.message : String(scanError) });
+  } finally {
+    app.displayDialogs = saveDialogs;
   }
 }
 
