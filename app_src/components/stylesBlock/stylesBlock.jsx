@@ -9,13 +9,50 @@ import { MdEdit, MdLock } from "react-icons/md";
 import { CiExport } from "react-icons/ci";
 
 import config from "../../config";
-import { locale, nativeAlert, getActiveLayerText, setActiveLayerText, rgbToHex, getStyleObject } from "../../utils";
+import { locale, nativeAlert, getActiveLayerText, setActiveLayerText, rgbToHex, getStyleObject, refreshUserFonts } from "../../utils";
 import { useContext } from "../../context";
 import { buildFolderTree } from "../../folderUtils";
 import { collectFontRefs, exportZipWithFonts } from "../../fontFileExport";
+import { createFontPreviewRegistry, getFontPreviewFamily } from "../../fontPreview";
+
+const FontPreviewContext = React.createContext({ aliases: {}, css: "", revision: 0 });
 
 const StylesBlock = React.memo(function StylesBlock() {
   const context = useContext();
+  const fontTextStyles = React.useMemo(
+    () => (context.state.styles || []).map((style) => style.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {}),
+    [context.state.styles]
+  );
+  const [fontPreviewRegistry, setFontPreviewRegistry] = React.useState(() =>
+    createFontPreviewRegistry([], fontTextStyles, 0)
+  );
+  const fontPreviewRevision = React.useRef(0);
+
+  const refreshFontPreviews = React.useCallback(() => {
+    refreshUserFonts((fonts) => {
+      fontPreviewRevision.current += 1;
+      setFontPreviewRegistry(
+        createFontPreviewRegistry(fonts, fontTextStyles, fontPreviewRevision.current)
+      );
+    });
+  }, [fontTextStyles]);
+
+  React.useEffect(() => {
+    refreshFontPreviews();
+  }, [refreshFontPreviews]);
+
+  React.useEffect(() => {
+    const refreshOnVisibility = () => {
+      if (!document.hidden) refreshFontPreviews();
+    };
+    window.addEventListener("focus", refreshFontPreviews);
+    document.addEventListener("visibilitychange", refreshOnVisibility);
+    return () => {
+      window.removeEventListener("focus", refreshFontPreviews);
+      document.removeEventListener("visibilitychange", refreshOnVisibility);
+    };
+  }, [refreshFontPreviews]);
+
   const stylesByFolder = React.useMemo(() => {
     const map = new Map();
     (context.state.styles || []).forEach((style) => {
@@ -33,7 +70,8 @@ const StylesBlock = React.memo(function StylesBlock() {
     !context.state.exportFolderFontTipDismissed &&
     context.state.showTips !== false;
   return (
-    <React.Fragment>
+    <FontPreviewContext.Provider value={fontPreviewRegistry}>
+      <style type="text/css">{fontPreviewRegistry.css}</style>
       {showExportFontTip && (
         <div className="export-font-tip hostBrdBotContrast">
           <FiInfo size={14} className="export-font-tip-icon" />
@@ -77,7 +115,7 @@ const StylesBlock = React.memo(function StylesBlock() {
           <FiPlus size={18} /> {locale.addStyle}
         </button>
       </div>
-    </React.Fragment>
+    </FontPreviewContext.Provider>
   );
 });
 
@@ -348,6 +386,7 @@ const StyleItem = React.memo(function StyleItem(props) {
   const layerText = props.style.textProps?.layerText || {};
   const textStyle = layerText.textStyleRange?.[0]?.textStyle || {};
   const styleObject = getStyleObject(textStyle);
+  const fontPreviewRegistry = React.useContext(FontPreviewContext);
   const prefixes = props.style.prefixes || [];
   const context = useContext();
 
@@ -529,7 +568,12 @@ const StyleItem = React.memo(function StyleItem(props) {
         )}
       </div>
       <div className="style-name" style={styleObject}>
-        <span style={{ fontFamily: styleObject.fontFamily || "Tahoma" }}>{props.style.name}</span>
+        <span
+          key={fontPreviewRegistry.revision}
+          style={{ fontFamily: getFontPreviewFamily(textStyle, fontPreviewRegistry) }}
+        >
+          {props.style.name}
+        </span>
       </div>
       <div className="style-actions">
         {showQuickStyleSize ? (
