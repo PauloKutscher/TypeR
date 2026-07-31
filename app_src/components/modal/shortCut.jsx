@@ -6,6 +6,34 @@ const MODIFIERS = ["WIN", "CTRL", "ALT", "SHIFT"];
 const SPECIAL_KEYS = { "+": "PLUS", "-": "MINUS", "=": "EQUAL", "/": "DIVIDE", "*": "MULTIPLY" };
 const IGNORED_KEYS = ["Meta", "Control", "Alt", "Shift", "AltGraph", "CapsLock", "Dead", "Process", "Unidentified"];
 
+const IS_MAC = typeof navigator !== "undefined" && /mac/i.test(navigator.platform || "");
+
+// Stored key names -> short human-friendly keycap labels (cosmetic only,
+// the stored value keeps the host vocabulary)
+const KEY_LABELS = {
+  WIN: IS_MAC ? "Cmd" : "Win",
+  CTRL: "Ctrl",
+  SHIFT: "Shift",
+  ALT: IS_MAC ? "Opt" : "Alt",
+  ENTER: "Enter",
+  TAB: "Tab",
+  SPACE: "Space",
+  ESCAPE: "Esc",
+  BACKSPACE: "Bksp",
+  DELETE: "Del",
+  PLUS: "+",
+  MINUS: "-",
+  EQUAL: "=",
+  DIVIDE: "/",
+  MULTIPLY: "*",
+  ARROWUP: "↑",
+  ARROWDOWN: "↓",
+  ARROWLEFT: "←",
+  ARROWRIGHT: "→",
+};
+
+const keyLabel = (key) => KEY_LABELS[String(key).toUpperCase()] || key;
+
 const getLocalKeys = (e) => {
   const keys = [];
   if (e.metaKey) keys.push("WIN");
@@ -38,10 +66,14 @@ const parseHostKeys = (state) => {
 
 const Shortcut = (props) => {
   const hostQueryRef = React.useRef(0);
+  // Mirrors the hidden input's value so the keycaps can render reactively
+  const [displayKeys, setDisplayKeys] = React.useState(props.value || []);
+  const [recording, setRecording] = React.useState(false);
 
   React.useEffect(() => {
     const input = document.getElementById(`shortcut_${props.index}`);
     if (input) input.value = (props.value || []).join(" + ");
+    setDisplayKeys(props.value || []);
   }, [props.index, props.value]);
 
   const changeShortCut = (e) => {
@@ -49,6 +81,7 @@ const Shortcut = (props) => {
     const input = e.target;
     const localKeys = getLocalKeys(e);
     input.value = localKeys.join(" + ");
+    setDisplayKeys(localKeys);
 
     // Shortcuts are matched at runtime against ScriptUI's keyboardState key
     // names, which can differ from browser key names (layout, Alt symbols,
@@ -65,6 +98,7 @@ const Shortcut = (props) => {
       // keyboard; fall back to the locally captured name for it
       const keys = hostHasMainKey ? hostKeys : hostKeys.concat(localKeys.filter((key) => !MODIFIERS.includes(key)));
       input.value = keys.join(" + ");
+      setDisplayKeys(keys);
     });
   };
 
@@ -72,18 +106,47 @@ const Shortcut = (props) => {
     hostQueryRef.current++;
     const input = document.getElementById(`shortcut_${props.index}`);
     if (input) input.value = "";
+    setDisplayKeys([]);
   };
 
+  const label = locale[`shortcut_${props.index}`];
   return (
-    <React.Fragment key={props.index}>
-      <div className="field-mini-label">{locale[`shortcut_${props.index}`]}</div>
-      <div className="field-input shortcut-field">
-        <input id={`shortcut_${props.index}`} defaultValue={props.value.join(" + ")} onKeyDown={changeShortCut} className="topcoat-textarea" />
-        <button type="button" className="topcoat-icon-button--large--quiet" title={locale.delete} onClick={clearShortcut}>
-          <FiX size={14} />
-        </button>
+    <div className="shortcut-row" key={props.index}>
+      <div className="shortcut-row-label" title={label}>{label}</div>
+      <div className={"shortcut-capture" + (recording ? " m-recording" : "")}>
+        <input
+          id={`shortcut_${props.index}`}
+          defaultValue={(props.value || []).join(" + ")}
+          onKeyDown={changeShortCut}
+          onFocus={() => setRecording(true)}
+          onBlur={() => setRecording(false)}
+        />
+        <div className="shortcut-keys">
+          {displayKeys.length ? (
+            displayKeys.map((key, i) => (
+              <React.Fragment key={`${key}_${i}`}>
+                {i > 0 && <span className="shortcut-plus">+</span>}
+                <kbd className="shortcut-key">{keyLabel(key)}</kbd>
+              </React.Fragment>
+            ))
+          ) : (
+            <span className="shortcut-empty">
+              {recording
+                ? locale.shortcutPressKeys || "Press keys..."
+                : locale.shortcutNotSet || "Not set"}
+            </span>
+          )}
+        </div>
       </div>
-    </React.Fragment>
+      <button
+        type="button"
+        className="topcoat-icon-button--large--quiet shortcut-clear"
+        title={locale.delete}
+        onClick={clearShortcut}
+      >
+        <FiX size={14} />
+      </button>
+    </div>
   );
 };
 

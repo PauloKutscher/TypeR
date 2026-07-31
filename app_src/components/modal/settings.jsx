@@ -5,7 +5,6 @@ import { FaKeyboard, FaFileExport, FaFileImport } from "react-icons/fa";
 
 import config from "../../config";
 import { locale, nativeAlert, nativeConfirm, checkUpdate, readStorage, writeToStorage, deleteStorageFile, openFile } from "../../utils";
-import { clearDebugLog, revealDebugLog } from "../../debugLogger";
 import { useContext, defaultUiLayout, normalizeUiLayout } from "../../context";
 import { EDITOR_THEME_PRESETS, getEditorThemePreviewColors } from "../../themePresets";
 import Shortcut from "./shortCut";
@@ -71,7 +70,6 @@ const SettingsModal = React.memo(function SettingsModal() {
     context.state.multiTabEnabled !== false
   );
   const [editorTheme, setEditorTheme] = React.useState(context.state.editorTheme || "system");
-  const [debugLogger, setDebugLogger] = React.useState(context.state.debugLogger === true);
   const [multiTabConfirmOpen, setMultiTabConfirmOpen] = React.useState(false);
   const [edited, setEdited] = React.useState(false);
 
@@ -228,22 +226,6 @@ const SettingsModal = React.memo(function SettingsModal() {
   const changeEditorTheme = (theme) => {
     setEditorTheme(theme);
     setEdited(true);
-  };
-
-  const changeDebugLogger = (e) => {
-    setDebugLogger(e.target.checked);
-    setEdited(true);
-  };
-
-  const clearDebugLogFile = () => {
-    const success = clearDebugLog();
-    nativeAlert(
-      success
-        ? locale.settingsDebugLogClearSuccess || "Debug log cleared."
-        : locale.settingsDebugLogClearError || "Unable to clear the debug log.",
-      success ? locale.successTitle : locale.errorTitle,
-      !success
-    );
   };
 
   const toggleUiElement = (key) => {
@@ -454,9 +436,6 @@ const SettingsModal = React.memo(function SettingsModal() {
     }
     if (editorTheme !== context.state.editorTheme) {
       context.dispatch({ type: "setEditorTheme", theme: editorTheme });
-    }
-    if (debugLogger !== (context.state.debugLogger === true)) {
-      context.dispatch({ type: "setDebugLogger", value: debugLogger });
     }
     const layoutToSave = buildUiLayoutToSave();
     if (JSON.stringify(layoutToSave) !== JSON.stringify(normalizeUiLayout(context.state.uiLayout))) {
@@ -935,7 +914,6 @@ const SettingsModal = React.memo(function SettingsModal() {
                   );
                 })}
               </div>
-              <div className="field-descr">{locale.settingsThemeHint || "Choose a TypeR theme. Photoshop follows the host appearance."}</div>
             </div>
             <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupInterface || "Interface layout"}</div>
@@ -1037,6 +1015,35 @@ const SettingsModal = React.memo(function SettingsModal() {
         return (
           <div className="fields">
             <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupExperimental || "Experimental"}</div>
+              <div className="settings-checkbox-grid">
+                {renderToggle(
+                  inlineTextShapeR,
+                  changeInlineTextShapeR,
+                  <React.Fragment>
+                    {locale.settingsInlineTextShapeRLabel || "TextShapeR"}
+                    <b className="settings-new-badge">{locale.settingsNewBadge || "New"}</b>
+                  </React.Fragment>,
+                  locale.settingsInlineTextShapeRHint || "Shows text shape suggestions directly in the main panel. This may impact performance."
+                )}
+                {inlineTextShapeR && renderToggle(
+                  dehyphenateTextShapeR,
+                  changeDehyphenateTextShapeR,
+                  locale.settingsDehyphenateLabel || "TextShapeR: join words split by hyphenation",
+                  locale.settingsDehyphenateHint || "When shaping text, joins words split across line breaks. Turn off if real compound words should stay separated."
+                )}
+                {renderToggle(
+                  multiTabEnabled,
+                  changeMultiTabEnabled,
+                  <React.Fragment>
+                    {locale.settingsMultiTabLabel || "Multi-tab"}
+                    <b className="settings-new-badge">{locale.settingsNewBadge || "New"}</b>
+                  </React.Fragment>,
+                  locale.settingsMultiTabHint || "Manage several series at once with tabs above the text block, each with its own text and PSD sync."
+                )}
+              </div>
+            </div>
+            <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupTextPositioning || "Text positioning"}</div>
               <div className="settings-checkbox-grid">
                 {renderToggle(
@@ -1133,53 +1140,27 @@ const SettingsModal = React.memo(function SettingsModal() {
                 )}
               </div>
             </div>
-            <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupExperimental || "Experimental"}</div>
-              <div className="settings-checkbox-grid">
-                {renderToggle(
-                  inlineTextShapeR,
-                  changeInlineTextShapeR,
-                  <React.Fragment>
-                    {locale.settingsInlineTextShapeRLabel || "TextShapeR"}
-                    <b className="settings-new-badge">{locale.settingsNewBadge || "New"}</b>
-                  </React.Fragment>,
-                  locale.settingsInlineTextShapeRHint || "Shows text shape suggestions directly in the main panel. This may impact performance."
-                )}
-                {inlineTextShapeR && renderToggle(
-                  dehyphenateTextShapeR,
-                  changeDehyphenateTextShapeR,
-                  locale.settingsDehyphenateLabel || "TextShapeR: join words split by hyphenation",
-                  locale.settingsDehyphenateHint || "When shaping text, joins words split across line breaks. Turn off if real compound words should stay separated."
-                )}
-                {renderToggle(
-                  multiTabEnabled,
-                  changeMultiTabEnabled,
-                  <React.Fragment>
-                    {locale.settingsMultiTabLabel || "Multi-tab"}
-                    <b className="settings-new-badge">{locale.settingsNewBadge || "New"}</b>
-                  </React.Fragment>,
-                  locale.settingsMultiTabHint || "Manage several series at once with tabs above the text block, each with its own text and PSD sync."
-                )}
-              </div>
-            </div>
           </div>
         );
 
       case "shortcuts":
         return (
           <div className="fields">
-            <div className="field">
-              <div className="field-label">{locale.shortcut}</div>
-              {Object.entries(context.state.shortcut).map(([index, value]) => (
-                <Shortcut key={index} value={value} index={index}></Shortcut>
-              ))}
-            </div>
-            <div className="field">
-              <button type="button" className="topcoat-button--large" onClick={resetShortcuts}>
-                {locale.settingsResetShortcuts || "Reset shortcuts"}
-              </button>
-            </div>
-            <div className="field">
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.shortcut}</div>
+              <div className="field-descr">
+                {locale.settingsShortcutsHint || "Click a shortcut and press the new key combination."}
+              </div>
+              <div className="shortcut-list">
+                {Object.entries(context.state.shortcut).map(([index, value]) => (
+                  <Shortcut key={index} value={value} index={index}></Shortcut>
+                ))}
+              </div>
+              <div className="field">
+                <button type="button" className="topcoat-button--large" onClick={resetShortcuts}>
+                  <FiRotateCcw size={14} /> {locale.settingsResetShortcuts || "Reset shortcuts"}
+                </button>
+              </div>
               <div className="field-descr">
                 {locale.settingsShortcutsTip || "If shortcuts feel buggy or stop working, resetting them often fixes it."}
               </div>
@@ -1272,27 +1253,6 @@ const SettingsModal = React.memo(function SettingsModal() {
                   </div>
                 </div>
               )}
-            </div>
-            <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupDebug || "Debugging"}</div>
-              <div className="settings-checkbox-grid">
-                {renderToggle(
-                  debugLogger,
-                  changeDebugLogger,
-                  locale.settingsDebugLoggerLabel || "Debug logging",
-                  locale.settingsDebugLoggerHint || "Writes a detailed log of every Photoshop action TypeR performs (calls, payloads, results, timings, events) to typer_debug.log in the extension folder."
-                )}
-              </div>
-              <div className="field">
-                <button type="button" className="topcoat-button--large" onClick={revealDebugLog}>
-                  {locale.settingsDebugLogReveal || "Open log folder"}
-                </button>
-              </div>
-              <div className="field">
-                <button type="button" className="topcoat-button--large" onClick={clearDebugLogFile}>
-                  {locale.settingsDebugLogClear || "Clear log file"}
-                </button>
-              </div>
             </div>
             <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupImportExport || "Import/Export"}</div>
