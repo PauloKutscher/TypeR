@@ -60,4 +60,42 @@ assert.notStrictEqual(
   getFontPreviewFamily(textStyle, refreshedRegistry)
 );
 
+const wildjessRegular = {
+  postScriptName: "Wildjess",
+  name: "Wildjess",
+  family: "Wildjess",
+  style: "Regular",
+};
+const wildjessBoldItalic = {
+  postScriptName: "Wildjess-BoldItalic",
+  name: "Wildjess BoldItalic",
+  family: "Wildjess",
+  style: "Bold Italic",
+};
+const wildjessTextStyle = {
+  fontPostScriptName: "Wildjess",
+  fontName: "Wildjess",
+  fontStyleName: "BoldItalic",
+};
+
+assert.strictEqual(
+  findInstalledFont([wildjessRegular, wildjessBoldItalic], wildjessTextStyle),
+  wildjessBoldItalic,
+  "family + style must resolve the exact face instead of the first family member"
+);
+
+const wildjessRegistry = createFontPreviewRegistry(
+  [wildjessRegular, wildjessBoldItalic],
+  [wildjessTextStyle],
+  0,
+  "preview"
+);
+assert.ok(wildjessRegistry.css.includes('@font-face{font-family:"TypeRPreview_preview_0_0"'));
+assert.ok(wildjessRegistry.css.includes('local("Wildjess-BoldItalic")'));
+assert.ok(wildjessRegistry.css.includes('local("Wildjess Bold Italic")'));
+assert.strictEqual(
+  getFontPreviewFamily(wildjessTextStyle, wildjessRegistry),
+  '"TypeRPreview_preview_0_0", "Wildjess", "Tahoma"'
+);
+
 console.log("font preview refresh tests passed");
