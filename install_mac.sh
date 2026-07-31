@@ -157,7 +157,7 @@ fi
 rm -rf "${DESTDIR}"
 mkdir -p "${DESTDIR}"
 
-for item in app CSXS icons locale .debug; do
+for item in app CSXS icons locale; do
   if [ -e "${SRCDIR}/${item}" ]; then
     cp -rf "${SRCDIR}/${item}" "${DESTDIR}/${item}"
   fi

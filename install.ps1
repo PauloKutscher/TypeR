@@ -131,11 +131,6 @@ if (Test-Path "$ScriptDir\themes") {
     Copy-Item "$ScriptDir\themes\*" -Destination $ThemeDest -Recurse -Force
 }
 
-# Fichier .debug
-if (Test-Path "$ScriptDir\.debug") {
-    Copy-Item "$ScriptDir\.debug" -Destination "$TargetDir\.debug" -Force
-}
-
 # RESTAURATION DU STORAGE
 # On verifie si la sauvegarde existe dans le conteneur
 if (Test-Path "$TempBackupContainer\storage") {
