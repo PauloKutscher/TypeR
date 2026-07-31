@@ -439,6 +439,55 @@ const buildCandidate = (tokens, lineCount, targets) => {
   return lines;
 };
 
+// Absolute silhouette quality gate, separate from scoring: scores only rank
+// candidates against each other, so when every candidate is bad the "best"
+// one is still bad — this measure tells ugly from clean in absolute terms so
+// the final list can drop ragged stacks, huge adjacent jumps, and overlong
+// lines outright instead of merely ranking them last
+const CLEAN_SILHOUETTE_BADNESS = 0.6;
+const BEARABLE_SILHOUETTE_BADNESS = 1.3;
+
+const getSilhouetteBadness = (lengths, widthCap) => {
+  const lineCount = lengths.length;
+  const maxLength = Math.max.apply(null, lengths);
+  let badness = 0;
+  if (widthCap > 0) {
+    lengths.forEach((length) => {
+      badness += Math.max(0, length / widthCap - 1) * 3;
+    });
+  }
+  if (lineCount < 2 || !(maxLength > 0)) return badness;
+  // Steps measured against the longer of the two neighbours: a 2-unit line
+  // beside a 10-unit line reads terribly even when the block peak is 20
+  const stepSlack = lineCount === 2 ? 0.32 : 0.55;
+  const stepWeight = lineCount === 2 ? 6 : 4;
+  for (let index = 1; index < lineCount; index++) {
+    const longer = Math.max(lengths[index], lengths[index - 1], 1);
+    const step = Math.abs(lengths[index] - lengths[index - 1]) / longer;
+    badness += Math.max(0, step - stepSlack) * stepWeight;
+  }
+  if (lineCount >= 3) {
+    const interiorMax = Math.max.apply(null, lengths.slice(1, lineCount - 1));
+    const edgeMax = Math.max(lengths[0], lengths[lineCount - 1]);
+    if (edgeMax > interiorMax) {
+      badness += ((edgeMax - interiorMax) / maxLength) * 2.5;
+    }
+    // Convex profile: rise to the peak, fall after it; small waves pass
+    const peakIndex = lengths.indexOf(maxLength);
+    for (let index = 1; index <= peakIndex; index++) {
+      const drop = (lengths[index - 1] - lengths[index]) / maxLength;
+      if (drop > 0.18) badness += (drop - 0.18) * 2;
+    }
+    for (let index = peakIndex + 1; index < lineCount; index++) {
+      const rise = (lengths[index] - lengths[index - 1]) / maxLength;
+      if (rise > 0.18) badness += (rise - 0.18) * 2;
+    }
+    const minRatio = Math.min.apply(null, lengths) / maxLength;
+    if (minRatio < 0.3) badness += (0.3 - minRatio) * 2;
+  }
+  return badness;
+};
+
 // Aesthetic silhouette rules shared by generic and bubble-aware scoring:
 // the widest line belongs in the middle, the top/bottom edges stay short,
 // widths rise to the peak then fall, and neighbouring lines keep close widths
@@ -504,6 +553,12 @@ const scoreSilhouetteAesthetics = (lengths, profile) => {
     const excess = Math.max(0, difference - adjacentSlack);
     score += excess * excess * smoothnessWeight;
     score += Math.max(0, difference - 0.38) * 280;
+    // Jumps between two short neighbouring lines barely move the global
+    // ratio but read just as badly: also measure against the longer of the
+    // two so ragged tails of tiny words get caught
+    const localStep = Math.abs(lengths[index] - lengths[index - 1]) / Math.max(lengths[index], lengths[index - 1], 1);
+    const localExcess = Math.max(0, localStep - 0.45);
+    score += localExcess * localExcess * 700;
   }
 
   // First and last lines may differ, but a lopsided pair reads badly
@@ -547,7 +602,7 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
   // a line: manga bubbles read best as compact multi-line stacks, and long
   // 1-2 line blocks are exactly what escapes bubble outlines
   const lineDelta = lineCount - profile.lineTarget;
-  const lineDeltaFactor = lineDelta < 0 ? 1.7 : 1;
+  const lineDeltaFactor = lineDelta < 0 ? 3 : 1;
   let score = hyphenCount * 34 + Math.pow(Math.abs(lineDelta), 1.5) * lineTargetWeight * lineDeltaFactor;
 
   const fit = profile.fit;
@@ -924,6 +979,13 @@ const generateTextShapeRVariants = (text, options = {}) => {
 
   const profile = PROFILE_PRESETS[options.profile] || PROFILE_PRESETS.balanced;
   const words = mergePunctuationWords(splitWordsPreservingMarkdown(normalized));
+  const totalUnits = visibleWidth(normalized);
+  const widestWordUnits = words.reduce((max, word) => Math.max(max, visibleWidth(word)), 1);
+  // Hard readability cap on line count: the widest word sets the block peak,
+  // and past this count some line is forced down to a lone tiny word beside
+  // it — the ragged staircases no scoring tweak can save. Hyphen token sets
+  // compute their own cap because splitting the widest word raises it.
+  const granularityMaxLines = clamp(Math.floor(totalUnits / (widestWordUnits * 0.72)), 1, 8);
   const resultMap = new Map();
   const seenTargets = new Set();
   const shapeRows = normalizeShapeRows(options.shapeProfile).filter((row) => row.width > 0);
@@ -950,11 +1012,21 @@ const generateTextShapeRVariants = (text, options = {}) => {
   const aspectStretch = aspect == null ? 1 : clamp(Math.sqrt(aspect), 0.7, 1.45);
   let scoringProfile = profile;
   let shapeTargetSettings = null;
+  if (aspect == null && shapeRows.length <= 1) {
+    // No bubble info at all: the preset's fixed line target over-shoots
+    // short texts and under-shoots long ones — adapt it to the text volume
+    // (average line width grows with the line count, roughly sqrt-shaped)
+    const volumeTarget = Math.round(Math.sqrt(totalUnits / 2.6));
+    scoringProfile = {
+      ...profile,
+      lineTarget: clamp(volumeTarget, Math.min(profile.minLines, granularityMaxLines), Math.min(profile.maxLines, Math.max(granularityMaxLines, 1))),
+    };
+  }
   if (aspect != null && shapeRows.length <= 1) {
     // Aspect known but no usable outline: still lean the scoring toward it
     scoringProfile = {
       ...profile,
-      lineTarget: clamp(Math.round(profile.lineTarget * aspectStretch), 1, 8),
+      lineTarget: clamp(Math.round(profile.lineTarget * aspectStretch), 1, Math.max(1, Math.min(8, granularityMaxLines))),
       maxLineWidth: clamp((profile.maxLineWidth || 28) / aspectStretch, 12, 40),
       lineTargetWeight: 12,
     };
@@ -965,7 +1037,7 @@ const generateTextShapeRVariants = (text, options = {}) => {
     // With pixel calibration the estimate becomes exact: the smallest line
     // count whose rows physically hold the text.
     const estimatedLines = fit
-      ? estimateFitLineCount(visibleWidth(normalized), fit)
+      ? estimateFitLineCount(totalUnits, fit)
       : estimateManualLineCount(normalized, options.width || 320, options.height || 280);
     scoringProfile = {
       ...profile,
@@ -1011,6 +1083,9 @@ const generateTextShapeRVariants = (text, options = {}) => {
   if (isWideBubble) {
     minLines = Math.max(1, minLines - 1);
   }
+  // The granularity cap always wins over profile and bubble stretching, but
+  // never pushes the range below the minimum line count
+  maxLines = Math.max(minLines, Math.min(maxLines, granularityMaxLines));
   // Always generate with the requested profile; when the bubble ratio leans
   // tall or wide, also generate with that preset's params for extra variety
   const generationParams = [profile];
@@ -1057,8 +1132,15 @@ const generateTextShapeRVariants = (text, options = {}) => {
     generateHyphenTokenSets(words, baseTokens).forEach((tokens) => {
       // Hyphen sets hold more tokens than words: cap by the profile range,
       // not by the word-count-capped maxLines (a single long word must still
-      // be allowed to split onto two lines)
-      const hyphenMaxLines = Math.min(options.maxLines || Math.max(profileMaxLines, maxLines), Math.max(1, tokens.length));
+      // be allowed to split onto two lines). Their granularity cap is
+      // recomputed on the set because the split word is narrower.
+      const setWidestUnits = tokens.reduce((max, token) => Math.max(max, tokenLength(token)), 1);
+      const setGranularityMaxLines = clamp(Math.floor(totalUnits / (setWidestUnits * 0.72)), 2, 8);
+      const hyphenMaxLines = Math.min(
+        options.maxLines || Math.max(profileMaxLines, maxLines),
+        Math.max(1, tokens.length),
+        setGranularityMaxLines
+      );
       for (let lineCount = Math.max(2, minLines); lineCount <= hyphenMaxLines; lineCount++) {
         generationParams.forEach((params) => {
           // Hyphen variants carry a heavy score penalty and rarely win: a
@@ -1076,14 +1158,29 @@ const generateTextShapeRVariants = (text, options = {}) => {
   }
 
   const limit = options.limit || MAX_VARIANTS;
-  const variants = Array.from(resultMap.values());
+  let variants = Array.from(resultMap.values());
   // A variant that physically stays inside the bubble must always outrank
   // one that escapes it, whatever their aesthetic scores say
   if (fit) {
     variants.forEach((variant) => {
       variant.fits = variantFitsBubble(variant.lines, fit);
     });
+    // Escaping the bubble is disqualifying, not just penalizing: overflowing
+    // variants never reach the list while at least two alternatives fit
+    const fitting = variants.filter((variant) => variant.fits);
+    if (fitting.length >= 2) variants = fitting;
   }
+  // Absolute quality gate: drop unbearable silhouettes whenever anything
+  // better exists, then keep only clean ones when enough of them survive —
+  // a shorter list of good shapes beats a full list padded with ugly ones
+  const widthCap = (scoringProfile.maxLineWidth || 28) * 1.05;
+  variants.forEach((variant) => {
+    variant.badness = getSilhouetteBadness(variant.lines.map(visibleWidth), widthCap);
+  });
+  const bearable = variants.filter((variant) => variant.badness <= BEARABLE_SILHOUETTE_BADNESS);
+  if (bearable.length) variants = bearable;
+  const clean = variants.filter((variant) => variant.badness <= CLEAN_SILHOUETTE_BADNESS);
+  if (clean.length >= Math.min(3, limit)) variants = clean;
   const compareVariants = (a, b) => {
     if (fit && a.fits !== b.fits) return a.fits ? -1 : 1;
     return a.score - b.score || a.text.localeCompare(b.text);
