@@ -10,7 +10,7 @@
 
 <p align="center">
   Paste a script, route lines to the right styles, create and fit text layers, move through pages,
-  and share a consistent setup with your team — without leaving Photoshop.
+  and share a consistent setup with your team, all without leaving Photoshop.
 </p>
 
 <p align="center">
