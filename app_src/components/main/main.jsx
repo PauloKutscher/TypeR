@@ -12,14 +12,21 @@ import AppFooter from "../footer/footer";
 
 const minMiddleHeight = 100;
 const minBottomHeight = 70;
+const minPreviewHeight = 80;
+const maxPreviewHeight = 300;
 
 const ResizeableCont = React.memo(function ResizeableCont() {
   const context = useContext();
   const uiLayout = context.state.uiLayout;
   const { order, visible, sizes } = uiLayout;
   const appBlock = React.useRef();
+  const topBlock = React.useRef();
   const bottomBlock = React.useRef();
+  const topDraggingRef = React.useRef(false);
   const draggingRef = React.useRef(false);
+  const topResizeStartYRef = React.useRef(0);
+  const topResizeStartHRef = React.useRef(0);
+  const topHeightRef = React.useRef(sizes.previewHeight);
   const resizeStartYRef = React.useRef(0);
   const resizeStartHRef = React.useRef(0);
   const bottomHeightRef = React.useRef(0);
@@ -30,18 +37,65 @@ const ResizeableCont = React.memo(function ResizeableCont() {
   // down must grow it instead of shrinking it
   const stylesBelowText = order.indexOf("styles") > order.indexOf("text");
 
+  const startTopResize = (e) => {
+    if (!topBlock.current || document.documentElement.clientHeight <= 450) return;
+    e.preventDefault();
+    topResizeStartHRef.current = topBlock.current.offsetHeight;
+    topResizeStartYRef.current = e.pageY;
+    topDraggingRef.current = true;
+    appBlock.current?.classList.add("is-resizing");
+  };
+
   const startBottomResize = (e) => {
     if (!bottomBlock.current) return;
     resizeStartHRef.current = bottomBlock.current.offsetHeight;
     resizeStartYRef.current = e.pageY;
     draggingRef.current = true;
+    appBlock.current?.classList.add("is-resizing");
+  };
+
+  const stopTopResize = () => {
+    if (!topDraggingRef.current) return;
+    topDraggingRef.current = false;
+    appBlock.current?.classList.remove("is-resizing");
+    context.dispatch({
+      type: "setUiLayout",
+      layout: {
+        ...uiLayout,
+        sizes: {
+          ...sizes,
+          previewHeight: topHeightRef.current,
+        },
+      },
+    });
   };
 
   const stopBottomResize = () => {
     if (draggingRef.current) {
       writeToStorage({ bottomHeight: bottomHeightRef.current });
       draggingRef.current = false;
+      appBlock.current?.classList.remove("is-resizing");
     }
+  };
+
+  const setTopSize = (height) => {
+    if (!topBlock.current || !visible.preview) return;
+    const requestedHeight = height ?? sizes.previewHeight;
+    const bottomHeight = visible.styles && visible.text && bottomBlock.current
+      ? bottomBlock.current.offsetHeight
+      : 0;
+    const availableHeight = appHeightRef.current - bottomHeight - minMiddleHeight;
+    const upperBound = Math.max(minPreviewHeight, Math.min(maxPreviewHeight, availableHeight));
+    topHeightRef.current = Math.min(upperBound, Math.max(minPreviewHeight, requestedHeight));
+    topBlock.current.style.height = topHeightRef.current + "px";
+    resizeTextArea(!!height);
+  };
+
+  const moveTopResize = (e) => {
+    if (!topDraggingRef.current) return;
+    e.preventDefault();
+    const dy = e.pageY - topResizeStartYRef.current;
+    setTopSize(topResizeStartHRef.current + dy);
   };
 
   const moveBottomResize = (e) => {
@@ -71,6 +125,7 @@ const ResizeableCont = React.memo(function ResizeableCont() {
   const setAppSize = () => {
     appHeightRef.current = document.documentElement.clientHeight;
     appBlock.current.style.height = appHeightRef.current + "px";
+    setTopSize();
     setBottomSize();
   };
 
@@ -91,18 +146,20 @@ const ResizeableCont = React.memo(function ResizeableCont() {
   }, [sizes.uiScale]);
 
   const divider = visible.text ? (
-    <div className="middle-divider hostBgdDark" onMouseDown={startBottomResize}>
-      <div className="hostBgdLight"></div>
+    <div className="middle-divider" onMouseDown={startBottomResize}>
+      <div></div>
     </div>
   ) : null;
 
   const blocks = {
     preview: visible.preview ? (
       <React.Fragment key="preview">
-        <div className="top-block preview-block" style={{ height: topHeight }}>
+        <div className="top-block preview-block" ref={topBlock} style={{ height: topHeight }}>
           <PreviewBlock />
         </div>
-        <div className="top-divider hostBgdDark"></div>
+        <div className="top-divider" onMouseDown={startTopResize}>
+          <div></div>
+        </div>
       </React.Fragment>
     ) : null,
     text: visible.text ? (
@@ -125,7 +182,22 @@ const ResizeableCont = React.memo(function ResizeableCont() {
   };
 
   return (
-    <div className="app-body" ref={appBlock} onMouseMove={moveBottomResize} onMouseLeave={stopBottomResize} onMouseUp={stopBottomResize}>
+    <div
+      className="app-body"
+      ref={appBlock}
+      onMouseMove={(e) => {
+        moveTopResize(e);
+        moveBottomResize(e);
+      }}
+      onMouseLeave={() => {
+        stopTopResize();
+        stopBottomResize();
+      }}
+      onMouseUp={() => {
+        stopTopResize();
+        stopBottomResize();
+      }}
+    >
       <Modal />
       {order.map((id) => blocks[id])}
       <div className="footer-block hostBrdTopContrast">

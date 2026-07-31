@@ -6,10 +6,21 @@ import { FaKeyboard, FaFileExport, FaFileImport } from "react-icons/fa";
 import config from "../../config";
 import { locale, nativeAlert, nativeConfirm, checkUpdate, readStorage, writeToStorage, deleteStorageFile, openFile } from "../../utils";
 import { useContext, defaultUiLayout, normalizeUiLayout } from "../../context";
+import { sanitizeTextShapeRTuning } from "../../textShapeR";
 import { EDITOR_THEME_PRESETS, getEditorThemePreviewColors } from "../../themePresets";
 import Shortcut from "./shortCut";
 import FontScanPromo from "./fontScanPromo";
 import { shortcutCommands } from "../../shortcutCommands";
+
+// Interactive layout mockup: canvas px per real panel px
+const LAYOUT_CANVAS_SCALE = 0.3;
+// Sub-elements shown in the inspector for each selectable mockup region
+const LAYOUT_BLOCK_ELEMENTS = {
+  preview: ["previewCreateButton", "previewAlignButton", "previewSizeControls", "previewNav", "previewWidget"],
+  text: ["tabBar"],
+  styles: [],
+  footer: ["footerHelp", "footerRepo", "footerModeToggles"],
+};
 
 const SettingsModal = React.memo(function SettingsModal() {
   const context = useContext();
@@ -87,6 +98,13 @@ const SettingsModal = React.memo(function SettingsModal() {
     String(readStorage("bottomHeight") || 70)
   );
   const initialStylesHeight = React.useRef(String(readStorage("bottomHeight") || 70));
+
+  // Interactive layout canvas (appearance tab)
+  const [selectedLayoutBlock, setSelectedLayoutBlock] = React.useState("preview");
+  const [layoutDrag, setLayoutDrag] = React.useState(null);
+  const [layoutHoverEl, setLayoutHoverEl] = React.useState(null);
+  const layoutCanvasRef = React.useRef(null);
+  const layoutDragInfo = React.useRef(null);
 
   // States manager
   const [stateName, setStateName] = React.useState("");
@@ -292,6 +310,85 @@ const SettingsModal = React.memo(function SettingsModal() {
       setEdited(true);
     }
   };
+
+  // Canvas drag: block reorder ("move") and edge resize ("resize") share
+  // the same window listeners; a short move threshold keeps clicks as selection
+  const onLayoutDragMove = React.useCallback((e) => {
+    const info = layoutDragInfo.current;
+    if (!info) return;
+    if (info.type === "resize") {
+      const delta = ((e.clientY - info.startY) / LAYOUT_CANVAS_SCALE) * info.dir;
+      const next = Math.round(Math.min(info.max, Math.max(info.min, info.start + delta)));
+      info.setter(String(next));
+      setEdited(true);
+      return;
+    }
+    if (!info.moved && Math.abs(e.clientY - info.startY) > 4) {
+      info.moved = true;
+      setLayoutDrag(info.id);
+    }
+    if (!info.moved || !layoutCanvasRef.current) return;
+    // The DOM order always reflects the latest state, so it is safe to derive
+    // the current order from it instead of capturing state in this callback
+    const els = Array.from(layoutCanvasRef.current.querySelectorAll("[data-layout-block]"));
+    const currentOrder = els.map((el) => el.getAttribute("data-layout-block"));
+    let target = 0;
+    els.forEach((el) => {
+      if (el.getAttribute("data-layout-block") === info.id) return;
+      const rect = el.getBoundingClientRect();
+      if (e.clientY > rect.top + rect.height / 2) target += 1;
+    });
+    const rest = currentOrder.filter((id) => id !== info.id);
+    const order = rest.slice(0, target).concat(info.id, rest.slice(target));
+    if (order.join(",") !== currentOrder.join(",")) {
+      setUiLayoutLocal((current) => ({ ...current, order }));
+      setEdited(true);
+    }
+  }, []);
+
+  const onLayoutDragEnd = React.useCallback(() => {
+    const info = layoutDragInfo.current;
+    layoutDragInfo.current = null;
+    setLayoutDrag(null);
+    window.removeEventListener("mousemove", onLayoutDragMove);
+    window.removeEventListener("mouseup", onLayoutDragEnd);
+    if (info && info.type === "move" && !info.moved) {
+      setSelectedLayoutBlock(info.id);
+    }
+  }, [onLayoutDragMove]);
+
+  const startLayoutMove = (e, id) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    layoutDragInfo.current = { type: "move", id, startY: e.clientY, moved: false };
+    window.addEventListener("mousemove", onLayoutDragMove);
+    window.addEventListener("mouseup", onLayoutDragEnd);
+  };
+
+  const startLayoutResize = (e, id, dir) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const isPreview = id === "preview";
+    layoutDragInfo.current = {
+      type: "resize",
+      startY: e.clientY,
+      start: parseInt(isPreview ? previewHeight : stylesHeight, 10) || (isPreview ? defaultUiLayout.sizes.previewHeight : 70),
+      min: isPreview ? 80 : 70,
+      max: isPreview ? 300 : 500,
+      dir,
+      setter: isPreview ? setPreviewHeight : setStylesHeight,
+    };
+    setSelectedLayoutBlock(id);
+    setLayoutDrag("resize");
+    window.addEventListener("mousemove", onLayoutDragMove);
+    window.addEventListener("mouseup", onLayoutDragEnd);
+  };
+
+  React.useEffect(() => () => {
+    window.removeEventListener("mousemove", onLayoutDragMove);
+    window.removeEventListener("mouseup", onLayoutDragEnd);
+  }, [onLayoutDragMove, onLayoutDragEnd]);
 
   const resetUiLayout = () => {
     setUiLayoutLocal(normalizeUiLayout(null));
@@ -502,7 +599,15 @@ const SettingsModal = React.memo(function SettingsModal() {
       } else {
         try {
           const data = JSON.parse(result.data);
-          if (data.exportedStyles) {
+          if (data.typerTextShapeRTuning) {
+            // A shared TextShapeR learning file: route it to its own flow so
+            // it never falls through to the full-settings import (which
+            // replaces storage and reloads the panel)
+            const tuningValue = sanitizeTextShapeRTuning(data.typerTextShapeRTuning);
+            if (!tuningValue.samples) throw new Error("format");
+            context.dispatch({ type: "setTextShapeRTuning", value: tuningValue });
+            nativeAlert(locale.textShapeRTuningImportSuccess || "TextShapeR learning imported — suggestions now follow this style.", locale.successTitle, false);
+          } else if (data.exportedStyles) {
             const folderId = Math.random().toString(36).substring(2, 8);
             const importedAt = Date.now();
             const dataFolder = { id: folderId, name: data.name };
@@ -577,6 +682,51 @@ const SettingsModal = React.memo(function SettingsModal() {
 
   const exportSettings = () => {
     context.dispatch({ type: "setModal", modal: "export" });
+  };
+
+  // TextShapeR learning travels in its own file, on purpose separate from the
+  // style export flow: sharing a learned line-break style must not drag the
+  // sender's folders, styles, or preferences along with it
+  const exportShapeTuning = () => {
+    const tuningState = context.state.textShapeRTuning;
+    if (!tuningState || !tuningState.samples) {
+      nativeAlert(locale.textShapeRTuningExportEmpty || "Nothing learned yet — use the star button on TextShapeR suggestions first.", locale.errorTitle, true);
+      return;
+    }
+    const pathSelect = window.cep.fs.showSaveDialogEx(false, false, ["json"], "typer-textshaper-style.json");
+    if (!pathSelect?.data) return;
+    const data = {
+      typerTextShapeRTuning: tuningState,
+      version: config.appVersion,
+      exported: new Date(),
+    };
+    const result = window.cep.fs.writeFile(pathSelect.data, JSON.stringify(data));
+    if (result.err) {
+      nativeAlert(locale.textShapeRTuningImportError || "This file does not contain TextShapeR learning data.", locale.errorTitle, true);
+    }
+  };
+
+  const importShapeTuning = () => {
+    const pathSelect = window.cep.fs.showOpenDialogEx(false, false, null, null, ["json"]);
+    if (!pathSelect?.data?.length) return;
+    const result = window.cep.fs.readFile(pathSelect.data[0]);
+    if (result.err) {
+      nativeAlert(locale.textShapeRTuningImportError || "This file does not contain TextShapeR learning data.", locale.errorTitle, true);
+      return;
+    }
+    try {
+      const data = JSON.parse(result.data);
+      const raw = data.typerTextShapeRTuning;
+      if (!raw || typeof raw !== "object") throw new Error("format");
+      // Sanitize through the algorithm's own gate so a foreign or hand-edited
+      // file can never park invalid knobs, weights, or exemplars in storage
+      const tuningValue = sanitizeTextShapeRTuning(raw);
+      if (!tuningValue.samples) throw new Error("format");
+      context.dispatch({ type: "setTextShapeRTuning", value: tuningValue });
+      nativeAlert(locale.textShapeRTuningImportSuccess || "TextShapeR learning imported — suggestions now follow this style.", locale.successTitle, false);
+    } catch (error) {
+      nativeAlert(locale.textShapeRTuningImportError || "This file does not contain TextShapeR learning data.", locale.errorTitle, true);
+    }
   };
 
   const openWalkthrough = () => {
@@ -858,49 +1008,154 @@ const SettingsModal = React.memo(function SettingsModal() {
           preview: locale.settingsLayoutBlockPreview || "Preview & actions",
           text: locale.settingsLayoutBlockText || "Text",
           styles: locale.settingsLayoutBlockStyles || "Styles",
+          footer: locale.settingsLayoutBlockFooter || "Footer",
         };
-        const layoutElements = [
-          { key: "tabBar", label: locale.settingsLayoutElTabBar || "Tab bar" },
-          { key: "previewCreateButton", label: locale.settingsLayoutElCreate || "Create layer button" },
-          { key: "previewAlignButton", label: locale.settingsLayoutElAlign || "Align button" },
-          { key: "previewSizeControls", label: locale.settingsLayoutElSize || "Text size controls" },
-          { key: "previewNav", label: locale.settingsLayoutElNav || "Line navigation arrows" },
-          { key: "previewWidget", label: locale.settingsLayoutElWidget || "Line preview / TextShapeR" },
-          { key: "footerHelp", label: locale.settingsLayoutElFooterHelp || "Footer: Help link" },
-          { key: "footerRepo", label: locale.settingsLayoutElFooterRepo || "Footer: Repository link" },
-          { key: "footerModeToggles", label: locale.settingsLayoutElFooterModes || "Footer: mode toggles" },
-        ];
-        const miniScale = 170 / 700;
-        const miniPreviewHeight = Math.max(14, Math.round((parseInt(previewHeight, 10) || 130) * miniScale));
-        const miniStylesHeight = Math.max(10, Math.round((parseInt(stylesHeight, 10) || 70) * miniScale));
-        const miniBlocks = {
-          preview: vis.preview ? (
-            <div key="preview" className="settings-layout-mini-block m-preview" style={{ height: miniPreviewHeight }}>
-              <div className="settings-layout-mini-row">
-                {vis.previewCreateButton && <span className="m-pill m-cta" />}
-                {vis.previewAlignButton && <span className="m-pill" />}
-                {vis.previewSizeControls && <span className="m-pill m-small" />}
+        const elementLabels = {
+          tabBar: locale.settingsLayoutElTabBar || "Tab bar",
+          previewCreateButton: locale.settingsLayoutElCreate || "Create layer button",
+          previewAlignButton: locale.settingsLayoutElAlign || "Align button",
+          previewSizeControls: locale.settingsLayoutElSize || "Text size controls",
+          previewNav: locale.settingsLayoutElNav || "Line navigation arrows",
+          previewWidget: locale.settingsLayoutElWidget || "Line preview / TextShapeR",
+          footerHelp: locale.settingsLayoutElFooterHelp || "Footer: Help link",
+          footerRepo: locale.settingsLayoutElFooterRepo || "Footer: Repository link",
+          footerModeToggles: locale.settingsLayoutElFooterModes || "Footer: mode toggles",
+        };
+        const previewMockHeight = Math.max(26, Math.round((parseInt(previewHeight, 10) || 130) * LAYOUT_CANVAS_SCALE));
+        const stylesMockHeight = Math.max(14, Math.round((parseInt(stylesHeight, 10) || 70) * LAYOUT_CANVAS_SCALE));
+        const visibleOrder = uiLayout.order.filter((id) => vis[id]);
+        const lastVisibleBlock = visibleOrder[visibleOrder.length - 1];
+        const hl = (key) => (layoutHoverEl === key ? " m-hl" : "");
+        const stopMouse = (e) => e.stopPropagation();
+        const mockElementProps = (key) => ({
+          onMouseDown: stopMouse,
+          onClick: (e) => {
+            e.stopPropagation();
+            toggleUiElement(key);
+          },
+          onMouseEnter: () => setLayoutHoverEl(key),
+          onMouseLeave: () => setLayoutHoverEl(null),
+          title: elementLabels[key],
+        });
+        const mockContents = {
+          preview: (
+            <div className="settings-layout-mock-inner">
+              <div className="settings-layout-mock-row">
+                {vis.previewCreateButton && <span className={"mk-pill mk-cta" + hl("previewCreateButton")} {...mockElementProps("previewCreateButton")} />}
+                {vis.previewAlignButton && <span className={"mk-pill" + hl("previewAlignButton")} {...mockElementProps("previewAlignButton")} />}
+                {vis.previewSizeControls && <span className={"mk-pill mk-small" + hl("previewSizeControls")} {...mockElementProps("previewSizeControls")} />}
               </div>
               {(vis.previewNav || vis.previewWidget) && (
-                <div className="settings-layout-mini-row">
-                  {vis.previewNav && <span className="m-nav" />}
-                  {vis.previewWidget && <span className="m-widget" />}
+                <div className="settings-layout-mock-row">
+                  {vis.previewNav && <span className={"mk-nav" + hl("previewNav")} {...mockElementProps("previewNav")} />}
+                  {vis.previewWidget && <span className={"mk-widget" + hl("previewWidget")} {...mockElementProps("previewWidget")} />}
+                  {vis.previewNav && <span className={"mk-nav" + hl("previewNav")} {...mockElementProps("previewNav")} />}
                 </div>
               )}
             </div>
-          ) : null,
-          text: vis.text ? (
-            <div key="text" className="settings-layout-mini-block m-text">
-              {vis.tabBar && <div className="settings-layout-mini-tabs"><span /><span /></div>}
-              <span className="settings-layout-mini-label">{blockLabels.text}</span>
+          ),
+          text: (
+            <div className="settings-layout-mock-inner m-top">
+              {vis.tabBar && (
+                <div className={"settings-layout-mock-tabs" + hl("tabBar")} {...mockElementProps("tabBar")}>
+                  <span className="m-active-tab" />
+                  <span />
+                </div>
+              )}
+              <div className="settings-layout-mock-lines">
+                <span style={{ width: "82%" }} />
+                <span style={{ width: "58%" }} />
+                <span style={{ width: "70%" }} />
+              </div>
+              <span className="settings-layout-mock-label">{blockLabels.text}</span>
             </div>
-          ) : null,
-          styles: vis.styles ? (
-            <div key="styles" className="settings-layout-mini-block m-styles" style={vis.text ? { height: miniStylesHeight } : { flex: "1 1 auto" }}>
-              <span className="settings-layout-mini-label">{blockLabels.styles}</span>
+          ),
+          styles: (
+            <div className="settings-layout-mock-inner">
+              <span className="settings-layout-mock-label">{blockLabels.styles}</span>
             </div>
-          ) : null,
+          ),
         };
+        const renderMockBlock = (id) => {
+          const hidden = !vis[id];
+          const style = {};
+          if (!hidden) {
+            if (id === "preview") style.height = previewMockHeight;
+            if (id === "styles") {
+              if (vis.text) style.height = stylesMockHeight;
+              else style.flex = "1 1 auto";
+            }
+          }
+          const resizable = !hidden && (id === "preview" || (id === "styles" && vis.text));
+          // The resize handle sits on the edge facing the flexible text block
+          const resizeDir = id === lastVisibleBlock ? -1 : 1;
+          return (
+            <div
+              key={id}
+              data-layout-block={id}
+              className={
+                "settings-layout-mock m-" + id +
+                (selectedLayoutBlock === id ? " m-selected" : "") +
+                (hidden ? " m-ghost" : "") +
+                (layoutDrag === id ? " m-dragging" : "")
+              }
+              style={style}
+              onMouseDown={(e) => startLayoutMove(e, id)}
+            >
+              {hidden ? (
+                <div className="settings-layout-mock-ghost-row">
+                  <FiEyeOff size={9} />
+                  <span>{blockLabels[id]}</span>
+                </div>
+              ) : (
+                mockContents[id]
+              )}
+              <button
+                type="button"
+                className="settings-layout-mock-eye"
+                title={hidden ? (locale.settingsLayoutShow || "Show") : (locale.settingsLayoutHide || "Hide")}
+                onMouseDown={stopMouse}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleUiElement(id);
+                }}
+              >
+                {hidden ? <FiEye size={10} /> : <FiEyeOff size={10} />}
+              </button>
+              {resizable && (
+                <div
+                  className={"settings-layout-mock-resize" + (resizeDir === -1 ? " m-top" : "")}
+                  title={id === "preview"
+                    ? (locale.settingsLayoutPreviewHeight || "Preview height (px)")
+                    : (locale.settingsLayoutStylesHeight || "Styles height (px)")}
+                  onMouseDown={(e) => startLayoutResize(e, id, resizeDir)}
+                />
+              )}
+            </div>
+          );
+        };
+        const renderHeightSlider = (value, setter, min, max, fallback) => (
+          <div className="settings-layout-slider">
+            <div className="settings-layout-slider-head">
+              <span>{locale.settingsLayoutHeight || "Height (px)"}</span>
+              <input type="number" min={min} max={max} value={value} onChange={changeUiSize(setter)} className="topcoat-text-input--large" />
+            </div>
+            <input
+              type="range"
+              min={min}
+              max={max}
+              value={Math.min(max, Math.max(min, parseInt(value, 10) || fallback))}
+              onChange={(e) => {
+                setter(e.target.value);
+                setEdited(true);
+              }}
+            />
+          </div>
+        );
+        const selectedIsPanel = selectedLayoutBlock !== "footer";
+        const selectedVisible = selectedIsPanel ? vis[selectedLayoutBlock] !== false : true;
+        const selectedIndex = uiLayout.order.indexOf(selectedLayoutBlock);
+        const selectedElements = LAYOUT_BLOCK_ELEMENTS[selectedLayoutBlock] || [];
         return (
           <div className="fields">
             <div className="settings-group">
@@ -944,88 +1199,116 @@ const SettingsModal = React.memo(function SettingsModal() {
             <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupInterface || "Interface layout"}</div>
               <div className="settings-layout">
-                <div className="settings-layout-mini-wrap">
-                  <div className="settings-layout-mini">
-                    {uiLayout.order.map((id) => miniBlocks[id])}
-                    <div className="settings-layout-mini-footer">
-                      {vis.footerHelp && <span />}
-                      <span className="m-on" />
-                      {vis.footerRepo && <span />}
+                <div className="settings-layout-canvas-wrap">
+                  <div
+                    ref={layoutCanvasRef}
+                    className={"settings-layout-canvas" + (layoutDrag ? (layoutDrag === "resize" ? " m-resizing" : " m-moving") : "")}
+                  >
+                    {uiLayout.order.map(renderMockBlock)}
+                    <div
+                      className={"settings-layout-mock-footerbar" + (selectedLayoutBlock === "footer" ? " m-selected" : "")}
+                      title={blockLabels.footer}
+                      onClick={() => setSelectedLayoutBlock("footer")}
+                    >
+                      {vis.footerHelp && <span className={"mk-f" + hl("footerHelp")} {...mockElementProps("footerHelp")} />}
+                      <span className="mk-f m-on" />
+                      {vis.footerRepo && <span className={"mk-f" + hl("footerRepo")} {...mockElementProps("footerRepo")} />}
+                      <span className="mk-fspacer" />
                       {vis.footerModeToggles && (
-                        <React.Fragment>
-                          <span className="m-dot" />
-                          <span className="m-dot" />
-                        </React.Fragment>
+                        <span className={"mk-fdots" + hl("footerModeToggles")} {...mockElementProps("footerModeToggles")}>
+                          <i />
+                          <i />
+                        </span>
                       )}
                     </div>
                   </div>
-                  <div className="settings-layout-mini-caption">
-                    {(locale.settingsLayoutScaleCaption || "Scale: {scale}%").replace("{scale}", uiScale || "100")}
-                  </div>
-                </div>
-                <div className="settings-layout-blocks">
-                  {uiLayout.order.map((id, index) => (
-                    <div key={id} className={"settings-layout-block-row" + (vis[id] ? "" : " m-hidden")}>
-                      <button
-                        type="button"
-                        className="settings-layout-icon-btn"
-                        title={vis[id] ? (locale.settingsLayoutHide || "Hide") : (locale.settingsLayoutShow || "Show")}
-                        onClick={() => toggleUiElement(id)}
-                      >
-                        {vis[id] ? <FiEye size={13} /> : <FiEyeOff size={13} />}
-                      </button>
-                      <span className="settings-layout-block-name">{blockLabels[id]}</span>
-                      <button
-                        type="button"
-                        className="settings-layout-icon-btn"
-                        disabled={index === 0}
-                        title={locale.settingsLayoutMoveUp || "Move up"}
-                        onClick={() => moveUiBlock(id, -1)}
-                      >
-                        <FiChevronUp size={13} />
-                      </button>
-                      <button
-                        type="button"
-                        className="settings-layout-icon-btn"
-                        disabled={index === uiLayout.order.length - 1}
-                        title={locale.settingsLayoutMoveDown || "Move down"}
-                        onClick={() => moveUiBlock(id, 1)}
-                      >
-                        <FiChevronDown size={13} />
-                      </button>
-                    </div>
-                  ))}
-                  <div className="field-descr">
-                    {locale.settingsLayoutBlocksHint || "Show, hide, and reorder the main panels. The settings stay reachable from the footer."}
-                  </div>
-                </div>
-              </div>
-              <div className="settings-layout-elements">
-                {layoutElements.map((element) => (
-                  <label key={element.key} className="settings-layout-element">
+                  <div className="settings-layout-scale">
                     <input
-                      type="checkbox"
-                      checked={vis[element.key] !== false}
-                      onChange={() => toggleUiElement(element.key)}
+                      type="range"
+                      min="70"
+                      max="150"
+                      step="5"
+                      title={locale.settingsLayoutUiScale || "Interface scale (%)"}
+                      value={Math.min(150, Math.max(70, parseInt(uiScale, 10) || 100))}
+                      onChange={(e) => {
+                        setUiScale(e.target.value);
+                        setEdited(true);
+                      }}
                     />
-                    <div className="settings-checkbox-custom"></div>
-                    <span>{element.label}</span>
-                  </label>
-                ))}
+                    <span className="settings-layout-scale-value">
+                      {(locale.settingsLayoutScaleCaption || "Scale: {scale}%").replace("{scale}", uiScale || "100")}
+                    </span>
+                  </div>
+                </div>
+                <div className="settings-layout-inspector">
+                  <div className="settings-layout-inspector-head">
+                    <span className={"settings-layout-inspector-title" + (selectedVisible ? "" : " m-hidden")}>
+                      {blockLabels[selectedLayoutBlock]}
+                    </span>
+                    {selectedIsPanel && (
+                      <div className="settings-layout-inspector-tools">
+                        <button
+                          type="button"
+                          className="settings-layout-icon-btn"
+                          title={selectedVisible ? (locale.settingsLayoutHide || "Hide") : (locale.settingsLayoutShow || "Show")}
+                          onClick={() => toggleUiElement(selectedLayoutBlock)}
+                        >
+                          {selectedVisible ? <FiEye size={13} /> : <FiEyeOff size={13} />}
+                        </button>
+                        <button
+                          type="button"
+                          className="settings-layout-icon-btn"
+                          disabled={selectedIndex <= 0}
+                          title={locale.settingsLayoutMoveUp || "Move up"}
+                          onClick={() => moveUiBlock(selectedLayoutBlock, -1)}
+                        >
+                          <FiChevronUp size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          className="settings-layout-icon-btn"
+                          disabled={selectedIndex === uiLayout.order.length - 1}
+                          title={locale.settingsLayoutMoveDown || "Move down"}
+                          onClick={() => moveUiBlock(selectedLayoutBlock, 1)}
+                        >
+                          <FiChevronDown size={13} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {selectedLayoutBlock === "preview" && renderHeightSlider(previewHeight, setPreviewHeight, 80, 300, defaultUiLayout.sizes.previewHeight)}
+                  {selectedLayoutBlock === "styles" && (vis.text
+                    ? renderHeightSlider(stylesHeight, setStylesHeight, 70, 500, 70)
+                    : (
+                      <div className="settings-layout-inspector-note">
+                        {locale.settingsLayoutTextAuto || "Fills the remaining space automatically."}
+                      </div>
+                    ))}
+                  {selectedLayoutBlock === "text" && (
+                    <div className="settings-layout-inspector-note">
+                      {locale.settingsLayoutTextAuto || "Fills the remaining space automatically."}
+                    </div>
+                  )}
+                  {selectedElements.length > 0 && (
+                    <div className="settings-layout-elements">
+                      {selectedElements.map((key) => (
+                        <label
+                          key={key}
+                          className="settings-layout-element"
+                          onMouseEnter={() => setLayoutHoverEl(key)}
+                          onMouseLeave={() => setLayoutHoverEl(null)}
+                        >
+                          <input type="checkbox" checked={vis[key] !== false} onChange={() => toggleUiElement(key)} />
+                          <div className="settings-checkbox-custom"></div>
+                          <span>{elementLabels[key]}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="settings-layout-sizes">
-                <div className="settings-layout-size-field">
-                  <div className="field-label">{locale.settingsLayoutPreviewHeight || "Preview height (px)"}</div>
-                  <input type="number" min="80" max="300" value={previewHeight} onChange={changeUiSize(setPreviewHeight)} className="topcoat-text-input--large" />
-                </div>
-                <div className="settings-layout-size-field">
-                  <div className="field-label">{locale.settingsLayoutStylesHeight || "Styles height (px)"}</div>
-                  <input type="number" min="70" max="500" value={stylesHeight} onChange={changeUiSize(setStylesHeight)} className="topcoat-text-input--large" />
-                </div>
-                <div className="settings-layout-size-field">
-                  <div className="field-label">{locale.settingsLayoutUiScale || "Interface scale (%)"}</div>
-                  <input type="number" min="70" max="150" value={uiScale} onChange={changeUiSize(setUiScale)} className="topcoat-text-input--large" />
-                </div>
+              <div className="field-descr">
+                {locale.settingsLayoutCanvasHint || "Click a panel in the preview to edit it. Drag panels to reorder them, or drag their edge to resize."}
               </div>
               <div className="field">
                 <button type="button" className="topcoat-button--large" onClick={resetUiLayout}>
@@ -1301,6 +1584,22 @@ const SettingsModal = React.memo(function SettingsModal() {
                 <button className="topcoat-button--large" onClick={exportSettings}>
                   <FaFileExport size={18} /> {locale.settingsExport}
                 </button>
+              </div>
+            </div>
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupShapeTuning || "TextShapeR learning"}</div>
+              <div className="field">
+                <button className="topcoat-button--large" onClick={importShapeTuning}>
+                  <FaFileImport size={18} /> {locale.settingsShapeTuningImport || "Import learning"}
+                </button>
+              </div>
+              <div className="field">
+                <button className="topcoat-button--large" onClick={exportShapeTuning}>
+                  <FaFileExport size={18} /> {locale.settingsShapeTuningExport || "Export learning"}
+                </button>
+              </div>
+              <div className="field-descr">
+                {locale.settingsShapeTuningHint || "Share the line-break style TypeR learned from your feedback as a small .json file. Importing replaces your current learning."}
               </div>
             </div>
             <div className="settings-group">

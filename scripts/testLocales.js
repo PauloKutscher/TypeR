@@ -31,23 +31,33 @@ const readLocale = (relativePath) => {
 };
 
 const defaultLocale = readLocale("locale/messages.properties");
-const frenchLocale = readLocale("locale/fr_FR/messages.properties");
 const defaultKeys = defaultLocale.keys;
-const frenchKeys = frenchLocale.keys;
-
-const missingFrench = [...defaultKeys].filter((key) => !frenchKeys.has(key));
-const extraFrench = [...frenchKeys].filter((key) => !defaultKeys.has(key));
-const placeholderMismatches = [...defaultKeys].filter((key) => {
-  if (!frenchKeys.has(key)) return false;
-  const defaultPlaceholders = getPlaceholders(defaultLocale.values.get(key));
-  const frenchPlaceholders = getPlaceholders(frenchLocale.values.get(key));
-  return defaultPlaceholders.join("|") !== frenchPlaceholders.join("|");
-});
+const localeNames = fs.readdirSync(path.resolve(rootDir, "locale"), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => entry.name)
+  .sort();
 
 assert.deepStrictEqual([...defaultLocale.duplicates], [], `Duplicate default keys: ${[...defaultLocale.duplicates].join(", ")}`);
-assert.deepStrictEqual([...frenchLocale.duplicates], [], `Duplicate fr_FR keys: ${[...frenchLocale.duplicates].join(", ")}`);
-assert.deepStrictEqual(missingFrench, [], `Missing fr_FR keys: ${missingFrench.join(", ")}`);
-assert.deepStrictEqual(extraFrench, [], `Extra fr_FR keys: ${extraFrench.join(", ")}`);
-assert.deepStrictEqual(placeholderMismatches, [], `Locale placeholder mismatches: ${placeholderMismatches.join(", ")}`);
+
+localeNames.forEach((localeName) => {
+  const locale = readLocale(`locale/${localeName}/messages.properties`);
+  const missing = [...defaultKeys].filter((key) => !locale.keys.has(key));
+  const extra = [...locale.keys].filter((key) => !defaultKeys.has(key));
+  const placeholderMismatches = [...defaultKeys].filter((key) => {
+    if (!locale.keys.has(key)) return false;
+    const expected = getPlaceholders(defaultLocale.values.get(key));
+    const actual = getPlaceholders(locale.values.get(key));
+    return expected.join("|") !== actual.join("|");
+  });
+  const invalidValues = [...locale.values]
+    .filter(([, value]) => !value.trim() || value === "undefined")
+    .map(([key]) => key);
+
+  assert.deepStrictEqual([...locale.duplicates], [], `Duplicate ${localeName} keys: ${[...locale.duplicates].join(", ")}`);
+  assert.deepStrictEqual(missing, [], `Missing ${localeName} keys: ${missing.join(", ")}`);
+  assert.deepStrictEqual(extra, [], `Extra ${localeName} keys: ${extra.join(", ")}`);
+  assert.deepStrictEqual(placeholderMismatches, [], `${localeName} placeholder mismatches: ${placeholderMismatches.join(", ")}`);
+  assert.deepStrictEqual(invalidValues, [], `Invalid ${localeName} values: ${invalidValues.join(", ")}`);
+});
 
 console.log("locale key tests passed");

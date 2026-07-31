@@ -189,15 +189,21 @@ body[data-editor-theme]:not([data-editor-theme="system"]) {
     color: var(--editor-text) !important;
   }
 
-  .hostBgdDark,
-  .top-divider,
-  .middle-divider {
+  .hostBgdDark {
     background-color: var(--editor-surfaceAlt) !important;
   }
 
-  .hostBgdLight,
-  .middle-divider > div {
+  .hostBgdLight {
     background-color: var(--editor-panel) !important;
+  }
+
+  .top-divider,
+  .middle-divider {
+    background-color: transparent !important;
+
+    > div {
+      background-color: var(--editor-border) !important;
+    }
   }
 
   .hostBrdTopContrast {
@@ -324,9 +330,8 @@ body[data-editor-theme]:not([data-editor-theme="system"]) {
   }
 
   .folder-item,
-  .settings-layout-block-row,
-  .settings-layout-mini,
-  .settings-layout-mini-block,
+  .settings-layout-canvas,
+  .settings-layout-inspector,
   .export-section,
   .export-folder-item,
   .export-font-item,

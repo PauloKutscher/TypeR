@@ -23,7 +23,8 @@ import {locale, openUrl} from '../../utils';
 import {useContext} from '../../context';
 import {shortcutCommands} from '../../shortcutCommands';
 
-const VIDEO_URL = 'https://youtu.be/QwxG2S_PCMQ';
+const VIDEO_URL = 'https://typer.hayasaku.fr/video-guide/';
+const VIDEO_CONFIG_URL = 'https://typer.hayasaku.fr/video-guide/config.json';
 const MULTI_BUBBLE_VIDEO_URL = 'https://youtu.be/gmIh-eEj2HY';
 
 // Pretty names for the raw key tokens stored in the shortcut settings
@@ -76,7 +77,26 @@ const HelpModal = React.memo(function HelpModal() {
     const context = useContext();
     const [query, setQuery] = React.useState('');
     const [openId, setOpenId] = React.useState('styles');
+    const [videoIsLegacy, setVideoIsLegacy] = React.useState(false);
     const shortcut = context.state.shortcut || {};
+
+    React.useEffect(() => {
+        let active = true;
+        fetch(`${VIDEO_CONFIG_URL}?v=${Date.now()}`, {cache: 'no-store'})
+            .then((response) => {
+                if (!response.ok) throw new Error(`Video guide config returned ${response.status}`);
+                return response.json();
+            })
+            .then((remoteConfig) => {
+                if (active && typeof remoteConfig.isLegacy === 'boolean') {
+                    setVideoIsLegacy(remoteConfig.isLegacy);
+                }
+            })
+            .catch(() => {});
+        return () => {
+            active = false;
+        };
+    }, []);
 
     const close = () => context.dispatch({type: 'setModal'});
     const openWalkthrough = () => context.dispatch({type: 'setModal', modal: 'walkthrough', data: {source: 'help'}});
@@ -346,7 +366,12 @@ const HelpModal = React.memo(function HelpModal() {
                             <FiPlayCircle size={15} /> {locale.helpOpenWalkthrough || 'Interactive walkthrough'}
                         </button>
                         <button type="button" className="topcoat-button--large help-action" onClick={() => openUrl(VIDEO_URL)}>
-                            <FiVideo size={15} /> {locale.helpVideoGuide || 'Old video guide'}
+                            <FiVideo size={15} /> {videoIsLegacy
+                                ? (locale.helpVideoGuide || 'Old video guide')
+                                : (locale.helpVideoGuideCurrent || 'Video guide')}
+                            {!videoIsLegacy
+                                ? <b className="settings-new-badge help-video-badge">{locale.settingsNewBadge || 'New'}</b>
+                                : null}
                         </button>
                         <button type="button" className="topcoat-button--large help-action" onClick={() => openUrl(config.authorUrl)}>
                             <FiMessageCircle size={15} /> {locale.helpSupport || 'Support'}
