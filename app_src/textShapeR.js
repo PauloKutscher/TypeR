@@ -469,11 +469,12 @@ const scoreSilhouetteAesthetics = (lengths, profile) => {
     score += Math.pow((edgeMax - interiorMax) / maxLength, 2) * 420 + 20;
   }
 
-  // Edge lines should stay clearly below the interior peak (graded, not binary)
+  // Edge lines must stay clearly below the interior peak (graded, not
+  // binary): equal-width top and middle lines read as a slab, not a bubble
   if (interiorMax > 0) {
     [lengths[0], lengths[lineCount - 1]].forEach((edgeLength) => {
-      const edgeExcess = Math.max(0, edgeLength / interiorMax - 0.9);
-      score += edgeExcess * edgeExcess * 320;
+      const edgeExcess = Math.max(0, edgeLength / interiorMax - 0.85);
+      score += edgeExcess * edgeExcess * 900;
     });
   }
 
@@ -489,12 +490,20 @@ const scoreSilhouetteAesthetics = (lengths, profile) => {
     if (rise > 0) score += Math.pow(rise / maxLength, 2) * 300;
   }
 
+  // The peak reads best at the vertical center of the block: a peak sitting
+  // right next to an edge tilts the whole silhouette
+  const centerIndex = (lineCount - 1) / 2;
+  if (centerIndex > 0) {
+    const peakOffset = Math.abs(peakIndex - centerIndex) / centerIndex;
+    score += peakOffset * peakOffset * 60;
+  }
+
   // Neighbouring lines must keep close widths for a smooth outline
   for (let index = 1; index < lengths.length; index++) {
     const difference = Math.abs(lengths[index] - lengths[index - 1]) / maxLength;
     const excess = Math.max(0, difference - adjacentSlack);
     score += excess * excess * smoothnessWeight;
-    score += Math.max(0, difference - 0.45) * 160;
+    score += Math.max(0, difference - 0.38) * 280;
   }
 
   // First and last lines may differ, but a lopsided pair reads badly
@@ -534,7 +543,12 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
 
   const maxLineWidth = profile.maxLineWidth || 28;
   const lineTargetWeight = profile.lineTargetWeight == null ? 16 : profile.lineTargetWeight;
-  let score = hyphenCount * 34 + Math.pow(Math.abs(lineCount - profile.lineTarget), 1.5) * lineTargetWeight;
+  // Falling short of the target (fewer, longer lines) hurts more than adding
+  // a line: manga bubbles read best as compact multi-line stacks, and long
+  // 1-2 line blocks are exactly what escapes bubble outlines
+  const lineDelta = lineCount - profile.lineTarget;
+  const lineDeltaFactor = lineDelta < 0 ? 1.7 : 1;
+  let score = hyphenCount * 34 + Math.pow(Math.abs(lineDelta), 1.5) * lineTargetWeight * lineDeltaFactor;
 
   const fit = profile.fit;
   if (fit) {
@@ -645,7 +659,7 @@ const getProfileWidthAt = (rows, y) => {
 };
 
 // Fraction of the bubble kept as breathing room between text and outline
-const FIT_MARGIN = 0.92;
+const FIT_MARGIN = 0.9;
 
 // Vertical position (0..1 of bubble height) of a line's center when the
 // whole block sits vertically centered in the bubble
@@ -689,22 +703,47 @@ const variantFitsBubble = (lines, fit) => {
 // measurement error: the estimated line count must leave headroom
 const FIT_CAPACITY_SLACK = 1.12;
 
-// Smallest line count whose stacked rows offer enough width (with headroom)
-// for the whole text while the block still fits the bubble height; a count
-// with exact-but-tight capacity is only a fallback when none has headroom
+// Blocks read best when slightly taller than the bubble's own proportions:
+// extra lines shorten every line, keeping the outline clear of the text
+const FIT_ASPECT_LEAN = 1.15;
+
+// Line count whose text block best echoes the bubble's proportions, among
+// the counts that physically hold the whole text. Picking the smallest
+// fitting count (the old rule) packs the text into 1-2 lines that run the
+// full bubble width and clip the outline on any measurement error; matching
+// the bubble aspect yields the compact multi-line stack a round bubble asks
+// for, with the peak line well inside the outline.
 const estimateFitLineCount = (totalUnits, fit) => {
   const maxByHeight = Math.max(1, Math.floor((fit.height * FIT_MARGIN) / fit.linePx));
   const limit = Math.min(8, maxByHeight);
-  let exactFit = 0;
+  const bubbleAspect = fit.height / Math.max(1, fit.width);
+  let best = 0;
+  let bestCost = Infinity;
+  let tightest = 0;
   for (let lineCount = 1; lineCount <= limit; lineCount++) {
     let capacity = 0;
+    let widest = 0;
     for (let index = 0; index < lineCount; index++) {
-      capacity += getFitAvailableUnits(index, lineCount, fit);
+      const units = getFitAvailableUnits(index, lineCount, fit);
+      capacity += units;
+      if (units > widest) widest = units;
     }
-    if (capacity >= totalUnits * FIT_CAPACITY_SLACK) return lineCount;
-    if (!exactFit && capacity >= totalUnits) exactFit = lineCount;
+    if (capacity < totalUnits) continue;
+    if (!tightest) tightest = lineCount;
+    const fill = totalUnits / capacity;
+    // Widest line the shaped block would render at this count, in pixels
+    const widestLinePx = Math.max(1, widest * fill * fit.unitPx);
+    const blockAspect = (lineCount * fit.linePx) / widestLinePx;
+    let cost = Math.abs(Math.log(blockAspect / (bubbleAspect * FIT_ASPECT_LEAN)));
+    // Rows packed close to capacity overflow on the slightest mismeasure
+    const headroomExcess = Math.max(0, fill * FIT_CAPACITY_SLACK - 1);
+    cost += headroomExcess * 6;
+    if (cost < bestCost) {
+      bestCost = cost;
+      best = lineCount;
+    }
   }
-  return exactFit || limit;
+  return best || tightest || limit;
 };
 
 const buildManualTargets = (tokens, lineCount, settings) => {
@@ -796,7 +835,9 @@ const estimateManualLineCount = (text, width = 320, height = 280) => {
   if (wordCount <= 2) return 1;
   const aspect = clamp((height || 1) / Math.max(1, width || 1), 0.35, 2.4);
   const maxLines = Math.min(8, Math.max(1, wordCount));
-  return clamp(Math.round(Math.sqrt(wordCount * aspect * 1.35)), 2, maxLines);
+  // Lean toward one more line than the square split: compact multi-line
+  // stacks track a bubble outline better than fewer, longer lines
+  return clamp(Math.round(Math.sqrt(wordCount * aspect * 1.5)), 2, maxLines);
 };
 
 let nextTokenSetId = 1;
@@ -931,7 +972,7 @@ const generateTextShapeRVariants = (text, options = {}) => {
       shapeRows,
       lineTarget: clamp(estimatedLines, 1, Math.max(profile.maxLines, estimatedLines)),
       // Soft enough that shapes one line taller/shorter still reach the list
-      lineTargetWeight: 18,
+      lineTargetWeight: 24,
       maxLineWidth: clamp((profile.maxLineWidth || 28) / aspectStretch, 12, 40),
     };
     shapeTargetSettings = {
