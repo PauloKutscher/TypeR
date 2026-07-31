@@ -278,10 +278,10 @@ You only need Node.js and npm when developing TypeR or installing the current un
 git clone --branch develop https://github.com/ScanR/TypeR.git
 cd TypeR
 npm install
-npm run verify
+npm run build
 ```
 
-`npm run verify` runs the logic tests, builds the production CEP files, and validates the generated `app/` artifacts. After it succeeds, install the extension with `install_win.cmd` on Windows or `./install_mac.sh` on macOS.
+After it succeeds, install the extension with `install_win.cmd` on Windows or `./install_mac.sh` on macOS.
 
 Useful development commands:
 
@@ -301,6 +301,6 @@ For code changes, run `npm run verify` before submitting a pull request.
 
 ## Credits and license
 
-TypeR is maintained by **Sakushi and SeanR** and is based on [TyperTools](https://swirt.github.io/typertools/) by **Swirt**.
+TypeR is maintained by **Sakushi** and is based on [TyperTools](https://swirt.github.io/typertools/) by **Swirt**.
 
-The project is distributed under the [MIT License](./LICENSE.md). For TypeR help, join the [ScanR support server](https://discord.com/invite/Pdmfmqk). For discussion around the original tools, use the [original community server](https://discord.gg/dsHn3xQQTC).
+The project is distributed under the [MIT License](./LICENSE.md). For TypeR help, join the [ScanR support server](https://discord.com/invite/Pdmfmqk).
