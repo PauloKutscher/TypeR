@@ -9,6 +9,7 @@ import { FaMagic } from "react-icons/fa";
 import { csInterface, locale, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, isPanelIdle, notePanelActivity, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { buildStoredSelectionPayload, getScaledStyle } from "../../textLayerPayload";
+import { withShortcutHint } from "../../shortcutCommands";
 import { generateTextShapeRVariants, visibleWidth } from "../../textShapeR";
 import TextShapeRFitPreview from "../textShapeRFitPreview";
 
@@ -855,16 +856,17 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         )}
         <div className="preview-top_main-controls">
           {uiVisible.previewCreateButton !== false && (
-            <button className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large--cta" title={
+            <button className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large--cta" title={withShortcutHint(
               context.state.multiBubbleMode && context.state.storedSelections && context.state.storedSelections.length > 0
                 ? (locale.multiBubbleCreateLayersDescr || "Paste {count} text layer(s)").replace("{count}", context.state.storedSelections.length)
-                : locale.createLayerDescr
-            } onClick={createLayer}>
+                : locale.createLayerDescr,
+              context.state.shortcut.add
+            )} onClick={createLayer}>
               <AiOutlineBorderInner size={18} /> {locale.createLayer}
             </button>
           )}
           {uiVisible.previewAlignButton !== false && (
-            <button className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large" title={locale.alignLayerDescr} onClick={handleAlignLayer}>
+            <button className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large" title={withShortcutHint(locale.alignLayerDescr, context.state.shortcut.center)} onClick={handleAlignLayer}>
               <MdCenterFocusWeak size={18} /> {locale.alignLayer}
             </button>
           )}
@@ -1030,7 +1032,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                 </div>
               </div>
               <div className="preview-line-info-actions">
-                <FiArrowRightCircle size={16} onClick={insertStyledText} title={locale.insertStyledText} />
+                <FiArrowRightCircle size={16} onClick={insertStyledText} title={withShortcutHint(locale.insertStyledText, context.state.shortcut.apply)} />
               </div>
             </div>
             <div className="preview-line-text" style={styleObject}>

@@ -9,6 +9,7 @@ import { useContext, defaultUiLayout, normalizeUiLayout } from "../../context";
 import { EDITOR_THEME_PRESETS, getEditorThemePreviewColors } from "../../themePresets";
 import Shortcut from "./shortCut";
 import FontScanPromo from "./fontScanPromo";
+import { shortcutCommands } from "../../shortcutCommands";
 
 const SettingsModal = React.memo(function SettingsModal() {
   const context = useContext();
@@ -70,6 +71,7 @@ const SettingsModal = React.memo(function SettingsModal() {
     context.state.multiTabEnabled !== false
   );
   const [editorTheme, setEditorTheme] = React.useState(context.state.editorTheme || "system");
+  const [shortcutDraft, setShortcutDraft] = React.useState(() => ({ ...context.state.shortcut }));
   const [multiTabConfirmOpen, setMultiTabConfirmOpen] = React.useState(false);
   const [edited, setEdited] = React.useState(false);
 
@@ -92,6 +94,39 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [selectedState, setSelectedState] = React.useState("");
   const [showDeleteStates, setShowDeleteStates] = React.useState(false);
   const [statesToDelete, setStatesToDelete] = React.useState({});
+
+  React.useEffect(() => {
+    setShortcutDraft({ ...context.state.shortcut });
+  }, [context.state.shortcut]);
+
+  const shortcutConflicts = React.useMemo(() => {
+    const bySignature = {};
+    const conflicts = {};
+    shortcutCommands.forEach((command) => {
+      const keys = shortcutDraft[command.id] || [];
+      if (!keys.length) return;
+      const signature = Array.from(new Set(keys.map((key) => String(key).toUpperCase())))
+        .sort()
+        .join("+");
+      if (!signature) return;
+      if (!bySignature[signature]) bySignature[signature] = [];
+      bySignature[signature].push(command);
+    });
+    Object.values(bySignature).forEach((commands) => {
+      if (commands.length < 2) return;
+      commands.forEach((command) => {
+        conflicts[command.id] = commands
+          .filter((other) => other.id !== command.id)
+          .map((other) => locale[other.label] || other.id)
+          .join(", ");
+      });
+    });
+    return conflicts;
+  }, [shortcutDraft]);
+
+  const changeShortcut = React.useCallback((id, keys) => {
+    setShortcutDraft((current) => ({ ...current, [id]: keys }));
+  }, []);
 
   const close = () => {
     context.dispatch({ type: "setModal" });
@@ -447,19 +482,9 @@ const SettingsModal = React.memo(function SettingsModal() {
       // The styles block height is applied imperatively by the resize logic
       setTimeout(() => window.dispatchEvent(new Event("resize")), 50);
     }
-    const shortcut = {};
-    document.querySelectorAll("input[id^=shortcut_]").forEach((input) => {
-      const typeShorcut = input.id.split("_").pop();
-      const value = input.value.trim();
-      if (value) {
-        shortcut[typeShorcut] = value.split(" + ");
-      } else {
-        shortcut[typeShorcut] = [];
-      }
-    });
     context.dispatch({
       type: "updateShortcut",
-      shortcut: shortcut,
+      shortcut: shortcutDraft,
     });
 
     context.dispatch({ type: "setModal" });
@@ -1152,8 +1177,17 @@ const SettingsModal = React.memo(function SettingsModal() {
                 {locale.settingsShortcutsHint || "Click a shortcut and press the new key combination."}
               </div>
               <div className="shortcut-list">
-                {Object.entries(context.state.shortcut).map(([index, value]) => (
-                  <Shortcut key={index} value={value} index={index}></Shortcut>
+                {shortcutCommands.map((command) => (
+                  <Shortcut
+                    key={command.id}
+                    value={shortcutDraft[command.id] || []}
+                    index={command.id}
+                    onChange={changeShortcut}
+                    conflict={shortcutConflicts[command.id]
+                      ? (locale.shortcutConflict || "Also assigned to: {actions}")
+                        .replace("{actions}", shortcutConflicts[command.id])
+                      : ""}
+                  />
                 ))}
               </div>
               <div className="field">
