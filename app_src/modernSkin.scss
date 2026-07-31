@@ -168,6 +168,19 @@ $accent-active: #1e7dc8;
       text-shadow: none;
     }
   }
+
+  // Chromium's native Windows popup does not reliably reuse the select's
+  // background. Give every row an explicit dark palette so inherited light
+  // text never ends up on the system's light option background.
+  select.topcoat-textarea {
+    color-scheme: dark;
+
+    option,
+    optgroup {
+      background: #353636;
+      color: #f0f0f0;
+    }
+  }
 }
 
 .light-theme {
@@ -180,6 +193,28 @@ $accent-active: #1e7dc8;
 
     &::placeholder {
       color: rgba(#000, 0.4);
+    }
+  }
+
+  select.topcoat-textarea {
+    color-scheme: light;
+
+    option,
+    optgroup {
+      background: #fff;
+      color: #222;
+    }
+  }
+}
+
+// Custom editor themes keep the native popup aligned with their input
+// palette; the body light/dark class above still supplies color-scheme.
+body[data-editor-theme]:not([data-editor-theme="system"]) {
+  select.topcoat-textarea {
+    option,
+    optgroup {
+      background: var(--editor-input);
+      color: var(--editor-text);
     }
   }
 }
