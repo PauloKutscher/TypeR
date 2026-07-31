@@ -291,6 +291,23 @@ function _convertPixelToPointExact(value) {
   return (value / activeDocument.resolution) * 72;
 }
 
+// Span (in points) for the temporary measuring box used while re-flowing
+// box text. The type engine's cost scales with the box's PIXEL size, and an
+// oversized box makes Photoshop pop its "Processing text" progress dialog
+// on every relayout — so derive the span from the document size and cap it
+// in pixels instead of using a huge fixed point value.
+function _getMeasureBoxSpanPoints() {
+  var spanPx = 20000;
+  try {
+    var oldUnits = app.preferences.rulerUnits;
+    app.preferences.rulerUnits = Units.PIXELS;
+    var docSpanPx = 2 * Math.max(parseFloat(activeDocument.width), parseFloat(activeDocument.height));
+    app.preferences.rulerUnits = oldUnits;
+    if (docSpanPx > 0 && docSpanPx < spanPx) spanPx = docSpanPx;
+  } catch (spanError) {}
+  return _convertPixelToPointExact(spanPx);
+}
+
 function _createCurrent(target, id) {
   var reference = new ActionReference();
   if (id > 0) reference.putProperty(charID.Property, id);
@@ -1081,18 +1098,21 @@ function _setActiveLayerText() {
 
     // Non-point layers are measured in an oversized box right after the text
     // lands; putting that box in the same set call skips one relayout with
-    // the stale retained bounds in between
+    // the stale retained bounds in between. Only needed when the text itself
+    // changes — a style-only apply keeps the same line breaks, and skipping
+    // the measure pass there keeps it as fast as the legacy path.
     var boxShapeRef = newTextParams.layerText.textShape && newTextParams.layerText.textShape[0];
     var measureBoxBounds = null;
-    if (!isPoint && boxShapeRef && boxShapeRef.bounds) {
+    if (!isPoint && boxShapeRef && boxShapeRef.bounds && dataText) {
+      var measureSpan = _getMeasureBoxSpanPoints();
       measureBoxBounds = {
         top: boxShapeRef.bounds.top || 0,
         left: boxShapeRef.bounds.left || 0,
         right: boxShapeRef.bounds.right,
         bottom: boxShapeRef.bounds.bottom,
       };
-      boxShapeRef.bounds.right = measureBoxBounds.left + 30000;
-      boxShapeRef.bounds.bottom = measureBoxBounds.top + 30000;
+      boxShapeRef.bounds.right = measureBoxBounds.left + measureSpan;
+      boxShapeRef.bounds.bottom = measureBoxBounds.top + measureSpan;
     }
 
     try {
@@ -1142,12 +1162,14 @@ function _setActiveLayerText() {
         } catch (fitError) {}
       }
       if (!boxFitted && boxShape) {
-        // Fallback: restore the retained box and only grow its height
+        // Fallback: restore the retained box and only grow its height. The
+        // restore set is only needed when a measure box was actually applied;
+        // on a style-only apply the layer still holds the retained box.
         if (measureBoxBounds) {
           boxShape.bounds.right = measureBoxBounds.right;
           boxShape.bounds.bottom = measureBoxBounds.bottom;
+          jamText.setLayerText({ layerText: { textShape: newTextParams.layerText.textShape } });
         }
-        jamText.setLayerText({ layerText: { textShape: newTextParams.layerText.textShape } });
         var fallbackBounds = _getCurrentTextLayerBounds();
         boxShape.bounds.bottom = _convertPixelToPoint(fallbackBounds.height + textSize + 2);
         jamText.setLayerText({ layerText: { textShape: newTextParams.layerText.textShape } });
