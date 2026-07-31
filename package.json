@@ -10,7 +10,7 @@
     "build": "node clean.js app && webpack --mode=production",
     "build_dev": "node clean.js app && webpack --mode=development",
     "build_watch": "node clean.js app && webpack --mode=development --watch",
-    "test": "node scripts/testTextLayerPayload.js && node scripts/testLineNumbering.js && node scripts/testLocales.js && node scripts/testShortcuts.js && node scripts/testTextShapeR.js && node scripts/testFontScan.js && node scripts/testFontPreview.js",
+    "test": "node scripts/testTextLayerPayload.js && node scripts/testLineNumbering.js && node scripts/testLocales.js && node scripts/testShortcuts.js && node scripts/testMultiBubbleHistory.js && node scripts/testTextShapeR.js && node scripts/testFontScan.js && node scripts/testFontPreview.js",
     "test:build": "node scripts/testBuildArtifacts.js",
     "verify": "npm test && npm run build && npm run test:build"
   },

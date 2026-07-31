@@ -30,7 +30,7 @@ const createInSelection = (ctx) => {
       ctx.state.direction,
       (ok) => {
         if (!ok) return;
-        ctx.dispatch({ type: "clearSelections" });
+        ctx.dispatch({ type: "clearSelections", preserveLine: true });
         // Prevent the selection monitor from immediately capturing the live
         // marquee again after a successful multi-bubble paste.
         deselectDocument();
