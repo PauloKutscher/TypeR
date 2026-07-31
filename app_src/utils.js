@@ -852,12 +852,19 @@ const setActiveLayerText = (text, style, direction, callback = () => {}) => {
     return false;
   }
   const parsed = buildRichTextPayload(text);
-  const data = JSON.stringify({
-    text: parsed.text,
-    style,
-    direction,
-    richTextRuns: parsed.richTextRuns,
-  });
+  const contentOnly = !style;
+  const data = JSON.stringify(contentOnly
+    ? {
+        text: parsed.text,
+        style: null,
+        contentOnly: true,
+      }
+    : {
+        text: parsed.text,
+        style,
+        direction,
+        richTextRuns: parsed.richTextRuns,
+      });
   csInterface.evalScript("setActiveLayerText(" + data + ")", trackHostAction((error) => {
     if (error) nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
     callback(!error);

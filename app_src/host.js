@@ -988,6 +988,17 @@ function _setActiveLayerText() {
   var dataRuns = payload.richTextRuns;
   var targetTextLength = 0;
 
+  // "Paste text to the current layer" is deliberately content-only. Assigning
+  // contents directly avoids writing any font, size, paragraph, direction,
+  // text-box or position property.
+  if (payload.contentOnly) {
+    _forEachSelectedLayer(function () {
+      app.activeDocument.activeLayer.textItem.contents = _normalizeTextKey(dataText);
+    });
+    state.result = "";
+    return;
+  }
+
   _forEachSelectedLayer(function () {
     var oldBounds = _getCurrentTextLayerBounds();
     var isPoint = _textLayerIsPointText();
