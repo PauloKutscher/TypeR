@@ -197,6 +197,9 @@ const shortcutCommands = [
       const selections = ctx.state.storedSelections || [];
       if (selections.length) {
         ctx.dispatch({ type: "removeSelection", index: selections.length - 1 });
+        // The removed item is normally still the live Photoshop marquee.
+        // Drop it so the selection monitor cannot capture it again.
+        deselectDocument();
       }
     },
   },

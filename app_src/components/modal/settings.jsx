@@ -126,6 +126,7 @@ const SettingsModal = React.memo(function SettingsModal() {
 
   const changeShortcut = React.useCallback((id, keys) => {
     setShortcutDraft((current) => ({ ...current, [id]: keys }));
+    setEdited(true);
   }, []);
 
   const close = () => {

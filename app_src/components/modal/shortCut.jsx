@@ -1,4 +1,5 @@
 import React from "react";
+import PropTypes from "prop-types";
 import { FiX } from "react-icons/fi";
 import { locale, getHotkeyPressed } from "../../utils";
 
@@ -159,6 +160,13 @@ const Shortcut = (props) => {
       {props.conflict ? <div className="shortcut-row-warning">{props.conflict}</div> : null}
     </div>
   );
+};
+
+Shortcut.propTypes = {
+  index: PropTypes.string.isRequired,
+  value: PropTypes.arrayOf(PropTypes.string).isRequired,
+  onChange: PropTypes.func.isRequired,
+  conflict: PropTypes.string,
 };
 
 export default Shortcut;
