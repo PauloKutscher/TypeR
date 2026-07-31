@@ -1,5 +1,5 @@
 import React from "react";
-import { FiX, FiSettings, FiEye, FiEyeOff, FiToggleLeft, FiDatabase, FiAlertTriangle, FiChevronUp, FiChevronDown, FiRotateCcw, FiCheck, FiPlayCircle } from "react-icons/fi";
+import { FiX, FiSettings, FiEye, FiEyeOff, FiToggleLeft, FiDatabase, FiAlertTriangle, FiChevronUp, FiChevronDown, FiRotateCcw, FiCheck, FiPlayCircle, FiType } from "react-icons/fi";
 import { MdSave } from "react-icons/md";
 import { FaKeyboard, FaFileExport, FaFileImport } from "react-icons/fa";
 
@@ -689,11 +689,26 @@ const SettingsModal = React.memo(function SettingsModal() {
 
   const tabs = [
     { id: "general", label: locale.settingsTabGeneral || "General", icon: FiSettings },
+    { id: "text", label: locale.settingsTabText || "Text", icon: FiType },
     { id: "appearance", label: locale.settingsTabAppearance || "Appearance", icon: FiEye },
     { id: "behavior", label: locale.settingsTabBehavior || "Behavior", icon: FiToggleLeft },
     { id: "shortcuts", label: locale.settingsTabShortcuts || "Shortcuts", icon: FaKeyboard },
     { id: "data", label: locale.settingsTabData || "Data", icon: FiDatabase }
   ];
+
+  // Shared markup for a toggle row (checkbox + label + optional hint)
+  const renderToggle = (checked, onChange, label, hint) => (
+    <div className="settings-checkbox-item">
+      <label className="settings-checkbox-label">
+        <input type="checkbox" checked={checked} onChange={onChange} />
+        <div className="settings-checkbox-custom"></div>
+        <div className="settings-checkbox-content">
+          <span>{label}</span>
+          {hint ? <div className="settings-checkbox-hint">{hint}</div> : null}
+        </div>
+      </label>
+    </div>
+  );
 
   const renderTabContent = () => {
     switch (activeTab) {
@@ -710,57 +725,124 @@ const SettingsModal = React.memo(function SettingsModal() {
               <div className="field-descr">
                 {locale.settingsOpenWalkthroughHint || "Replay the first-time guide for the complete TypeR workflow."}
               </div>
+              <div className="settings-checkbox-grid">
+                {renderToggle(
+                  showTips,
+                  changeShowTips,
+                  locale.settingsShowTipsLabel || "Show tips",
+                  locale.settingsShowTipsHint || "Display tips in the interface (multi-bubble hints, etc.)"
+                )}
+              </div>
             </div>
-            <div className="field">
-              <div className="field-label">{locale.settingsLanguageLabel}</div>
-              <div className="field-input">
-                <select value={language} onChange={changeLanguage} className="topcoat-textarea">
-                  {Object.entries(config.languages).map(([code, name]) => (
-                    <option key={code} value={code}>
-                      {code === "auto" ? locale.settingsLanguageAuto : name}
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsLanguageLabel}</div>
+              <div className="field">
+                <div className="field-input">
+                  <select value={language} onChange={changeLanguage} className="topcoat-textarea">
+                    {Object.entries(config.languages).map(([code, name]) => (
+                      <option key={code} value={code}>
+                        {code === "auto" ? locale.settingsLanguageAuto : name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupAppUpdates || "Updates"}</div>
+              <div className="settings-checkbox-grid">
+                {renderToggle(
+                  checkUpdates,
+                  changeCheckUpdates,
+                  locale.settingsCheckUpdatesLabel,
+                  locale.settingsCheckUpdatesHint || "Automatically checks for available updates"
+                )}
+              </div>
+              <div className="field">
+                <button type="button" className="topcoat-button--large" onClick={checkUpdatesNow}>
+                  {locale.settingsCheckUpdatesButton}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+
+      case "text":
+        return (
+          <div className="fields">
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupTextInsertion || "Text insertion"}</div>
+              <div className="field">
+                <div className="field-label">{locale.settingsTextItemKindLabel}</div>
+                <div className="field-input">
+                  <select value={pastePointText} onChange={changePastePointText} className="topcoat-textarea">
+                    <option value="">{locale.settingsTextItemKindBox}</option>
+                    <option value="1">{locale.settingsTextItemKindPoint}</option>
+                  </select>
+                </div>
+              </div>
+              <div className="field">
+                <div className="field-label">{locale.settingsDefaultStyleLabel}</div>
+                <div className="field-input">
+                  <select value={defaultStyleId} onChange={changeDefaultStyle} className="topcoat-textarea">
+                    <option key="none" value="">
+                      {locale.settingsDefaultStyleNone}
                     </option>
-                  ))}
-                </select>
+                    {context.state.styles.map((style) => (
+                      <option key={style.id} value={style.id}>
+                        {style.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field-descr">{locale.settingsDefaultStyleDescr}</div>
               </div>
             </div>
-            <div className="field">
-              <div className="field-label">{locale.settingsTextItemKindLabel}</div>
-              <div className="field-input">
-                <select value={pastePointText} onChange={changePastePointText} className="topcoat-textarea">
-                  <option value="">{locale.settingsTextItemKindBox}</option>
-                  <option value="1">{locale.settingsTextItemKindPoint}</option>
-                </select>
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupTextScript || "Script & tags"}</div>
+              <div className="field">
+                <div className="field-label">{locale.settingsLinePrefixesLabel}</div>
+                <div className="field-input">
+                  <textarea rows={2} value={ignoreLinePrefixes} onChange={changeLinePrefixes} className="topcoat-textarea" />
+                </div>
+                <div className="field-descr">{locale.settingsLinePrefixesDescr}</div>
+              </div>
+              <div className="field">
+                <div className="field-label">{locale.settingsIgnoreTagsLabel}</div>
+                <div className="field-input">
+                  <textarea rows={2} value={ignoreTags} onChange={changeIgnoreTags} className="topcoat-textarea" />
+                </div>
+                <div className="field-descr">{locale.settingsIgnoreTagsDescr}</div>
+              </div>
+              <div className="settings-checkbox-grid">
+                {renderToggle(
+                  interpretMarkdown,
+                  changeInterpretMarkdown,
+                  locale.settingsMarkdownLabel || "Interpret markdown (bold/italic)",
+                  locale.settingsMarkdownHint || "Convert markdown and rich text on paste and apply bold/italic in the text block."
+                )}
+                {renderToggle(
+                  resetLineCounterOnPage,
+                  changeResetLineCounterOnPage,
+                  locale.settingsResetLineCounterOnPageLabel || "Reset line counter on page markers",
+                  locale.settingsResetLineCounterOnPageHint || "Restarts text line numbering at 1 after each Page N marker."
+                )}
               </div>
             </div>
-            <div className="field">
-              <div className="field-label">{locale.settingsLinePrefixesLabel}</div>
-              <div className="field-input">
-                <textarea rows={2} value={ignoreLinePrefixes} onChange={changeLinePrefixes} className="topcoat-textarea" />
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupTextDirection || "Text direction"}</div>
+              <div className="field">
+                <div className="field-label">{locale.settingsDirectionLabel}</div>
+                <div className="field-input">
+                  <select value={direction} onChange={changeDirection} className="topcoat-textarea">
+                    <option value="ltr">{locale.settingsDirectionLtr}</option>
+                    <option value="rtl">{locale.settingsDirectionRtl}</option>
+                  </select>
+                </div>
               </div>
-              <div className="field-descr">{locale.settingsLinePrefixesDescr}</div>
-            </div>
-            <div className="field">
-              <div className="field-label">{locale.settingsIgnoreTagsLabel}</div>
-              <div className="field-input">
-                <textarea rows={2} value={ignoreTags} onChange={changeIgnoreTags} className="topcoat-textarea" />
+              <div className="settings-checkbox-grid">
+                {renderToggle(middleEast, changeMiddleEast, locale.settingsMiddleEastLabel, null)}
               </div>
-              <div className="field-descr">{locale.settingsIgnoreTagsDescr}</div>
-            </div>
-            <div className="field">
-              <div className="field-label">{locale.settingsDefaultStyleLabel}</div>
-              <div className="field-input">
-                <select value={defaultStyleId} onChange={changeDefaultStyle} className="topcoat-textarea">
-                  <option key="none" value="">
-                    {locale.settingsDefaultStyleNone}
-                  </option>
-                  {context.state.styles.map((style) => (
-                    <option key={style.id} value={style.id}>
-                      {style.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field-descr">{locale.settingsDefaultStyleDescr}</div>
             </div>
           </div>
         );
@@ -947,24 +1029,6 @@ const SettingsModal = React.memo(function SettingsModal() {
                 </button>
               </div>
             </div>
-            <div className="field">
-              <div className="field-label">{locale.settingsDirectionLabel}</div>
-              <div className="field-input">
-                <select value={direction} onChange={changeDirection} className="topcoat-textarea">
-                  <option value="ltr">{locale.settingsDirectionLtr}</option>
-                  <option value="rtl">{locale.settingsDirectionRtl}</option>
-                </select>
-              </div>
-            </div>
-            <div className="field">
-              <div className="field-label">{locale.settingsMiddleEastLabel}</div>
-              <div className="field-input">
-                <label className="topcoat-checkbox">
-                  <input type="checkbox" checked={middleEast} onChange={changeMiddleEast} />
-                  <div className="topcoat-checkbox__checkmark"></div>
-                </label>
-              </div>
-            </div>
           </div>
         );
       }
@@ -973,160 +1037,72 @@ const SettingsModal = React.memo(function SettingsModal() {
         return (
           <div className="fields">
             <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupExperimental || "Experimental"}</div>
+              <div className="settings-group-title">{locale.settingsGroupTextPositioning || "Text positioning"}</div>
               <div className="settings-checkbox-grid">
-                <div className="settings-checkbox-item">
-                  <label className="settings-checkbox-label">
-                    <input type="checkbox" checked={inlineTextShapeR} onChange={changeInlineTextShapeR} />
-                    <div className="settings-checkbox-custom"></div>
-                    <div className="settings-checkbox-content">
-                      <span>
-                        {locale.settingsInlineTextShapeRLabel || "TextShapeR"}
-                        <b className="settings-new-badge">{locale.settingsNewBadge || "New"}</b>
-                      </span>
-                      <div className="settings-checkbox-hint">
-                        {locale.settingsInlineTextShapeRHint || "Shows text shape suggestions directly in the main panel. This may impact performance."}
-                      </div>
-                    </div>
-                  </label>
-                </div>
-                {inlineTextShapeR && (
-                  <div className="settings-checkbox-item">
-                    <label className="settings-checkbox-label">
-                      <input type="checkbox" checked={dehyphenateTextShapeR} onChange={changeDehyphenateTextShapeR} />
-                      <div className="settings-checkbox-custom"></div>
-                      <div className="settings-checkbox-content">
-                        <span>{locale.settingsDehyphenateLabel || "TextShapeR: join words split by hyphenation"}</span>
-                        <div className="settings-checkbox-hint">
-                          {locale.settingsDehyphenateHint || "When shaping text, joins words split across line breaks. Turn off if real compound words should stay separated."}
-                        </div>
-                      </div>
-                    </label>
-                  </div>
+                {renderToggle(
+                  resizeTextBoxOnCenter,
+                  changeResizeTextBoxOnCenter,
+                  locale.settingsResizeTextBoxOnCenterLabel,
+                  locale.settingsResizeTextBoxOnCenterHint || "Resizes text box during automatic centering"
                 )}
-                <div className="settings-checkbox-item">
-                  <label className="settings-checkbox-label">
-                    <input type="checkbox" checked={multiTabEnabled} onChange={changeMultiTabEnabled} />
-                    <div className="settings-checkbox-custom"></div>
-                    <div className="settings-checkbox-content">
-                      <span>
-                        {locale.settingsMultiTabLabel || "Multi-tab"}
-                        <b className="settings-new-badge">{locale.settingsNewBadge || "New"}</b>
-                      </span>
-                      <div className="settings-checkbox-hint">
-                        {locale.settingsMultiTabHint || "Manage several series at once with tabs above the text block, each with its own text and PSD sync."}
-                      </div>
-                    </div>
-                  </label>
+                {renderToggle(
+                  multiBubbleMode,
+                  changeMultiBubbleMode,
+                  locale.multiBubbleModeToggle || "Multi-Bubble Mode",
+                  <React.Fragment>
+                    {locale.multiBubbleModeHint || "Allows capturing multiple selections to insert multiple texts at once"}
+                    <button
+                      type="button"
+                      className="settings-help-badge"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        window.cep && window.cep.util && window.cep.util.openURLInDefaultBrowser('https://youtu.be/gmIh-eEj2HY');
+                      }}
+                      title={locale.multiBubbleModeHowToUse || "How to use"}
+                    >
+                      <FiPlayCircle size={12} />
+                      {locale.multiBubbleModeHowToUse || "How to use"}
+                    </button>
+                  </React.Fragment>
+                )}
+              </div>
+              <div className="field">
+                <div className="field-label">{locale.settingsInternalPaddingLabel || "Internal padding (px)"}</div>
+                <div className="field-input">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={internalPadding}
+                    onChange={changeInternalPadding}
+                    className="topcoat-text-input--large"
+                  />
                 </div>
+                <div className="field-descr">{locale.settingsInternalPaddingHint || "Internal space to prevent text from touching bubble edges (0-100 pixels)"}</div>
               </div>
             </div>
             <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupAutomations || "Automations"}</div>
+              <div className="settings-group-title">{locale.settingsGroupStyles || "Styles"}</div>
               <div className="settings-checkbox-grid">
-                <div className="settings-checkbox-item">
-                  <label className="settings-checkbox-label">
-                    <input type="checkbox" checked={autoClosePSD} onChange={changeAutoClosePSD} />
-                    <div className="settings-checkbox-custom"></div>
-                    <div className="settings-checkbox-content">
-                      <span>{locale.settingsAutoClosePsdLabel}</span>
-                      <div className="settings-checkbox-hint">{locale.settingsAutoClosePsdHint || "Automatically closes PSD files after processing"}</div>
-                    </div>
-                  </label>
-                </div>
-                <div className="settings-checkbox-item">
-                  <label className="settings-checkbox-label">
-                    <input type="checkbox" checked={autoScrollStyle} onChange={changeAutoScrollStyle} />
-                    <div className="settings-checkbox-custom"></div>
-                    <div className="settings-checkbox-content">
-                      <span>{locale.settingsAutoScrollStyleLabel}</span>
-                      <div className="settings-checkbox-hint">{locale.settingsAutoScrollStyleHint || "Automatically scrolls to selected style"}</div>
-                    </div>
-                  </label>
-                </div>
-                <div className="settings-checkbox-item">
-                  <label className="settings-checkbox-label">
-                    <input type="checkbox" checked={resizeTextBoxOnCenter} onChange={changeResizeTextBoxOnCenter} />
-                    <div className="settings-checkbox-custom"></div>
-                    <div className="settings-checkbox-content">
-                      <span>{locale.settingsResizeTextBoxOnCenterLabel}</span>
-                      <div className="settings-checkbox-hint">{locale.settingsResizeTextBoxOnCenterHint || "Resizes text box during automatic centering"}</div>
-                    </div>
-                  </label>
-                </div>
-                <div className="settings-checkbox-item">
-                  <label className="settings-checkbox-label">
-                    <input type="checkbox" checked={multiBubbleMode} onChange={changeMultiBubbleMode} />
-                    <div className="settings-checkbox-custom"></div>
-                    <div className="settings-checkbox-content">
-                      <span>{locale.multiBubbleModeToggle || "Multi-Bubble Mode"}</span>
-                      <div className="settings-checkbox-hint">
-                        {locale.multiBubbleModeHint || "Allows capturing multiple selections to insert multiple texts at once"}
-                        <button
-                          type="button"
-                          className="settings-help-badge"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            window.cep && window.cep.util && window.cep.util.openURLInDefaultBrowser('https://youtu.be/gmIh-eEj2HY');
-                          }}
-                          title={locale.multiBubbleModeHowToUse || "How to use"}
-                        >
-                          <FiPlayCircle size={12} />
-                          {locale.multiBubbleModeHowToUse || "How to use"}
-                        </button>
-                      </div>
-                    </div>
-                  </label>
-                </div>
-                <div className="settings-checkbox-item">
-                  <label className="settings-checkbox-label">
-                    <input type="checkbox" checked={showTips} onChange={changeShowTips} />
-                    <div className="settings-checkbox-custom"></div>
-                    <div className="settings-checkbox-content">
-                      <span>{locale.settingsShowTipsLabel || "Show tips"}</span>
-                      <div className="settings-checkbox-hint">
-                        {locale.settingsShowTipsHint || "Display tips in the interface (multi-bubble hints, etc.)"}
-                      </div>
-                    </div>
-                  </label>
-                </div>
-                <div className="settings-checkbox-item">
-                  <label className="settings-checkbox-label">
-                    <input type="checkbox" checked={showQuickStyleSize} onChange={changeShowQuickStyleSize} />
-                    <div className="settings-checkbox-custom"></div>
-                    <div className="settings-checkbox-content">
-                      <span>{locale.settingsQuickStyleSizeLabel || "Quick style size editor"}</span>
-                      <div className="settings-checkbox-hint">
-                        {locale.settingsQuickStyleSizeHint || "Show the mini size editor when hovering the style edit button."}
-                      </div>
-                    </div>
-                  </label>
-                </div>
-                <div className="settings-checkbox-item">
-                  <label className="settings-checkbox-label">
-                    <input type="checkbox" checked={interpretMarkdown} onChange={changeInterpretMarkdown} />
-                    <div className="settings-checkbox-custom"></div>
-                    <div className="settings-checkbox-content">
-                      <span>{locale.settingsMarkdownLabel || "Interpret markdown (bold/italic)"}</span>
-                      <div className="settings-checkbox-hint">
-                        {locale.settingsMarkdownHint || "Convert markdown and rich text on paste and apply bold/italic in the text block."}
-                      </div>
-                    </div>
-                  </label>
-                </div>
-                <div className="settings-checkbox-item">
-                  <label className="settings-checkbox-label">
-                    <input type="checkbox" checked={resetLineCounterOnPage} onChange={changeResetLineCounterOnPage} />
-                    <div className="settings-checkbox-custom"></div>
-                    <div className="settings-checkbox-content">
-                      <span>{locale.settingsResetLineCounterOnPageLabel || "Reset line counter on page markers"}</span>
-                      <div className="settings-checkbox-hint">
-                        {locale.settingsResetLineCounterOnPageHint || "Restarts text line numbering at 1 after each Page N marker."}
-                      </div>
-                    </div>
-                  </label>
-                </div>
+                {renderToggle(
+                  autoScrollStyle,
+                  changeAutoScrollStyle,
+                  locale.settingsAutoScrollStyleLabel,
+                  locale.settingsAutoScrollStyleHint || "Automatically scrolls to selected style"
+                )}
+                {renderToggle(
+                  currentFolderTagPriority,
+                  changeCurrentFolderTagPriority,
+                  locale.settingsCurrentFolderTagPriorityLabel,
+                  locale.settingsCurrentFolderTagPriorityHint || "Gives priority to styles from current folder"
+                )}
+                {renderToggle(
+                  showQuickStyleSize,
+                  changeShowQuickStyleSize,
+                  locale.settingsQuickStyleSizeLabel || "Quick style size editor",
+                  locale.settingsQuickStyleSizeHint || "Show the mini size editor when hovering the style edit button."
+                )}
               </div>
               <div className="field">
                 <div className="field-label">{locale.settingsQuickStyleSizeStepLabel || "Quick size step"}</div>
@@ -1147,45 +1123,43 @@ const SettingsModal = React.memo(function SettingsModal() {
               </div>
             </div>
             <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupTextPositioning || "Text positioning"}</div>
-              <div className="field">
-                <div className="field-label">{locale.settingsInternalPaddingLabel || "Internal padding (px)"}</div>
-                <div className="field-input">
-                  <input 
-                    type="number" 
-                    min="0" 
-                    max="100" 
-                    value={internalPadding} 
-                    onChange={changeInternalPadding} 
-                    className="topcoat-text-input--large" 
-                  />
-                </div>
-                <div className="field-descr">{locale.settingsInternalPaddingHint || "Internal space to prevent text from touching bubble edges (0-100 pixels)"}</div>
+              <div className="settings-group-title">{locale.settingsGroupAutomations || "Automations"}</div>
+              <div className="settings-checkbox-grid">
+                {renderToggle(
+                  autoClosePSD,
+                  changeAutoClosePSD,
+                  locale.settingsAutoClosePsdLabel,
+                  locale.settingsAutoClosePsdHint || "Automatically closes PSD files after processing"
+                )}
               </div>
             </div>
             <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupUpdates || "Priorities and Updates"}</div>
+              <div className="settings-group-title">{locale.settingsGroupExperimental || "Experimental"}</div>
               <div className="settings-checkbox-grid">
-                <div className="settings-checkbox-item">
-                  <label className="settings-checkbox-label">
-                    <input type="checkbox" checked={currentFolderTagPriority} onChange={changeCurrentFolderTagPriority} />
-                    <div className="settings-checkbox-custom"></div>
-                    <div className="settings-checkbox-content">
-                      <span>{locale.settingsCurrentFolderTagPriorityLabel}</span>
-                      <div className="settings-checkbox-hint">{locale.settingsCurrentFolderTagPriorityHint || "Gives priority to styles from current folder"}</div>
-                    </div>
-                  </label>
-                </div>
-                <div className="settings-checkbox-item">
-                  <label className="settings-checkbox-label">
-                    <input type="checkbox" checked={checkUpdates} onChange={changeCheckUpdates} />
-                    <div className="settings-checkbox-custom"></div>
-                    <div className="settings-checkbox-content">
-                      <span>{locale.settingsCheckUpdatesLabel}</span>
-                      <div className="settings-checkbox-hint">{locale.settingsCheckUpdatesHint || "Automatically checks for available updates"}</div>
-                    </div>
-                  </label>
-                </div>
+                {renderToggle(
+                  inlineTextShapeR,
+                  changeInlineTextShapeR,
+                  <React.Fragment>
+                    {locale.settingsInlineTextShapeRLabel || "TextShapeR"}
+                    <b className="settings-new-badge">{locale.settingsNewBadge || "New"}</b>
+                  </React.Fragment>,
+                  locale.settingsInlineTextShapeRHint || "Shows text shape suggestions directly in the main panel. This may impact performance."
+                )}
+                {inlineTextShapeR && renderToggle(
+                  dehyphenateTextShapeR,
+                  changeDehyphenateTextShapeR,
+                  locale.settingsDehyphenateLabel || "TextShapeR: join words split by hyphenation",
+                  locale.settingsDehyphenateHint || "When shaping text, joins words split across line breaks. Turn off if real compound words should stay separated."
+                )}
+                {renderToggle(
+                  multiTabEnabled,
+                  changeMultiTabEnabled,
+                  <React.Fragment>
+                    {locale.settingsMultiTabLabel || "Multi-tab"}
+                    <b className="settings-new-badge">{locale.settingsNewBadge || "New"}</b>
+                  </React.Fragment>,
+                  locale.settingsMultiTabHint || "Manage several series at once with tabs above the text block, each with its own text and PSD sync."
+                )}
               </div>
             </div>
           </div>
@@ -1302,18 +1276,12 @@ const SettingsModal = React.memo(function SettingsModal() {
             <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupDebug || "Debugging"}</div>
               <div className="settings-checkbox-grid">
-                <div className="settings-checkbox-item">
-                  <label className="settings-checkbox-label">
-                    <input type="checkbox" checked={debugLogger} onChange={changeDebugLogger} />
-                    <div className="settings-checkbox-custom"></div>
-                    <div className="settings-checkbox-content">
-                      <span>{locale.settingsDebugLoggerLabel || "Debug logging"}</span>
-                      <div className="settings-checkbox-hint">
-                        {locale.settingsDebugLoggerHint || "Writes a detailed log of every Photoshop action TypeR performs (calls, payloads, results, timings, events) to typer_debug.log in the extension folder."}
-                      </div>
-                    </div>
-                  </label>
-                </div>
+                {renderToggle(
+                  debugLogger,
+                  changeDebugLogger,
+                  locale.settingsDebugLoggerLabel || "Debug logging",
+                  locale.settingsDebugLoggerHint || "Writes a detailed log of every Photoshop action TypeR performs (calls, payloads, results, timings, events) to typer_debug.log in the extension folder."
+                )}
               </div>
               <div className="field">
                 <button type="button" className="topcoat-button--large" onClick={revealDebugLog}>
@@ -1341,15 +1309,16 @@ const SettingsModal = React.memo(function SettingsModal() {
                   <FaFileExport size={18} /> {locale.settingsExport}
                 </button>
               </div>
+            </div>
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupDanger || "Danger zone"}</div>
               <div className="field">
-                <button className="topcoat-button--large" onClick={checkUpdatesNow}>
-                  {locale.settingsCheckUpdatesButton}
-                </button>
-              </div>
-              <div className="field">
-                <button className="topcoat-button--large--cta" onClick={resetStorage}>
+                <button type="button" className="topcoat-button--large settings-danger-btn" onClick={resetStorage}>
                   {locale.settingsResetStorage || "Reset settings"}
                 </button>
+              </div>
+              <div className="field-descr">
+                {locale.settingsResetStorageHint || "Deletes the storage file and restores every setting to its default value."}
               </div>
             </div>
           </div>
@@ -1387,7 +1356,12 @@ const SettingsModal = React.memo(function SettingsModal() {
           </div>
           <form className="settings-content" onSubmit={save}>
             {renderTabContent()}
-            <div className="settings-actions">
+            <div className="settings-actions hostBgdLight hostBrdTopContrast">
+              {edited && (
+                <span className="settings-unsaved">
+                  {locale.settingsUnsavedChanges || "Unsaved changes"}
+                </span>
+              )}
               <button type="submit" className={edited ? "topcoat-button--large--cta" : "topcoat-button--large"}>
                 <MdSave size={18} /> {locale.save}
               </button>
