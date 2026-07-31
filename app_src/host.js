@@ -620,29 +620,80 @@ function _moveLayer(offsetX, offsetY) {
  * Returns null if no stroke is found.
  */
 function _getLayerStroke() {
-  var ref = new ActionReference();
-  ref.putProperty(charIDToTypeID("Prpr"), charIDToTypeID("Lefx"));
-  ref.putEnumerated(charIDToTypeID("Lyr "), charIDToTypeID("Ordn"), charIDToTypeID("Trgt"));
-  var desc = executeActionGet(ref);
-  if (!desc.hasKey(charIDToTypeID("Lefx"))) return null;
+  // Must never throw: getActiveLayerText() serializes its result straight to
+  // the panel, and an exception here would make the whole call fail and show
+  // "select a text layer" even though a text layer is active.
+  try {
+    var ref = new ActionReference();
+    ref.putProperty(charIDToTypeID("Prpr"), charIDToTypeID("Lefx"));
+    ref.putEnumerated(charIDToTypeID("Lyr "), charIDToTypeID("Ordn"), charIDToTypeID("Trgt"));
+    var desc = executeActionGet(ref);
+    if (!desc.hasKey(charIDToTypeID("Lefx"))) return null;
 
-  var fx = desc.getObjectValue(charIDToTypeID("Lefx"));
-  if (!fx.hasKey(charIDToTypeID("FrFX"))) return null;
+    var fx = desc.getObjectValue(charIDToTypeID("Lefx"));
+    var fr = null;
+    if (fx.hasKey(charIDToTypeID("FrFX"))) {
+      try {
+        fr = fx.getObjectValue(charIDToTypeID("FrFX"));
+      } catch (frError) {
+        fr = null;
+      }
+    }
+    if (!fr) {
+      // Newer Photoshop versions store duplicated strokes in a
+      // "frameFXMulti" list instead of a single FrFX object
+      var multiId = stringIDToTypeID("frameFXMulti");
+      if (fx.hasKey(multiId)) {
+        var frList = fx.getList(multiId);
+        if (frList.count > 0) fr = frList.getObjectValue(0);
+      }
+    }
+    if (!fr) return null;
 
-  var fr = fx.getObjectValue(charIDToTypeID("FrFX"));
-  var col = fr.getObjectValue(charIDToTypeID("Clr "));
+    // Gradient/pattern strokes have no solid "Clr " descriptor, and
+    // grayscale documents store the color as "Gry " instead of RGB
+    var color = { r: 0, g: 0, b: 0 };
+    try {
+      var col = fr.getObjectValue(charIDToTypeID("Clr "));
+      if (col.hasKey(charIDToTypeID("Rd  "))) {
+        color = {
+          r: col.getDouble(charIDToTypeID("Rd  ")),
+          g: col.getDouble(charIDToTypeID("Grn ")),
+          b: col.getDouble(charIDToTypeID("Bl  ")),
+        };
+      } else if (col.hasKey(charIDToTypeID("Gry "))) {
+        var grayValue = Math.round(255 * (1 - col.getDouble(charIDToTypeID("Gry ")) / 100));
+        color = { r: grayValue, g: grayValue, b: grayValue };
+      }
+    } catch (colorError) {}
 
-  return {
-    enabled: fr.getBoolean(charIDToTypeID("enab")),
-    position: fr.getEnumerationValue(charIDToTypeID("Styl")) == charIDToTypeID("OutF") ? "outer" : "other",
-    size: fr.getUnitDoubleValue(charIDToTypeID("Sz  ")),
-    opacity: fr.getUnitDoubleValue(charIDToTypeID("Opct")),
-    color: {
-      r: col.getDouble(charIDToTypeID("Rd  ")),
-      g: col.getDouble(charIDToTypeID("Grn ")),
-      b: col.getDouble(charIDToTypeID("Bl  ")),
-    },
-  };
+    var enabled = true;
+    try {
+      enabled = fr.getBoolean(charIDToTypeID("enab"));
+    } catch (enabledError) {}
+    var position = "other";
+    try {
+      position = fr.getEnumerationValue(charIDToTypeID("Styl")) == charIDToTypeID("OutF") ? "outer" : "other";
+    } catch (positionError) {}
+    var size = 0;
+    try {
+      size = fr.getUnitDoubleValue(charIDToTypeID("Sz  "));
+    } catch (sizeError) {}
+    var opacity = 100;
+    try {
+      opacity = fr.getUnitDoubleValue(charIDToTypeID("Opct"));
+    } catch (opacityError) {}
+
+    return {
+      enabled: enabled,
+      position: position,
+      size: size,
+      opacity: opacity,
+      color: color,
+    };
+  } catch (strokeError) {
+    return null;
+  }
 }
 
 /**
@@ -1689,11 +1740,15 @@ function getActiveLayerText() {
   try {
     bounds = _getCurrentTextLayerBounds();
   } catch (boundsError) {}
+  var stroke = null;
+  try {
+    stroke = _getLayerStroke();
+  } catch (strokeError) {}
   return jamJSON.stringify({
     layerId: layerId,
     bounds: bounds,
     textProps: jamText.getLayerText(),
-    stroke: _getLayerStroke(),
+    stroke: stroke,
   });
 }
 
