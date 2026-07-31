@@ -1,8 +1,8 @@
 import React from "react";
 
-import { csInterface, setActiveLayerText, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, getHotkeyPressed, changeActiveLayerTextSize, isHostActionPending, isPanelIdle, notePanelActivity, deselectDocument } from "./utils";
+import { csInterface, getHotkeyPressed, isHostActionPending, isPanelIdle, notePanelActivity } from "./utils";
 import { useContext } from "./context";
-import { buildStoredSelectionPayload, getScaledStyle } from "./textLayerPayload";
+import { shortcutCommands } from "./shortcutCommands";
 
 const intervalTime = 50;
 // After a few idle minutes the keyboard poll slows to this rate: 20 host
@@ -17,14 +17,13 @@ const checkShortcut = (state, ref) => {
 // Matching is subset-based, so a modifier-only binding (e.g. default add =
 // WIN+CTRL) would always shadow a longer custom binding built on the same
 // modifiers. Pick the most specific match instead of the first one.
-const bindingOrder = ["add", "apply", "center", "toggleMultiBubble", "next", "previous", "increase", "decrease", "insertText", "nextPage"];
 const matchBinding = (state, shortcut) => {
   let best = null;
   let bestLength = 0;
-  bindingOrder.forEach((name) => {
-    const ref = shortcut[name];
+  shortcutCommands.forEach((command) => {
+    const ref = shortcut[command.id];
     if (checkShortcut(state, ref) && ref.length > bestLength) {
-      best = name;
+      best = command;
       bestLength = ref.length;
     }
   });
@@ -66,77 +65,13 @@ const HotkeysListner = React.memo(function HotkeysListner() {
       // Pressed keys are activity: restore fast polling before matching so a
       // hotkey burst after an idle period is never throttled
       if (realState.length) notePanelActivity();
-      const matched = matchBinding(realState, ctx.state.shortcut);
-      if (matched === "add") {
-        if (!checkRepeatTime()) return;
-
-        const storedSelections = ctx.state.storedSelections || [];
-
-        if (ctx.state.multiBubbleMode && storedSelections.length > 0) {
-          const payload = buildStoredSelectionPayload({
-            storedSelections,
-            lines: ctx.state.lines,
-            currentLineIndex: ctx.state.currentLineIndex,
-            styles: ctx.state.styles,
-            currentStyle: ctx.state.currentStyle,
-            textScale: ctx.state.textScale,
-          });
-
-          const pointText = ctx.state.pastePointText;
-          const padding = ctx.state.internalPadding || 0;
-          const direction = ctx.state.direction;
-          createTextLayersInStoredSelections(payload.texts, payload.styles, storedSelections, pointText, padding, direction, (ok) => {
-            if (ok) {
-              ctx.dispatch({ type: "clearSelections" });
-              // Drop the live marquee too: leaving it active would make the
-              // selection poll re-add it and advance the line
-              deselectDocument();
-            }
-          });
-        } else {
-          const line = ctx.state.currentLine || { text: "" };
-          const style = getScaledStyle(ctx.state.currentStyle, ctx.state.textScale);
-          createTextLayerInSelection(line.text, style, ctx.state.pastePointText, ctx.state.internalPadding || 0, ctx.state.direction, (ok) => {
-            if (ok) ctx.dispatch({ type: "nextLine", add: true });
-          });
-        }
-      } else if (matched === "apply") {
-        if (!checkRepeatTime()) return;
-        const line = ctx.state.currentLine || { text: "" };
-        const style = getScaledStyle(ctx.state.currentStyle, ctx.state.textScale);
-        setActiveLayerText(line.text, style, ctx.state.direction, (ok) => {
-          if (ok) ctx.dispatch({ type: "nextLine", add: true });
-        });
-      } else if (matched === "center") {
-        if (!checkRepeatTime()) return;
-        alignTextLayerToSelection(ctx.state.resizeTextBoxOnCenter, ctx.state.internalPadding || 0);
-      } else if (matched === "toggleMultiBubble") {
-        if (!checkRepeatTime(300)) return;
-        ctx.dispatch({ type: "setMultiBubbleMode", value: !ctx.state.multiBubbleMode });
-      } else if (matched === "next") {
-        if (!checkRepeatTime(300)) return;
-        ctx.dispatch({ type: "nextLine" });
-      } else if (matched === "previous") {
-        if (!checkRepeatTime(300)) return;
-        ctx.dispatch({ type: "prevLine" });
-      } else if (matched === "increase") {
-        if (!checkRepeatTime(300)) return;
-        changeActiveLayerTextSize(ctx.state.textSizeIncrement || 1);
-      } else if (matched === "decrease") {
-        if (!checkRepeatTime(300)) return;
-        changeActiveLayerTextSize(-(ctx.state.textSizeIncrement || 1));
-      } else if (matched === "insertText") {
-        if (!checkRepeatTime()) return;
-        const line = ctx.state.currentLine || { text: "" };
-        setActiveLayerText(line.text, null, ctx.state.direction, (ok) => {
-          if (ok) ctx.dispatch({ type: "nextLine", add: true });
-        });
-      } else if (matched === "nextPage") {
-        if (!checkRepeatTime(300)) return;
-        ctx.dispatch({ type: "nextPage" });
-      } else {
+      const command = matchBinding(realState, ctx.state.shortcut);
+      if (!command) {
         keyUpRef.current = true;
+        return;
       }
+      if (!checkRepeatTime(command.repeatDelay || 0)) return;
+      command.handler(ctx);
     };
 
     const interval = setInterval(() => {

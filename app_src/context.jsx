@@ -6,6 +6,7 @@ import { getNextLineNumberState } from "./lineNumbering";
 import { setDehyphenationEnabled } from "./textShapeR";
 import { normalizeEditorTheme } from "./themePresets";
 import { applyEditorTheme } from "./lib/themeManager";
+import { getDefaultShortcuts } from "./shortcutCommands";
 
 const storage = readStorage();
 const storeFields = [
@@ -127,18 +128,7 @@ const normalizeUiLayout = (raw) => {
   return { order, visible, sizes };
 };
 
-const defaultShortcut = {
-  add: ["WIN", "CTRL"],
-  center: ["WIN", "ALT"],
-  apply: ["WIN", "SHIFT"],
-  next: ["CTRL", "ENTER"],
-  previous: ["CTRL", "TAB"],
-  increase: ["CTRL", "SHIFT", "PLUS"],
-  decrease: ["CTRL", "SHIFT", "MINUS"],
-  insertText: ["WIN", "V"],
-  nextPage: ["SHIFT", "X"],
-  toggleMultiBubble: ["CTRL", "ALT", "M"],
-};
+const defaultShortcut = getDefaultShortcuts();
 
 const normalizeFolders = (folders) => {
   const normalized = (folders || []).map((folder) => {
@@ -415,8 +405,40 @@ const reducer = (state, action) => {
       break;
     }
 
+    case "previousPage": {
+      if (!state.text) break;
+      const pageMarkers = [];
+      for (let i = 0; i < state.currentLineIndex; i++) {
+        if (state.lines[i].rawText.match(/Page [0-9]+/i)) pageMarkers.push(i);
+      }
+      // The nearest marker is the current page; move to the one before it.
+      const targetMarker = pageMarkers.length > 1 ? pageMarkers[pageMarkers.length - 2] : -1;
+      if (targetMarker < 0) break;
+      for (let i = targetMarker + 1; i < state.lines.length; i++) {
+        if (state.lines[i].rawText.match(/Page [0-9]+/i)) break;
+        if (!state.lines[i].ignore) {
+          newState.currentLineIndex = state.lines[i].rawIndex;
+          thenScroll = true;
+          thenSelectStyle = true;
+          break;
+        }
+      }
+      break;
+    }
+
     case "setCurrentStyleId": {
       newState.currentStyleId = action.id;
+      break;
+    }
+
+    case "previousStyle":
+    case "nextStyle": {
+      if (!state.styles.length) break;
+      const currentIndex = state.styles.findIndex((style) => style.id === state.currentStyleId);
+      const baseIndex = currentIndex < 0 ? 0 : currentIndex;
+      const direction = action.type === "previousStyle" ? -1 : 1;
+      const nextIndex = (baseIndex + direction + state.styles.length) % state.styles.length;
+      newState.currentStyleId = state.styles[nextIndex].id;
       break;
     }
 

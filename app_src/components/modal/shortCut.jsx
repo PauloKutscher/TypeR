@@ -66,12 +66,13 @@ const parseHostKeys = (state) => {
 
 const Shortcut = (props) => {
   const hostQueryRef = React.useRef(0);
+  const inputRef = React.useRef(null);
   // Mirrors the hidden input's value so the keycaps can render reactively
   const [displayKeys, setDisplayKeys] = React.useState(props.value || []);
   const [recording, setRecording] = React.useState(false);
 
   React.useEffect(() => {
-    const input = document.getElementById(`shortcut_${props.index}`);
+    const input = inputRef.current;
     if (input) input.value = (props.value || []).join(" + ");
     setDisplayKeys(props.value || []);
   }, [props.index, props.value]);
@@ -82,6 +83,7 @@ const Shortcut = (props) => {
     const localKeys = getLocalKeys(e);
     input.value = localKeys.join(" + ");
     setDisplayKeys(localKeys);
+    props.onChange(props.index, localKeys);
 
     // Shortcuts are matched at runtime against ScriptUI's keyboardState key
     // names, which can differ from browser key names (layout, Alt symbols,
@@ -99,22 +101,30 @@ const Shortcut = (props) => {
       const keys = hostHasMainKey ? hostKeys : hostKeys.concat(localKeys.filter((key) => !MODIFIERS.includes(key)));
       input.value = keys.join(" + ");
       setDisplayKeys(keys);
+      props.onChange(props.index, keys);
     });
   };
 
-  const clearShortcut = () => {
+  const focusShortcut = () => {
+    if (inputRef.current) inputRef.current.focus();
+  };
+
+  const clearShortcut = (e) => {
+    e.stopPropagation();
     hostQueryRef.current++;
-    const input = document.getElementById(`shortcut_${props.index}`);
+    const input = inputRef.current;
     if (input) input.value = "";
     setDisplayKeys([]);
+    props.onChange(props.index, []);
   };
 
   const label = locale[`shortcut_${props.index}`];
   return (
-    <div className="shortcut-row" key={props.index}>
+    <div className={"shortcut-row" + (props.conflict ? " m-conflict" : "")} key={props.index} onClick={focusShortcut}>
       <div className="shortcut-row-label" title={label}>{label}</div>
       <div className={"shortcut-capture" + (recording ? " m-recording" : "")}>
         <input
+          ref={inputRef}
           id={`shortcut_${props.index}`}
           defaultValue={(props.value || []).join(" + ")}
           onKeyDown={changeShortCut}
@@ -146,6 +156,7 @@ const Shortcut = (props) => {
       >
         <FiX size={14} />
       </button>
+      {props.conflict ? <div className="shortcut-row-warning">{props.conflict}</div> : null}
     </div>
   );
 };
