@@ -21,6 +21,7 @@ import {
 import config from '../../config';
 import {locale, openUrl} from '../../utils';
 import {useContext} from '../../context';
+import {shortcutCommands} from '../../shortcutCommands';
 
 const VIDEO_URL = 'https://youtu.be/QwxG2S_PCMQ';
 const MULTI_BUBBLE_VIDEO_URL = 'https://youtu.be/gmIh-eEj2HY';
@@ -99,18 +100,22 @@ const HelpModal = React.memo(function HelpModal() {
         },
     ];
 
-    const shortcutRows = [
-        {id: 'add', detail: locale.helpQuickPasteDescr},
-        {id: 'apply', detail: locale.helpQuickApplyDescr},
-        {id: 'center', detail: locale.helpQuickAlignDescr},
-        {id: 'insertText', detail: locale.helpShortcutInsertTextDescr || 'Pastes the line text only, keeping the layer style.'},
-        {id: 'previous', detail: locale.helpShortcutPreviousDescr || 'Moves to the previous non-ignored line.'},
-        {id: 'next', detail: locale.helpShortcutNextDescr || 'Moves to the next non-ignored line.'},
-        {id: 'increase', detail: locale.helpShortcutIncreaseDescr || 'Increases the size of the active text layer.'},
-        {id: 'decrease', detail: locale.helpShortcutDecreaseDescr || 'Decreases the size of the active text layer.'},
-        {id: 'nextPage', detail: locale.helpQuickNextPageDescr},
-        {id: 'toggleMultiBubble', detail: locale.helpQuickMultiBubbleDescr},
-    ];
+    const shortcutDetails = {
+        add: locale.helpQuickPasteDescr,
+        apply: locale.helpQuickApplyDescr,
+        center: locale.helpQuickAlignDescr,
+        insertText: locale.helpShortcutInsertTextDescr || 'Pastes the line text only, keeping the layer style.',
+        previous: locale.helpShortcutPreviousDescr || 'Moves to the previous non-ignored line.',
+        next: locale.helpShortcutNextDescr || 'Moves to the next non-ignored line.',
+        increase: locale.helpShortcutIncreaseDescr || 'Increases the size of the active text layer.',
+        decrease: locale.helpShortcutDecreaseDescr || 'Decreases the size of the active text layer.',
+        nextPage: locale.helpQuickNextPageDescr,
+        toggleMultiBubble: locale.helpQuickMultiBubbleDescr,
+    };
+    const shortcutRows = shortcutCommands.map((command) => ({
+        id: command.id,
+        detail: shortcutDetails[command.id] || '',
+    }));
 
     const sections = [
         {
