@@ -1295,10 +1295,8 @@ const SettingsModal = React.memo(function SettingsModal() {
               </div>
             </div>
             <div className="settings-group">
-              <FontScanPromo />
-            </div>
-            <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupImportExport || "Import/Export"}</div>
+              <FontScanPromo />
               <div className="field">
                 <button className="topcoat-button--large" onClick={importSettings}>
                   <FaFileImport size={18} /> {locale.settingsImport}
