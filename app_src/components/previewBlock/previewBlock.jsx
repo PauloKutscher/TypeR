@@ -207,6 +207,16 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     inlineShapePending.current = true;
     getCurrentSelection((selection) => {
       if (selection && selection.width && selection.height) {
+        // Without an active text layer there is nothing to shape: skip the
+        // outline sampling entirely so drawing selections on non-text layers
+        // never churns the document with the 21-op sampling pass.
+        if (!inlineSourceKey.current) {
+          inlineShapePending.current = false;
+          inlineShapeKey.current = "";
+          clearInlineShapeSettle();
+          setInlineSelectionShape((current) => (current ? null : current));
+          return;
+        }
         // A manual selection always wins over the automatic bubble detection
         const boundsHash = `selection:${getSelectionBoundsHash(selection)}`;
         if (boundsHash === inlineShapeKey.current) {

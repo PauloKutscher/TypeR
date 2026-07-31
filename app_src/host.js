@@ -7,22 +7,27 @@ var charID = {
   By: 1115234336, // 'By  '
   Channel: 1130917484, // 'Chnl'
   Contract: 1131312227, // 'Cntc'
+  Delete: 1147958304, // 'Dlt '
   Document: 1147366766, // 'Dcmn'
   Expand: 1165521006, // 'Expn'
   FrameSelect: 1718838636, // 'fsel'
+  From: 1181904749, // 'From'
   Horizontal: 1215461998, // 'Hrzn'
   Layer: 1283027488, // 'Lyr '
   Left: 1281713780, // 'Left'
+  Make: 1298866208, // 'Mk  '
   Move: 1836021349, // 'move'
   None: 1315925605, // 'None'
   Null: 1853189228, // 'null'
   Offset: 1332114292, // 'Ofst'
   Ordinal: 1332896878, // 'Ordn'
+  Path: 1348564072, // 'Path'
   PixelUnit: 592476268, // '#Pxl'
   Point: 1349415968, // 'Pnt '
   Property: 1349677170, // 'Prpr'
   Right: 1382508660, // 'Rght'
   Select: 1936483188, // 'slct'
+  SelectionClass: 1668506988, // 'csel'
   Set: 1936028772, // 'setd'
   Size: 1400512544, // 'Sz  '
   Target: 1416783732, // 'Trgt'
@@ -32,8 +37,10 @@ var charID = {
   TextStyle: 1417180243, // 'TxtS'
   TextStyleRange: 1417180276, // 'Txtt'
   To: 1411391520, // 'T   '
+  Tolerance: 1416393326, // 'Tlrn'
   Top: 1416589344, // 'Top '
   Vertical: 1450341475, // 'Vrtc'
+  WorkPath: 1467116368, // 'WrkP'
 };
 
 var _SAFE_PARAGRAPH_PROPS = [
@@ -1824,6 +1831,253 @@ function _sampleCurrentSelectionShape(bounds, sampleCount) {
   };
 }
 
+function _findWorkPath(doc) {
+  try {
+    for (var i = 0; i < doc.pathItems.length; i++) {
+      if (doc.pathItems[i].kind === PathKind.WORKPATH) return doc.pathItems[i];
+    }
+  } catch (findError) {}
+  return null;
+}
+
+function _readPathPolygons(pathItem) {
+  var polygons = [];
+  var subPaths = pathItem.subPathItems;
+  for (var s = 0; s < subPaths.length; s++) {
+    var points = subPaths[s].pathPoints;
+    var count = points.length;
+    if (count < 3) continue;
+    // On noisy outlines (wand caught screentone) the point count explodes:
+    // skip curve flattening there, the anchors alone are dense enough
+    var flattenSteps = count > 500 ? 1 : 6;
+    var poly = [];
+    for (var i = 0; i < count; i++) {
+      var current = points[i];
+      var next = points[(i + 1) % count];
+      var a = current.anchor;
+      var c1 = current.rightDirection;
+      var c2 = next.leftDirection;
+      var b = next.anchor;
+      var straight = c1[0] === a[0] && c1[1] === a[1] && c2[0] === b[0] && c2[1] === b[1];
+      var steps = straight ? 1 : flattenSteps;
+      for (var t = 0; t < steps; t++) {
+        var u = t / steps;
+        var v = 1 - u;
+        poly.push([
+          v * v * v * a[0] + 3 * v * v * u * c1[0] + 3 * v * u * u * c2[0] + u * u * u * b[0],
+          v * v * v * a[1] + 3 * v * v * u * c1[1] + 3 * v * u * u * c2[1] + u * u * u * b[1],
+        ]);
+      }
+    }
+    if (poly.length >= 3) polygons.push(poly);
+  }
+  return polygons;
+}
+
+function _polygonScanlineSpan(polygons, y) {
+  var minX = null;
+  var maxX = null;
+  for (var p = 0; p < polygons.length; p++) {
+    var poly = polygons[p];
+    for (var i = 0; i < poly.length; i++) {
+      var a = poly[i];
+      var b = poly[(i + 1) % poly.length];
+      // Half-open rule so scanlines crossing a vertex count it exactly once
+      if ((a[1] <= y && b[1] > y) || (b[1] <= y && a[1] > y)) {
+        var x = a[0] + ((y - a[1]) / (b[1] - a[1])) * (b[0] - a[0]);
+        if (minX === null || x < minX) minX = x;
+        if (maxX === null || x > maxX) maxX = x;
+      }
+    }
+  }
+  return minX === null ? null : { left: minX, right: maxX };
+}
+
+function _buildPathShapeRows(polygons, sampleCount) {
+  var minX = Infinity;
+  var minY = Infinity;
+  var maxX = -Infinity;
+  var maxY = -Infinity;
+  for (var p = 0; p < polygons.length; p++) {
+    for (var i = 0; i < polygons[p].length; i++) {
+      var point = polygons[p][i];
+      if (point[0] < minX) minX = point[0];
+      if (point[0] > maxX) maxX = point[0];
+      if (point[1] < minY) minY = point[1];
+      if (point[1] > maxY) maxY = point[1];
+    }
+  }
+  var width = maxX - minX;
+  var height = maxY - minY;
+  if (!(width > 0) || !(height > 0)) return null;
+  var sliceHeight = height / sampleCount;
+  var rows = [];
+  var covered = 0;
+  for (var r = 0; r < sampleCount; r++) {
+    var yRatio = sampleCount <= 1 ? 0.5 : r / (sampleCount - 1);
+    var yMid = minY + height * yRatio;
+    var left = null;
+    var right = null;
+    // The legacy sampler measured the widest extent inside each band: probe
+    // three scanlines per band to keep the same behavior
+    var offsets = [-sliceHeight / 2, 0, sliceHeight / 2];
+    for (var k = 0; k < offsets.length; k++) {
+      var y = yMid + offsets[k];
+      if (y <= minY) y = minY + height * 0.002;
+      if (y >= maxY) y = maxY - height * 0.002;
+      var span = _polygonScanlineSpan(polygons, y);
+      if (span) {
+        if (left === null || span.left < left) left = span.left;
+        if (right === null || span.right > right) right = span.right;
+      }
+    }
+    if (left !== null && right > left) {
+      covered++;
+      rows.push({
+        y: yRatio,
+        left: Math.max(0, Math.min(1, (left - minX) / width)),
+        right: Math.max(0, Math.min(1, (right - minX) / width)),
+        width: Math.max(0, Math.min(1, (right - left) / width)),
+      });
+    } else {
+      rows.push({ y: yRatio, left: 0.5, right: 0.5, width: 0 });
+    }
+  }
+  if (!covered) return null;
+  return rows;
+}
+
+// DOM errors pop modal alerts ("The command X is not available") unless
+// dialogs are turned off for the run: scans must never surface a dialog
+function _withDialogsSuppressed(fn) {
+  var oldDialogs = null;
+  try {
+    oldDialogs = app.displayDialogs;
+    app.displayDialogs = DialogModes.NO;
+  } catch (dialogError) {
+    oldDialogs = null;
+  }
+  var result = null;
+  try {
+    result = fn();
+  } finally {
+    if (oldDialogs !== null) {
+      try {
+        app.displayDialogs = oldDialogs;
+      } catch (restoreError) {}
+    }
+  }
+  return result;
+}
+
+function _makeWorkPathFromSelection(tolerance) {
+  // Canonical source reference is property 'fsel' of class 'csel'; some
+  // hosts accept it on 'Chnl' instead, so try both before giving up
+  var sourceClasses = [charID.SelectionClass, charID.Channel];
+  var lastError = null;
+  for (var i = 0; i < sourceClasses.length; i++) {
+    try {
+      var desc = new ActionDescriptor();
+      var pathRef = new ActionReference();
+      pathRef.putClass(charID.Path);
+      desc.putReference(charID.Null, pathRef);
+      var fromRef = new ActionReference();
+      fromRef.putProperty(sourceClasses[i], charID.FrameSelect);
+      desc.putReference(charID.From, fromRef);
+      desc.putUnitDouble(charID.Tolerance, charID.PixelUnit, tolerance);
+      executeAction(charID.Make, desc, DialogModes.NO);
+      return;
+    } catch (makeError) {
+      lastError = makeError;
+    }
+  }
+  throw lastError;
+}
+
+function _deleteWorkPath() {
+  var desc = new ActionDescriptor();
+  var pathRef = new ActionReference();
+  pathRef.putProperty(charID.Path, charID.WorkPath);
+  desc.putReference(charID.Null, pathRef);
+  executeAction(charID.Delete, desc, DialogModes.NO);
+}
+
+// Fast selection shape scan: one make-work-path call replaces the legacy
+// 21x (rect select + channel intersect + bounds read) loop that kept
+// Photoshop's UI thread busy long enough to flash the wait cursor.
+// Rows are normalized against the path's own bounding box, so whatever
+// unit path anchors are reported in cancels out.
+// The active selection is snapshotted to a temp channel first: the path
+// conversion consumes it, and both the caller (restoreSelection) and the
+// legacy fallback need it back. Everything risky runs through ActionManager
+// with DialogModes.NO - a host that refuses the path conversion fails
+// silently into the legacy sampler instead of popping alerts, and after 3
+// failures the fast path stops trying for the session.
+function _sampleSelectionShapeViaPath(bounds, sampleCount, restoreSelection) {
+  if ((_hostState.pathScanFails || 0) >= 3) return null;
+  var doc = app.activeDocument;
+  // Never clobber a work path the user is keeping around
+  if (_findWorkPath(doc)) return null;
+  var tempChannel = _createTempSelectionChannel(doc);
+  if (!tempChannel) return null;
+  var polygons = null;
+  var failure = "";
+  try {
+    _makeWorkPathFromSelection(2.0);
+  } catch (makeError) {
+    failure = "make:" + String(makeError.message || makeError);
+  }
+  if (!failure) {
+    var workPath = _findWorkPath(doc);
+    if (workPath) {
+      try {
+        polygons = _readPathPolygons(workPath);
+      } catch (readError) {
+        failure = "read:" + String(readError.message || readError);
+      }
+      try {
+        _deleteWorkPath();
+      } catch (deleteError) {
+        try {
+          workPath.remove();
+        } catch (domRemoveError) {}
+      }
+    } else {
+      failure = "noWorkPath";
+    }
+  }
+  var rows = null;
+  if (!failure && polygons && polygons.length) {
+    rows = _buildPathShapeRows(polygons, sampleCount);
+    if (!rows) failure = "emptyRows";
+  } else if (!failure) {
+    failure = "noPolygons";
+  }
+  // The conversion consumed the selection: bring it back whenever the caller
+  // wants it or the legacy fallback is about to need it
+  if (restoreSelection || !rows) {
+    try {
+      doc.selection.load(tempChannel);
+    } catch (loadError) {}
+  }
+  try {
+    tempChannel.remove();
+  } catch (removeError) {}
+  if (!rows) {
+    _hostState.pathScanFails = (_hostState.pathScanFails || 0) + 1;
+    _hostState.lastPathScanError = failure;
+    return null;
+  }
+  _hostState.pathScanFails = 0;
+  _hostState.lastPathScanError = "";
+  return {
+    scan: "path",
+    bounds: bounds,
+    rows: rows,
+    fallback: false,
+  };
+}
+
 function getCurrentSelectionShape(data) {
   if (!documents.length) {
     return jamJSON.stringify({ error: "doc" });
@@ -1834,9 +2088,23 @@ function getCurrentSelectionShape(data) {
   }
   var sampleCount = _normalizeShapeSampleCount(data && data.samples, 17);
   var shape = _withSuspendedHistory("TypeR Shape Scan", function () {
-    return _sampleCurrentSelectionShape(bounds, sampleCount);
+    return _withDialogsSuppressed(function () {
+      return (
+        _sampleSelectionShapeViaPath(bounds, sampleCount, true) ||
+        _sampleCurrentSelectionShape(bounds, sampleCount)
+      );
+    });
   });
-  return jamJSON.stringify(shape || _buildBoundsShapeRows(bounds, sampleCount));
+  shape = shape || _buildBoundsShapeRows(bounds, sampleCount);
+  // scan/scanError lead the object so they survive the debug log preview cap
+  var out = { scan: shape.scan || "legacy" };
+  if (out.scan === "legacy" && _hostState.lastPathScanError) {
+    out.scanError = _hostState.lastPathScanError;
+  }
+  out.bounds = shape.bounds;
+  out.rows = shape.rows;
+  out.fallback = shape.fallback;
+  return jamJSON.stringify(out);
 }
 
 function getActiveLayerBubbleShape(data) {
@@ -1860,6 +2128,7 @@ function getActiveLayerBubbleShape(data) {
   var sampleCount = _normalizeShapeSampleCount(data && data.samples, 21);
 
   var result = _withSuspendedHistory("TypeR Bubble Scan", function () {
+    return _withDialogsSuppressed(function () {
     var scanResult = null;
     try {
       var textBounds = _getCurrentTextLayerBounds();
@@ -1885,7 +2154,11 @@ function getActiveLayerBubbleShape(data) {
       var contractAmount = _clampAdjustAmount(expanded, -smoothAmount);
       if (contractAmount !== 0) _modifySelectionBounds(contractAmount);
       bounds = _getCurrentSelectionBounds() || bounds;
-      scanResult = _sampleCurrentSelectionShape(bounds, sampleCount);
+      // The wand selection is ours and gets deselected right below, so the
+      // fast path only restores it when the legacy fallback needs to run
+      scanResult =
+        _sampleSelectionShapeViaPath(bounds, sampleCount, false) ||
+        _sampleCurrentSelectionShape(bounds, sampleCount);
     } catch (bubbleError) {
       scanResult = null;
     }
@@ -1893,6 +2166,7 @@ function getActiveLayerBubbleShape(data) {
       _deselect();
     } catch (deselectError) {}
     return scanResult;
+    });
   });
   if (!result) {
     return jamJSON.stringify({ error: "shape" });
@@ -1900,7 +2174,15 @@ function getActiveLayerBubbleShape(data) {
   if (result.error) {
     return jamJSON.stringify({ error: result.error });
   }
-  return jamJSON.stringify(result);
+  // scan/scanError lead the object so they survive the debug log preview cap
+  var out = { scan: result.scan || "legacy" };
+  if (out.scan === "legacy" && _hostState.lastPathScanError) {
+    out.scanError = _hostState.lastPathScanError;
+  }
+  out.bounds = result.bounds;
+  out.rows = result.rows;
+  out.fallback = result.fallback;
+  return jamJSON.stringify(out);
 }
 
 function getSelectedTextLayers() {
