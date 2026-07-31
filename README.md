@@ -31,9 +31,6 @@
 
 ---
 
-> [!NOTE]
-> The `develop` branch currently documents TypeR 2.6.0. Until the 2.6.0 release is published, the stable download remains on the previous feature set. Check the [latest release notes](https://github.com/ScanR/TypeR/releases/latest) when choosing between the release build and the current source.
-
 TypeR is a free, open-source Photoshop panel built for typesetters working on translated manga and comics. It keeps the script, page navigation, bubble selection, text placement, and typography styles in one compact workspace.
 
 Instead of repeatedly switching between a script editor and Photoshop, the core loop becomes:
