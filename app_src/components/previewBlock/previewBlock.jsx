@@ -401,16 +401,11 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       }, 120);
     });
 
-    const refreshOnFocus = () => {
-      refreshInlineLayerSource();
-      refreshInlineSelectionShape();
-      refreshBatchSelection();
-    };
-    const refreshOnVisibility = () => {
-      if (!document.hidden) refreshOnFocus();
-    };
-    window.addEventListener("focus", refreshOnFocus);
-    document.addEventListener("visibilitychange", refreshOnVisibility);
+    // No focus-triggered refresh: the panel regains focus on every click
+    // coming from the Photoshop canvas, and running the layer/bubble/batch
+    // refresh at that exact moment competed with the click being processed
+    // (laggy style selection). Photoshop select events and the fallback
+    // poll below keep the inline data fresh.
 
     // Fallback polling for hosts where the event bridge stays silent; slows
     // down to a keep-alive once real Photoshop events are flowing.
@@ -430,8 +425,6 @@ const PreviewBlock = React.memo(function PreviewBlock() {
 
     return () => {
       unsubscribePhotoshopEvents();
-      window.removeEventListener("focus", refreshOnFocus);
-      document.removeEventListener("visibilitychange", refreshOnVisibility);
       clearInterval(pollTimer);
       if (inlineEventDebounce.current) {
         clearTimeout(inlineEventDebounce.current);
@@ -504,8 +497,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   // Resets the stored selections AND the active Photoshop selection: leaving
   // the marquee alive would make the poll re-add it right away and advance
   // the current line behind the user's back
-  const resetStoredSelections = React.useCallback(() => {
-    context.dispatch({ type: "clearSelections" });
+  const resetStoredSelections = React.useCallback((preserveLine = false) => {
+    context.dispatch({ type: "clearSelections", preserveLine });
     deselectDocument();
   }, [context.dispatch]);
 
@@ -680,7 +673,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       const direction = context.state.direction;
       createTextLayersInStoredSelections(payload.texts, payload.styles, storedSelections, pointText, padding, direction, (ok) => {
         if (ok) {
-          resetStoredSelections();
+          resetStoredSelections(true);
         }
       });
     } else {
@@ -712,7 +705,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const handleAlignLayer = React.useCallback(() => {
     alignTextLayerToSelection(context.state.resizeTextBoxOnCenter, context.state.internalPadding || 0, () => {
       if (context.state.multiBubbleMode && (context.state.storedSelections || []).length > 0) {
-        resetStoredSelections();
+        resetStoredSelections(true);
       }
     });
   }, [context.state, resetStoredSelections]);

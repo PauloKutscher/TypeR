@@ -9,7 +9,7 @@ import { MdEdit, MdLock } from "react-icons/md";
 import { CiExport } from "react-icons/ci";
 
 import config from "../../config";
-import { locale, nativeAlert, getActiveLayerText, setActiveLayerText, rgbToHex, getStyleObject, refreshUserFonts } from "../../utils";
+import { locale, nativeAlert, getActiveLayerText, setActiveLayerText, rgbToHex, getStyleObject, getUserFonts, refreshUserFonts } from "../../utils";
 import { useContext } from "../../context";
 import { buildFolderTree } from "../../folderUtils";
 import { collectFontRefs, exportZipWithFonts } from "../../fontFileExport";
@@ -23,35 +23,26 @@ const StylesBlock = React.memo(function StylesBlock() {
     () => (context.state.styles || []).map((style) => style.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {}),
     [context.state.styles]
   );
-  const [fontPreviewRegistry, setFontPreviewRegistry] = React.useState(() =>
-    createFontPreviewRegistry([], fontTextStyles, 0)
-  );
-  const fontPreviewRevision = React.useRef(0);
+  const [installedFonts, setInstalledFonts] = React.useState(getUserFonts);
 
-  const refreshFontPreviews = React.useCallback(() => {
+  // Fonts are fetched once at panel startup: enumerating app.fonts blocks
+  // Photoshop, and refreshing on focus used to swallow clicks on style items
+  React.useEffect(() => {
     refreshUserFonts((fonts) => {
-      fontPreviewRevision.current += 1;
-      setFontPreviewRegistry(
-        createFontPreviewRegistry(fonts, fontTextStyles, fontPreviewRevision.current)
-      );
+      setInstalledFonts(fonts);
     });
-  }, [fontTextStyles]);
+  }, []);
 
-  React.useEffect(() => {
-    refreshFontPreviews();
-  }, [refreshFontPreviews]);
-
-  React.useEffect(() => {
-    const refreshOnVisibility = () => {
-      if (!document.hidden) refreshFontPreviews();
-    };
-    window.addEventListener("focus", refreshFontPreviews);
-    document.addEventListener("visibilitychange", refreshOnVisibility);
-    return () => {
-      window.removeEventListener("focus", refreshFontPreviews);
-      document.removeEventListener("visibilitychange", refreshOnVisibility);
-    };
-  }, [refreshFontPreviews]);
+  const registryRef = React.useRef(null);
+  const fontPreviewRegistry = React.useMemo(() => {
+    const next = createFontPreviewRegistry(installedFonts, fontTextStyles, 0);
+    // Reuse the previous registry when the CSS is identical: a new object
+    // would re-inject the <style> block and force a full style recalculation
+    // on every style edit (e.g. each quick-size click)
+    if (registryRef.current && registryRef.current.css === next.css) return registryRef.current;
+    registryRef.current = next;
+    return next;
+  }, [installedFonts, fontTextStyles]);
 
   const stylesByFolder = React.useMemo(() => {
     const map = new Map();
@@ -123,16 +114,40 @@ const styleDragMime = "application/x-typer-style-id";
 let currentDraggingStyleId = null;
 
 const hasStyleDragData = (event) => {
-  return Array.from(event.dataTransfer.types || []).includes(styleDragMime);
+  if (currentDraggingStyleId) return true;
+  return Array.from(event.dataTransfer?.types || []).includes(styleDragMime);
 };
 
 const getDraggedStyleId = (event) => {
   return currentDraggingStyleId || event.dataTransfer.getData(styleDragMime) || event.dataTransfer.getData("text/plain");
 };
 
-const getStyleDropPosition = (event) => {
+const getStyleDropLocation = (event) => {
   const rect = event.currentTarget.getBoundingClientRect();
-  return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+  const list = event.currentTarget.parentElement;
+  const listRect = list?.getBoundingClientRect();
+  const isGrid = !!listRect && rect.width < listRect.width * 0.75;
+
+  if (!isGrid) {
+    const position = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+    return { position, edge: position === "before" ? "top" : "bottom" };
+  }
+
+  const position = event.clientX < rect.left + rect.width / 2 ? "before" : "after";
+  const sibling = position === "before"
+    ? event.currentTarget.previousElementSibling
+    : event.currentTarget.nextElementSibling;
+  const siblingRect = sibling?.classList.contains("style-item")
+    ? sibling.getBoundingClientRect()
+    : null;
+  const isSameRow = !!siblingRect && Math.abs(siblingRect.top - rect.top) < 2;
+
+  return {
+    position,
+    edge: isSameRow
+      ? (position === "before" ? "left" : "right")
+      : (position === "before" ? "top" : "bottom"),
+  };
 };
 
 const FolderTree = React.memo(function FolderTree({ folders, parentId, depth, stylesByFolder }) {
@@ -174,6 +189,7 @@ const FolderItem = React.memo(function FolderItem(props) {
     e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
     setDropActive(true);
+    setStyleDropTarget(null);
   }, []);
 
   const handleDragLeave = React.useCallback((e) => {
@@ -218,7 +234,8 @@ const FolderItem = React.memo(function FolderItem(props) {
       setStyleDropTarget(null);
       return;
     }
-    setStyleDropTarget({ id: targetStyleId, position: getStyleDropPosition(e) });
+    const location = getStyleDropLocation(e);
+    setStyleDropTarget({ id: targetStyleId, ...location });
   }, []);
 
   const handleStyleItemDrop = React.useCallback(
@@ -233,7 +250,7 @@ const FolderItem = React.memo(function FolderItem(props) {
         setStyleDropTarget(null);
         return;
       }
-      const position = getStyleDropPosition(e);
+      const { position } = getStyleDropLocation(e);
       setDropActive(false);
       setStyleDropTarget(null);
       context.dispatch({
@@ -246,7 +263,8 @@ const FolderItem = React.memo(function FolderItem(props) {
     [context.dispatch, getStyleOrder, props.data.id]
   );
 
-  const clearStyleDropTarget = React.useCallback(() => {
+  const clearStyleDropTarget = React.useCallback((e) => {
+    if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
     setStyleDropTarget(null);
   }, []);
 
@@ -357,11 +375,15 @@ const FolderItem = React.memo(function FolderItem(props) {
                 <StyleItem
                   key={style.id}
                   active={context.state.currentStyleId === style.id}
-                  dropPosition={styleDropTarget?.id === style.id ? styleDropTarget.position : null}
+                  dropEdge={styleDropTarget?.id === style.id ? styleDropTarget.edge : null}
                   onDragOverStyle={handleStyleItemDragOver}
                   onDropStyle={handleStyleItemDrop}
                   onDragLeaveStyle={clearStyleDropTarget}
                   style={style}
+                  dispatch={context.dispatch}
+                  direction={context.state.direction}
+                  showQuickStyleSize={context.state.showQuickStyleSize}
+                  styleSizeStep={context.state.styleSizeStep}
                 />
               ))}
               {!styles.length && (
@@ -382,13 +404,17 @@ FolderItem.propTypes = {
   stylesByFolder: PropTypes.object.isRequired,
 };
 
+// StyleItem deliberately avoids useContext: subscribing to the global context
+// would re-render every style item on every dispatch (each keystroke, each
+// line change). Everything it needs arrives through identity-stable props so
+// React.memo can actually skip it.
 const StyleItem = React.memo(function StyleItem(props) {
   const layerText = props.style.textProps?.layerText || {};
   const textStyle = layerText.textStyleRange?.[0]?.textStyle || {};
   const styleObject = getStyleObject(textStyle);
   const fontPreviewRegistry = React.useContext(FontPreviewContext);
   const prefixes = props.style.prefixes || [];
-  const context = useContext();
+  const dispatch = props.dispatch;
 
   const [quickSizeOverride, setQuickSizeOverride] = React.useState(null);
   const displaySize = quickSizeOverride !== null ? quickSizeOverride : (textStyle.size || "");
@@ -399,8 +425,8 @@ const StyleItem = React.memo(function StyleItem(props) {
   const quickInputRef = React.useRef(null);
   const sizeValue = textStyle.size || "";
   const unit = props.style.textProps?.typeUnit ? props.style.textProps.typeUnit.substr(0, 3) : "px";
-  const showQuickStyleSize = context.state.showQuickStyleSize !== false;
-  const sizeStep = Number(context.state.styleSizeStep) > 0 ? Number(context.state.styleSizeStep) : 1;
+  const showQuickStyleSize = props.showQuickStyleSize !== false;
+  const sizeStep = Number(props.styleSizeStep) > 0 ? Number(props.styleSizeStep) : 1;
   const sizeStepDecimals = (sizeStep.toString().split(".")[1] || "").length;
   const normalizeSizeStep = (value) => {
     const rounded = Math.round(value / sizeStep) * sizeStep;
@@ -415,17 +441,17 @@ const StyleItem = React.memo(function StyleItem(props) {
 
   // StyleItem now handles its own select/open dispatch instead of receiving closures as props
   const selectStyle = React.useCallback(() => {
-    context.dispatch({ type: "setCurrentStyleId", id: props.style.id });
-  }, [context.dispatch, props.style.id]);
+    dispatch({ type: "setCurrentStyleId", id: props.style.id });
+  }, [dispatch, props.style.id]);
 
   const openStyle = React.useCallback((e) => {
     e.stopPropagation();
-    context.dispatch({ type: "setModal", modal: "editStyle", data: props.style });
-  }, [context.dispatch, props.style]);
+    dispatch({ type: "setModal", modal: "editStyle", data: props.style });
+  }, [dispatch, props.style]);
 
   const insertStyle = React.useCallback((e) => {
     e.stopPropagation();
-    const direction = context.state.direction;
+    const direction = props.direction;
     if (e.ctrlKey) {
       getActiveLayerText((data) => {
         const activeTextStyle = data?.textProps?.layerText?.textStyleRange?.[0]?.textStyle;
@@ -439,17 +465,17 @@ const StyleItem = React.memo(function StyleItem(props) {
     } else {
       setActiveLayerText("", props.style, direction);
     }
-  }, [context.state.direction, props.style]);
+  }, [props.direction, props.style]);
 
   const duplicateStyle = React.useCallback((e) => {
     e.stopPropagation();
-    context.dispatch({ type: "duplicateStyle", data: props.style });
-  }, [context.dispatch, props.style]);
+    dispatch({ type: "duplicateStyle", data: props.style });
+  }, [dispatch, props.style]);
 
   const togglePrefixes = React.useCallback((e) => {
     e.stopPropagation();
-    context.dispatch({ type: "toggleStylePrefixes", id: props.style.id });
-  }, [context.dispatch, props.style.id]);
+    dispatch({ type: "toggleStylePrefixes", id: props.style.id });
+  }, [dispatch, props.style.id]);
 
   const openQuickSize = () => {
     if (quickCloseTimeout.current) clearTimeout(quickCloseTimeout.current);
@@ -471,12 +497,12 @@ const StyleItem = React.memo(function StyleItem(props) {
       const newStyle = newTextProps.layerText.textStyleRange[0].textStyle;
       newStyle.size = parsed;
       if (newStyle.impliedFontSize != null) newStyle.impliedFontSize = parsed;
-      context.dispatch({
+      dispatch({
         type: "saveStyle",
         data: { ...props.style, textProps: newTextProps, edited: Date.now() },
       });
     },
-    [context.dispatch, props.style]
+    [dispatch, props.style]
   );
   const stopQuickEvent = (e) => {
     e.stopPropagation();
@@ -544,7 +570,7 @@ const StyleItem = React.memo(function StyleItem(props) {
         "style-item hostBgdLight" +
         (props.active ? " m-current" : "") +
         (props.style.prefixesDisabled ? " m-disabled" : "") +
-        (props.dropPosition ? " m-drop-" + props.dropPosition : "")
+        (props.dropEdge ? " m-drop-" + props.dropEdge : "")
       }
       draggable
       onDragStart={startDrag}
@@ -554,6 +580,7 @@ const StyleItem = React.memo(function StyleItem(props) {
       onDrop={dropStyle}
       onClick={selectStyle}
     >
+      {props.dropEdge && <span className={"style-drop-indicator m-" + props.dropEdge} aria-hidden="true" />}
       <div className="style-marker">
         <div className="style-color" style={{ background: rgbToHex(textStyle.color) }} title={locale.styleTextColor + ": " + rgbToHex(textStyle.color)}></div>
         {!!prefixes.length && (
@@ -632,10 +659,14 @@ const StyleItem = React.memo(function StyleItem(props) {
 StyleItem.propTypes = {
   style: PropTypes.object.isRequired,
   active: PropTypes.bool,
-  dropPosition: PropTypes.oneOf(["before", "after"]),
+  dropEdge: PropTypes.oneOf(["top", "right", "bottom", "left"]),
   onDragOverStyle: PropTypes.func.isRequired,
   onDropStyle: PropTypes.func.isRequired,
   onDragLeaveStyle: PropTypes.func.isRequired,
+  dispatch: PropTypes.func.isRequired,
+  direction: PropTypes.string,
+  showQuickStyleSize: PropTypes.bool,
+  styleSizeStep: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
 };
 
 export default StylesBlock;

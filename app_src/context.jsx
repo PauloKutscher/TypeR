@@ -7,6 +7,7 @@ import { setDehyphenationEnabled } from "./textShapeR";
 import { normalizeEditorTheme } from "./themePresets";
 import { applyEditorTheme } from "./lib/themeManager";
 import { getDefaultShortcuts } from "./shortcutCommands";
+import { getStoredSelectionLineIndex } from "./multiBubbleHistory";
 
 const storage = readStorage();
 const storeFields = [
@@ -894,12 +895,32 @@ const reducer = (state, action) => {
     }
 
     case "clearSelections": {
+      if (!action.preserveLine) {
+        const restoredLineIndex = getStoredSelectionLineIndex(
+          state.storedSelections[0],
+          state.currentLineIndex
+        );
+        if (restoredLineIndex !== state.currentLineIndex) {
+          newState.currentLineIndex = restoredLineIndex;
+          thenScroll = true;
+          thenSelectStyle = true;
+        }
+      }
       newState.storedSelections = [];
       break;
     }
 
     case "removeSelection": {
       if (action.index >= 0 && action.index < state.storedSelections.length) {
+        const restoredLineIndex = getStoredSelectionLineIndex(
+          state.storedSelections[action.index],
+          state.currentLineIndex
+        );
+        if (restoredLineIndex !== state.currentLineIndex) {
+          newState.currentLineIndex = restoredLineIndex;
+          thenScroll = true;
+          thenSelectStyle = true;
+        }
         newState.storedSelections = state.storedSelections.filter((_, i) => i !== action.index);
       }
       break;
@@ -1002,22 +1023,43 @@ const reducer = (state, action) => {
   const resetLineCounterOnPageChanged = newState.resetLineCounterOnPage !== state.resetLineCounterOnPage;
 
   const needsStyleProcessing = !state.initiated || stylesChanged || foldersChanged;
+
+  // Selecting a style only affects line parsing through the current folder's
+  // prefix priority: skip the full text re-parse when that folder is unchanged
+  // so clicking a style stays instant even with long scripts
+  let stylePrefixContextChanged = styleIdChanged;
+  if (styleIdChanged && !stylesChanged && state.initiated) {
+    if (newState.currentFolderTagPriority === false) {
+      stylePrefixContextChanged = false;
+    } else {
+      const prevFolder = state.currentStyle ? state.currentStyle.folder || null : null;
+      const nextActive =
+        newState.styles.find((style) => style.id === newState.currentStyleId) ||
+        state.currentStyle ||
+        null;
+      const nextFolder = nextActive ? nextActive.folder || null : null;
+      stylePrefixContextChanged = prevFolder !== nextFolder;
+    }
+  }
+
   const needsLineProcessing = needsStyleProcessing || textChanged ||
     ignoreLinePrefixesChanged || ignoreTagsChanged || currentFolderTagPriorityChanged ||
-    imagesChanged || styleIdChanged || usedLineStylesChanged || resetLineCounterOnPageChanged;
+    imagesChanged || stylePrefixContextChanged || usedLineStylesChanged || resetLineCounterOnPageChanged;
 
   // Phase 1: Style/folder validation and sorting (only when styles or folders changed)
   if (needsStyleProcessing) {
-    newState.styles = (newState.styles || []).map((style) => ({ ...style }));
     if (foldersChanged || !state.initiated) {
       newState.folders = normalizeFolders(newState.folders);
     }
 
+    // Keep untouched style objects identity-stable so memoized style and
+    // line components can skip re-rendering after a single-style edit
     const validFolderIds = new Set(newState.folders.map((folder) => folder.id));
-    for (const style of newState.styles) {
+    newState.styles = (newState.styles || []).map((style) => {
       const folderId = style.folder || null;
-      if (!validFolderIds.has(folderId)) style.folder = null;
-    }
+      if (folderId === null || validFolderIds.has(folderId)) return style;
+      return { ...style, folder: null };
+    });
 
     if (newState.openFolders) {
       if (newState.openFolders.some((id) => id !== "unsorted" && !validFolderIds.has(id))) {
