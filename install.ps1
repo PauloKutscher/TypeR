@@ -3,21 +3,21 @@
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 $OutputEncoding = New-Object System.Text.UTF8Encoding
 
-# --- 1. Definition robuste du dossier du script ---
-# $PSScriptRoot est une variable native fiable, contrairement e %~dp0
+# --- 1. Définition robuste du dossier du script ---
+# $PSScriptRoot est une variable native fiable, contrairement à %~dp0
 $ScriptDir = $PSScriptRoot
 Set-Location -Path $ScriptDir
 
-# --- 2. Verification du Manifest ---
+# --- 2. Vérification du Manifest ---
 $ManifestPath = Join-Path $ScriptDir "CSXS\manifest.xml"
 if (-not (Test-Path $ManifestPath)) {
     Write-Host "[ERREUR] Fichier introuvable : $ManifestPath" -ForegroundColor Red
-    Write-Host "Placez ce script e côte des dossiers 'CSXS', 'app', 'icons', 'locale', 'themes'."
-    Read-Host "Appuyez sur Entree pour quitter..."
+    Write-Host "Placez ce script à côté des dossiers 'CSXS', 'app', 'icons', 'locale', 'themes'."
+    Read-Host "Appuyez sur Entrée pour quitter..."
     exit
 }
 
-# --- 3. Extraction de la version (plus precis que findstr) ---
+# --- 3. Extraction de la version (plus précis que findstr) ---
 $Content = Get-Content $ManifestPath -Raw
 if ($Content -match 'Extension Id="typer".*?Version="([^"]+)"') {
     $ExtVersion = $matches[1]
@@ -25,11 +25,11 @@ if ($Content -match 'Extension Id="typer".*?Version="([^"]+)"') {
     $ExtVersion = "Inconnue"
 }
 
-# --- 4. Langues et Messages ---
-# Detection de la langue de l'interface utilisateur (ex: fr-FR)
+# --- 4. Langues et messages ---
+# Détection de la langue de l'interface utilisateur (ex: fr-FR)
 $Lang = $Host.CurrentCulture.TwoLetterISOLanguageName
 
-# Valeurs par defaut (Anglais)
+# Valeurs par défaut (anglais)
 $msg_install  = "Photoshop extension TypeR v$ExtVersion will be installed."
 $msg_close    = "Close Photoshop (if it is open)."
 $msg_complete = "Installation completed."
@@ -40,11 +40,11 @@ $msg_typertools = "typertools, developed by Swirt: https://swirt.github.io/typer
 $msg_discord  = "ScanR's Discord if you need help: https://discord.com/invite/Pdmfmqk"
 
 if ($Lang -eq "fr") {
-    $msg_install  = "L'extension Photoshop TypeR v$ExtVersion sera installee."
+    $msg_install  = "L'extension Photoshop TypeR v$ExtVersion sera installée."
     $msg_close    = "Fermez Photoshop (s'il est ouvert)."
-    $msg_complete = "Installation terminee."
-    $msg_open     = "Ouvrez Photoshop et dans le menu superieur cliquez sur : [Fenetre] > [Extensions] > [TypeR]"
-    $msg_pause    = "Appuyez sur Entree pour continuer..."
+    $msg_complete = "Installation terminée."
+    $msg_open     = "Ouvrez Photoshop et dans le menu supérieur cliquez sur : [Fenêtre] > [Extensions] > [TypeR]"
+    $msg_pause    = "Appuyez sur Entrée pour continuer..."
     $msg_credits  = "TypeR développé par Sakushi & SeanR."
     $msg_typertools = "typertools, développé par Swirt : https://swirt.github.io/typertools/"
     $msg_discord  = "Discord de ScanR si besoin d'aide : https://discord.com/invite/Pdmfmqk"
@@ -81,8 +81,8 @@ Write-Host "? $msg_close" -ForegroundColor Yellow
 Write-Host ""
 Read-Host -Prompt "? $msg_pause"
 
-# --- 5. Mode Debug (CSXS 6 e 18) ---
-# Ne necessite pas les droits admin car c'est dans HKCU (Utilisateur courant)
+# --- 5. Mode Debug (CSXS 6 à 18) ---
+# Ne nécessite pas les droits admin car c'est dans HKCU (utilisateur courant)
 6..18 | ForEach-Object {
     $RegPath = "HKCU:\Software\Adobe\CSXS.$_"
     if (Test-Path $RegPath) {
@@ -94,17 +94,18 @@ Read-Host -Prompt "? $msg_pause"
 $AppData = $env:APPDATA
 $TargetDir = Join-Path $AppData "Adobe\CEP\extensions\typertools"
 
-# On cree un dossier TEMP pour contenir la sauvegarde (et non le fichier lui-meme)
+# On crée un dossier TEMP pour contenir la sauvegarde (et non le fichier lui-même)
 $TempBackupContainer = Join-Path $env:TEMP "typer_backup_container"
 
-# Nettoyage prealable du temp au cas où
+# Nettoyage préalable du temp au cas où
 if (Test-Path $TempBackupContainer) { Remove-Item $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -Path $TempBackupContainer -ItemType Directory -Force | Out-Null
 
 # SAUVEGARDE : On copie "storage" DANS le dossier conteneur
-# Cela preserve la nature de "storage" (que ce soit un fichier ou un dossier)
-if (Test-Path "$TargetDir\storage") {
-    Copy-Item "$TargetDir\storage" -Destination $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue
+# Cela préserve la nature de "storage" (que ce soit un fichier ou un dossier)
+# "storage*" : le fichier de réglages et ses annexes (image de fond)
+Get-ChildItem -Path $TargetDir -Filter "storage*" -ErrorAction SilentlyContinue | ForEach-Object {
+    Copy-Item $_.FullName -Destination $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # Nettoyage dossier cible (Reset complet de l'extension)
@@ -124,7 +125,7 @@ foreach ($folder in $FoldersToCopy) {
     }
 }
 
-# Cas particulier: themes
+# Cas particulier : thèmes
 if (Test-Path "$ScriptDir\themes") {
     $ThemeDest = "$TargetDir\app\themes"
     if (-not (Test-Path $ThemeDest)) { New-Item $ThemeDest -ItemType Directory -Force | Out-Null }
@@ -132,10 +133,10 @@ if (Test-Path "$ScriptDir\themes") {
 }
 
 # RESTAURATION DU STORAGE
-# On verifie si la sauvegarde existe dans le conteneur
-if (Test-Path "$TempBackupContainer\storage") {
-    # On copie l'element "storage" depuis le conteneur vers la racine de l'extension
-    Copy-Item "$TempBackupContainer\storage" -Destination "$TargetDir" -Recurse -Force
+# On vérifie si la sauvegarde existe dans le conteneur
+Get-ChildItem -Path $TempBackupContainer -Filter "storage*" -ErrorAction SilentlyContinue | ForEach-Object {
+    # On recopie chaque élément "storage*" vers la racine de l'extension
+    Copy-Item $_.FullName -Destination "$TargetDir" -Recurse -Force
 }
 
 # Nettoyage final du dossier temp
