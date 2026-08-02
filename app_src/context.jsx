@@ -3,12 +3,14 @@ import PropTypes from "prop-types";
 import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, checkUpdate } from "./utils";
 import config from "./config";
 import { getNextLineNumberState } from "./lineNumbering";
-import { normalizeEditorTheme } from "./themePresets";
-import { applyEditorTheme } from "./lib/themeManager";
+import { CUSTOM_IMAGE_THEME_ID, normalizeCustomThemes, normalizeEditorTheme, normalizePageLineColor, setCustomEditorThemes } from "./themePresets";
+import { normalizeBackgroundImage } from "./backgroundImage";
+import { applyThemeState } from "./lib/themeManager";
 import { getDefaultShortcuts } from "./shortcutCommands";
 import { getStoredSelectionLineIndex } from "./multiBubbleHistory";
 import { getAutomaticTagStyles } from "./folderUtils";
 import { perfMeasure } from "./perfDebug";
+import { TAB_FIELDS, createTab, migrateTabStorage } from "./tabStorage";
 
 const storage = readStorage();
 const storeFields = [
@@ -55,24 +57,17 @@ const storeFields = [
   "multiTabEnabled",
   "uiLayout",
   "editorTheme",
+  "customThemes",
+  "pageLineColor",
+  "backgroundImage",
 ];
 
 // Fields that belong to each tab (text script + PSD sync)
-const tabFields = ["text", "images", "currentLineIndex", "lastOpenedImagePath", "usedLineStyles"];
+const tabFields = TAB_FIELDS;
 // These values live inside `tabs`. Keeping another top-level copy nearly
 // doubled text-heavy storage files and their JSON serialization cost. They
 // remain readable for migration, but new writes persist only the tab schema.
 const persistedFields = storeFields.filter((field) => !tabFields.includes(field));
-
-const createTab = (name, data = {}) => ({
-  id: Math.random().toString(36).substr(2, 8),
-  name,
-  text: data.text || "",
-  images: data.images || [],
-  currentLineIndex: data.currentLineIndex || 0,
-  lastOpenedImagePath: data.lastOpenedImagePath || null,
-  usedLineStyles: data.usedLineStyles || {},
-});
 
 const loadTabIntoState = (state, tab) => {
   state.currentTabId = tab.id;
@@ -257,21 +252,40 @@ const initialState = {
   ...storage.data,
   shortcut: { ...defaultShortcut, ...(storage.data?.shortcut || {}) },
   uiLayout: normalizeUiLayout(storage.data?.uiLayout),
+  // The theme registry is filled by the theme manager at import time, so the
+  // stored id can already point at a custom theme here
+  customThemes: normalizeCustomThemes(storage.data?.customThemes),
+  pageLineColor: normalizePageLineColor(storage.data?.pageLineColor),
+  backgroundImage: normalizeBackgroundImage(storage.data?.backgroundImage),
   editorTheme: normalizeEditorTheme(storage.data?.editorTheme),
   stylePrefixRefreshVersion: 0,
 };
 
-// Multi-tab migration: wrap pre-tab data into a single tab, or restore the
-// active tab's fields from the stored tabs list
-if (!Array.isArray(initialState.tabs) || !initialState.tabs.length) {
-  const firstTab = createTab((locale.tabDefaultName || "Tab") + " 1", initialState);
-  initialState.tabs = [firstTab];
-  initialState.currentTabId = firstTab.id;
-} else {
-  const activeTab = initialState.tabs.find((tab) => tab.id === initialState.currentTabId) || initialState.tabs[0];
-  loadTabIntoState(initialState, activeTab);
-  // Keep stored selections across restarts (loadTabIntoState clears them)
-  initialState.storedSelections = storage.data?.storedSelections || [];
+// Persist the pre-tab -> tab migration immediately. Waiting for a later user
+// action leaves the only copy of the migrated text in memory and also lets
+// stale tabs win after an older TypeR version has rewritten top-level fields.
+const tabStorage = migrateTabStorage(
+  storage.data,
+  (locale.tabDefaultName || "Tab") + " 1"
+);
+initialState.tabs = tabStorage.tabs;
+initialState.currentTabId = tabStorage.currentTabId;
+const activeTab = initialState.tabs.find((tab) => tab.id === initialState.currentTabId) || initialState.tabs[0];
+loadTabIntoState(initialState, activeTab);
+// Keep stored selections across restarts (loadTabIntoState clears them)
+initialState.storedSelections = storage.data?.storedSelections || [];
+
+if (tabStorage.migrated) {
+  const migratedData = {
+    tabs: initialState.tabs,
+    currentTabId: initialState.currentTabId,
+  };
+  // Remove the legacy duplicates only after their values are safely inside
+  // the active tab in the very same storage write.
+  tabFields.forEach((field) => {
+    migratedData[field] = undefined;
+  });
+  writeToStorage(migratedData);
 }
 
 const baseReducer = (state, action) => {
@@ -1017,7 +1031,8 @@ const baseReducer = (state, action) => {
       if (!action.preserveLine) {
         const restoredLineIndex = getStoredSelectionLineIndex(
           state.storedSelections[0],
-          state.currentLineIndex
+          state.currentLineIndex,
+          state.lines
         );
         if (restoredLineIndex !== state.currentLineIndex) {
           newState.currentLineIndex = restoredLineIndex;
@@ -1033,7 +1048,8 @@ const baseReducer = (state, action) => {
       if (action.index >= 0 && action.index < state.storedSelections.length) {
         const restoredLineIndex = getStoredSelectionLineIndex(
           state.storedSelections[action.index],
-          state.currentLineIndex
+          state.currentLineIndex,
+          state.lines
         );
         if (restoredLineIndex !== state.currentLineIndex) {
           newState.currentLineIndex = restoredLineIndex;
@@ -1107,6 +1123,32 @@ const baseReducer = (state, action) => {
 
     case "setEditorTheme": {
       newState.editorTheme = normalizeEditorTheme(action.theme);
+      break;
+    }
+
+    case "setCustomThemes": {
+      // The registry has to be updated before the theme id is validated,
+      // otherwise a brand new theme would be rejected as unknown
+      const customThemes = setCustomEditorThemes(action.themes);
+      newState.customThemes = customThemes;
+      if (action.theme !== undefined) {
+        newState.editorTheme = normalizeEditorTheme(action.theme);
+      } else if (!customThemes.some((theme) => theme.id === state.editorTheme)) {
+        newState.editorTheme = normalizeEditorTheme(state.editorTheme);
+      }
+      break;
+    }
+
+    case "setPageLineColor": {
+      newState.pageLineColor = normalizePageLineColor(action.color);
+      break;
+    }
+
+    case "setBackgroundImage": {
+      newState.backgroundImage = normalizeBackgroundImage(action.image);
+      if (!newState.backgroundImage && state.editorTheme === CUSTOM_IMAGE_THEME_ID) {
+        newState.editorTheme = "system";
+      }
       break;
     }
 
@@ -1550,8 +1592,13 @@ const ContextProvider = React.memo(function ContextProvider(props) {
     }
   }, [state.direction]);
   React.useEffect(() => {
-    applyEditorTheme(state.editorTheme);
-  }, [state.editorTheme]);
+    applyThemeState({
+      editorTheme: state.editorTheme,
+      customThemes: state.customThemes,
+      pageLineColor: state.pageLineColor,
+      backgroundImage: state.backgroundImage,
+    });
+  }, [state.editorTheme, state.customThemes, state.pageLineColor, state.backgroundImage]);
   React.useEffect(() => {
     if (state.checkUpdates) {
       checkUpdate(config.appVersion).then((data) => {

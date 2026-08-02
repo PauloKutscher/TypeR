@@ -1700,10 +1700,431 @@
     opacity: 0.85;
 }
 
+// Each card carries its own "customize" and "delete" buttons, which cannot
+// live inside the card button itself
+.settings-theme-cell {
+    position: relative;
+    display: flex;
+    min-width: 0;
+
+    .settings-theme-choice {
+        flex: 1 1 auto;
+        padding-right: 38px;
+    }
+}
+
+.settings-theme-tools {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    display: flex;
+    gap: 2px;
+}
+
+.settings-theme-tool {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.12);
+    color: inherit;
+    cursor: pointer;
+    opacity: 0.5;
+
+    &:hover,
+    &.m-active {
+        opacity: 1;
+        background: var(--theme-card-accent, rgba(255, 255, 255, 0.3));
+        color: #fff;
+    }
+
+    &.m-danger:hover {
+        background: #af2121;
+    }
+
+    .light-theme & {
+        background: rgba(0, 0, 0, 0.1);
+    }
+}
+
+.settings-theme-preview {
+    background-size: cover;
+    background-position: center;
+
+    &.m-add {
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 1px dashed rgba(255, 255, 255, 0.3);
+        box-shadow: none;
+        opacity: 0.7;
+
+        .light-theme & {
+            border-color: rgba(0, 0, 0, 0.28);
+        }
+    }
+}
+
+.settings-theme-choice.m-add:hover .settings-theme-preview.m-add {
+    opacity: 1;
+}
+
+// Custom theme editor
+.settings-theme-editor,
+.settings-bg-editor {
+    margin-top: 8px;
+    padding: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.04);
+
+    .light-theme & {
+        border-color: rgba(0, 0, 0, 0.14);
+        background: rgba(0, 0, 0, 0.03);
+    }
+}
+
+.settings-theme-editor-head,
+.settings-bg-editor-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    INPUT[type="text"] {
+        flex: 1 1 auto;
+        min-width: 60px;
+    }
+}
+
+.settings-bg-editor-title {
+    flex: 1 1 auto;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.settings-theme-editor-modes {
+    display: flex;
+    flex: 0 0 auto;
+
+    BUTTON {
+        padding: 0 8px;
+        opacity: 0.6;
+
+        &.m-active {
+            opacity: 1;
+            font-weight: 600;
+        }
+    }
+}
+
+.settings-theme-editor-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    opacity: 0.6;
+
+    &:hover {
+        opacity: 1;
+    }
+}
+
+.settings-theme-editor-body {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.settings-theme-editor-colors {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    flex: 1 1 auto;
+    gap: 4px 10px;
+    min-width: 0;
+}
+
+.settings-theme-editor-preview {
+    display: flex;
+    flex: 0 0 116px;
+    flex-direction: column;
+    gap: 4px;
+    width: 116px;
+    padding: 5px;
+    border-radius: 4px;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+
+.settings-theme-editor-preview-bar {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 4px 5px;
+    border-radius: 3px;
+    border: 1px solid transparent;
+
+    i {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+    }
+}
+
+.settings-theme-editor-preview-code {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 3px;
+}
+
+.settings-theme-editor-preview-row {
+    display: flex;
+    align-items: center;
+    height: 8px;
+    padding: 0 3px;
+    border-radius: 2px;
+
+    SPAN {
+        width: 70%;
+        height: 2px;
+        border-radius: 2px;
+        opacity: 0.85;
+    }
+}
+
+.settings-theme-editor-preview-foot {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+
+    .m-pill {
+        padding: 1px 5px;
+        border-radius: 8px;
+        font-size: 9px;
+        line-height: 1.4;
+    }
+
+    .m-input {
+        flex: 1 1 auto;
+        height: 12px;
+        border: 1px solid transparent;
+        border-radius: 3px;
+    }
+}
+
+// Background image editor
+.settings-bg-empty {
+    margin-top: 8px;
+    font-size: 11px;
+    opacity: 0.7;
+}
+
+.settings-bg-preview {
+    position: relative;
+    margin-top: 8px;
+    overflow: hidden;
+    border-radius: 4px;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3);
+    cursor: grab;
+    user-select: none;
+
+    &.m-dragging {
+        cursor: grabbing;
+    }
+}
+
+.settings-bg-preview-image {
+    position: absolute;
+    inset: 0;
+    background-repeat: no-repeat;
+}
+
+.settings-bg-preview-tint {
+    position: absolute;
+    inset: 0;
+}
+
+// Mock interface drawn over the picture so the tint and opacity can be judged
+.settings-bg-preview-mock {
+    position: absolute;
+    inset: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    pointer-events: none;
+
+    .m-bar {
+        height: 12px;
+        border-radius: 3px;
+        background: rgba(128, 128, 128, 0.55);
+    }
+
+    .m-line {
+        height: 6px;
+        border-radius: 3px;
+        background: rgba(128, 128, 128, 0.4);
+    }
+
+    .m-line.m-short {
+        width: 55%;
+    }
+}
+
+.settings-bg-controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 4px 12px;
+    margin-top: 8px;
+}
+
+.settings-bg-slider {
+    INPUT[type="range"] {
+        width: 100%;
+    }
+}
+
+.settings-bg-slider-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 11px;
+    opacity: 0.85;
+}
+
+.settings-bg-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.settings-bg-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    opacity: 0.7;
+}
+
+// Color picker field
+.settings-color-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.settings-color-hint {
+    flex: 1 1 auto;
+    font-size: 11px;
+    opacity: 0.65;
+}
+
+.settings-color-field {
+    min-width: 0;
+
+    &.m-disabled {
+        opacity: 0.5;
+        pointer-events: none;
+    }
+}
+
+.settings-color-field-label {
+    display: block;
+    font-size: 11px;
+    opacity: 0.8;
+}
+
+.settings-color-field-control {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.settings-color-swatch {
+    display: flex;
+    flex: 0 0 auto;
+    padding: 2px;
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    border-radius: 3px;
+    background: transparent;
+    cursor: pointer;
+
+    .light-theme & {
+        border-color: rgba(0, 0, 0, 0.24);
+    }
+}
+
+.settings-color-swatch-fill {
+    width: 20px;
+    height: 14px;
+    border-radius: 2px;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+
+    &.m-empty {
+        background: linear-gradient(
+            135deg,
+            transparent 45%,
+            rgba(220, 60, 60, 0.9) 45%,
+            rgba(220, 60, 60, 0.9) 55%,
+            transparent 55%
+        );
+    }
+}
+
+.settings-color-value {
+    font-size: 11px;
+    opacity: 0.7;
+    text-transform: uppercase;
+}
+
+.settings-color-clear {
+    flex: 0 0 auto;
+    padding: 0 6px;
+    font-size: 10px;
+}
+
+.settings-color-popover-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+}
+
+.settings-color-popover {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 21;
+}
+
 // Small panel widths: stack the mockup canvas above the inspector
 @media (max-width: 420px) {
     .settings-theme-grid {
         grid-template-columns: 1fr;
+    }
+
+    .settings-theme-editor-body {
+        flex-direction: column;
+    }
+
+    .settings-theme-editor-preview {
+        align-self: center;
     }
 
     .settings-layout {

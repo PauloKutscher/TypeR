@@ -1,3 +1,11 @@
+import {
+  buildCustomPalette,
+  extractThemeKeys,
+  isValidColor,
+  toHex,
+  withAlpha,
+} from "./themeColors";
+
 const EDITOR_THEME_PRESETS = [
   {
     id: "system",
@@ -232,27 +240,163 @@ const EDITOR_THEME_PRESETS = [
 ];
 
 const DEFAULT_EDITOR_THEME_ID = "system";
+const CUSTOM_IMAGE_THEME_ID = "custom-image";
+const CUSTOM_THEME_PREFIX = "custom-";
 
-const getEditorThemePreset = (id) =>
-  EDITOR_THEME_PRESETS.find((theme) => theme.id === id) || EDITOR_THEME_PRESETS[0];
+// User-made themes and the background image live in the app storage, but the
+// theme lookup has to stay a synchronous pure function (it runs during the
+// initial reducer state and inside the theme manager). A module-level registry
+// is kept in sync by the context whenever either of them changes.
+let customEditorThemes = [];
+let backgroundImageMeta = null;
+
+const createCustomThemeId = () =>
+  CUSTOM_THEME_PREFIX + Math.random().toString(36).substr(2, 8);
+
+const normalizeCustomTheme = (raw) => {
+  if (!raw || typeof raw !== "object") return null;
+  const id = typeof raw.id === "string" && raw.id.indexOf(CUSTOM_THEME_PREFIX) === 0 && raw.id !== CUSTOM_IMAGE_THEME_ID
+    ? raw.id
+    : createCustomThemeId();
+  const mode = raw.mode === "light" ? "light" : "dark";
+  const keys = extractThemeKeys(raw.keys || raw.colors, mode);
+  const colors = buildCustomPalette(keys, mode);
+  return {
+    id,
+    // Kept as typed (the name field must stay erasable while editing)
+    label: typeof raw.label === "string" ? raw.label.slice(0, 32) : "Custom",
+    mode,
+    keys,
+    colors,
+    swatches: [colors.surface, colors.panel, colors.accent],
+    custom: true,
+  };
+};
+
+const normalizeCustomThemes = (list) =>
+  (Array.isArray(list) ? list : []).map(normalizeCustomTheme).filter(Boolean);
+
+const setCustomEditorThemes = (list) => {
+  customEditorThemes = normalizeCustomThemes(list);
+  return customEditorThemes;
+};
+
+const getCustomEditorThemes = () => customEditorThemes;
+
+const setBackgroundImageMeta = (meta) => {
+  backgroundImageMeta = meta && typeof meta === "object" ? meta : null;
+};
+
+const getBackgroundImageMeta = () => backgroundImageMeta;
+
+// The image theme reuses a built-in palette but makes every surface partly
+// transparent, so the picture stays visible behind the panels.
+const buildImageThemePreset = (meta) => {
+  const mode = meta && meta.mode === "light" ? "light" : "dark";
+  const base = getEditorThemePreset(mode === "light" ? "editor-light" : "editor-dark").colors;
+  const tint = meta && Number.isFinite(meta.tint) ? meta.tint : 0.45;
+  return {
+    id: CUSTOM_IMAGE_THEME_ID,
+    label: "Custom image",
+    mode,
+    image: true,
+    swatches: [base.surface, base.panel, base.accent],
+    background: {
+      base: base.surface,
+      tint: withAlpha(base.surface, tint),
+    },
+    colors: {
+      ...base,
+      // Body and app background: fully see-through, the fixed image layer and
+      // its tint sit underneath and provide the color.
+      surface: "transparent",
+      surfaceAlt: withAlpha(base.surfaceAlt, 0.94),
+      panel: withAlpha(base.panel, 0.72),
+      input: withAlpha(base.input, 0.58),
+      inputAlt: withAlpha(base.inputAlt, 0.64),
+      codeBg: withAlpha(base.codeBg, 0.55),
+      codeGutter: withAlpha(base.codeGutter, 0.62),
+      codeCurrent: withAlpha(base.codeCurrent, 0.85),
+      codePage: withAlpha(base.codePage, 0.8),
+    },
+  };
+};
+
+const getImageThemePreset = () =>
+  backgroundImageMeta ? buildImageThemePreset(backgroundImageMeta) : null;
+
+const getEditorThemePreset = (id) => {
+  const preset = EDITOR_THEME_PRESETS.find((theme) => theme.id === id);
+  if (preset) return preset;
+  const custom = customEditorThemes.find((theme) => theme.id === id);
+  if (custom) return custom;
+  if (id === CUSTOM_IMAGE_THEME_ID) {
+    const imageTheme = getImageThemePreset();
+    if (imageTheme) return imageTheme;
+  }
+  return EDITOR_THEME_PRESETS[0];
+};
 
 const normalizeEditorTheme = (id) => getEditorThemePreset(id).id;
 
+// Built-in presets first, then user themes, then the image theme when one has
+// been configured. Used to render the theme grid in the settings.
+const getEditorThemeList = () => {
+  const list = EDITOR_THEME_PRESETS.concat(customEditorThemes);
+  const imageTheme = getImageThemePreset();
+  return imageTheme ? list.concat([imageTheme]) : list;
+};
+
 // Colors used to render the theme cards in settings; the "system" preset
 // has no fixed palette, so it falls back to a Photoshop-like mock.
-const getEditorThemePreviewColors = (preset) =>
-  preset.colors || {
-    surface: "#323232",
-    panel: "#3f3f3f",
-    text: "#e8e8e8",
-    muted: "#9a9a9a",
-    accent: preset.swatches ? preset.swatches[2] : "#288edf",
-  };
+const getEditorThemePreviewColors = (preset) => {
+  if (preset.image) {
+    const base = getEditorThemePreset(preset.mode === "light" ? "editor-light" : "editor-dark").colors;
+    return { ...base, ...preset.colors, surface: base.surface };
+  }
+  return (
+    preset.colors || {
+      surface: "#323232",
+      panel: "#3f3f3f",
+      text: "#e8e8e8",
+      muted: "#9a9a9a",
+      accent: preset.swatches ? preset.swatches[2] : "#288edf",
+    }
+  );
+};
+
+// A new custom theme starts from the palette of the theme it was created from
+const createCustomThemeFrom = (sourceId, label) => {
+  const source = getEditorThemePreset(sourceId);
+  const mode = source.mode === "light" ? "light" : "dark";
+  return normalizeCustomTheme({
+    id: createCustomThemeId(),
+    label,
+    mode,
+    keys: extractThemeKeys(source.colors, mode),
+  });
+};
+
+const normalizePageLineColor = (value) => (isValidColor(value) ? toHex(value) : null);
 
 export {
   EDITOR_THEME_PRESETS,
   DEFAULT_EDITOR_THEME_ID,
+  CUSTOM_IMAGE_THEME_ID,
+  CUSTOM_THEME_PREFIX,
   getEditorThemePreset,
   normalizeEditorTheme,
   getEditorThemePreviewColors,
+  getEditorThemeList,
+  normalizeCustomTheme,
+  normalizeCustomThemes,
+  createCustomThemeFrom,
+  createCustomThemeId,
+  setCustomEditorThemes,
+  getCustomEditorThemes,
+  setBackgroundImageMeta,
+  getBackgroundImageMeta,
+  getImageThemePreset,
+  buildImageThemePreset,
+  normalizePageLineColor,
 };

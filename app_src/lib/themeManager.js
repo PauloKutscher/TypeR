@@ -3,10 +3,33 @@ import './CSInterface';
 import LightTheme from './topcoat/css/topcoat-desktop-light.min.css';
 import DarkTheme from './topcoat/css/topcoat-desktop-dark.min.css';
 import { readStorage } from '../utils';
-import { getEditorThemePreset, normalizeEditorTheme } from '../themePresets';
+import {
+    getBackgroundImageMeta,
+    getEditorThemePreset,
+    normalizeEditorTheme,
+    normalizePageLineColor,
+    setBackgroundImageMeta,
+    setCustomEditorThemes,
+} from '../themePresets';
+import {
+    computeBackgroundLayout,
+    normalizeBackgroundImage,
+    readBackgroundImageData,
+} from '../backgroundImage';
+
+// The theme registry has to be filled before the very first lookup: this module
+// runs before the React context is created, and both read the same storage.
+setCustomEditorThemes(readStorage("customThemes"));
+setBackgroundImageMeta(normalizeBackgroundImage(readStorage("backgroundImage")));
 
 let currentAppSkinInfo = null;
 let currentEditorTheme = normalizeEditorTheme(readStorage("editorTheme"));
+let currentPageLineColor = normalizePageLineColor(readStorage("pageLineColor"));
+let currentBackground = null;
+let backgroundLayer = null;
+let backgroundImageElement = null;
+let backgroundTintElement = null;
+let backgroundResizeFrame = null;
 
 function computeValue(value, delta) {
     var computedValue = !isNaN(delta) ? value + delta : value;
@@ -50,9 +73,91 @@ function setBodyThemeMode(mode) {
     }
 }
 
+// The background picture is a fixed layer behind everything (negative z-index),
+// so no panel needs to know about it: the themes above simply use translucent
+// surfaces to let it show through.
+function ensureBackgroundLayer() {
+    if (backgroundLayer) return;
+    backgroundLayer = document.createElement("div");
+    backgroundLayer.className = "app-bg-layer";
+    backgroundImageElement = document.createElement("div");
+    backgroundImageElement.className = "app-bg-layer-image";
+    backgroundTintElement = document.createElement("div");
+    backgroundTintElement.className = "app-bg-layer-tint";
+    backgroundLayer.appendChild(backgroundImageElement);
+    backgroundLayer.appendChild(backgroundTintElement);
+    document.body.insertBefore(backgroundLayer, document.body.firstChild);
+}
+
+function layoutBackgroundImage() {
+    if (!currentBackground || !backgroundImageElement) return;
+    const meta = currentBackground.meta;
+    // The blurred layer is oversized so the blur never fades out at the edges
+    const pad = Math.round(meta.blur * 2);
+    const layout = computeBackgroundLayout(
+        window.innerWidth + pad * 2,
+        window.innerHeight + pad * 2,
+        meta.width,
+        meta.height,
+        meta.crop
+    );
+    backgroundImageElement.style.inset = `${-pad}px`;
+    backgroundImageElement.style.backgroundSize = layout.backgroundSize;
+    backgroundImageElement.style.backgroundPosition = layout.backgroundPosition;
+}
+
+function onBackgroundResize() {
+    if (backgroundResizeFrame) return;
+    backgroundResizeFrame = window.requestAnimationFrame(function () {
+        backgroundResizeFrame = null;
+        layoutBackgroundImage();
+    });
+}
+
+function applyBackgroundLayer(preset) {
+    const meta = preset && preset.image ? getBackgroundImageMeta() : null;
+    const data = meta ? readBackgroundImageData() : null;
+
+    if (!meta || !data) {
+        currentBackground = null;
+        document.documentElement.classList.remove("m-typer-bg");
+        if (backgroundLayer) backgroundLayer.style.display = "none";
+        window.removeEventListener("resize", onBackgroundResize);
+        return;
+    }
+
+    ensureBackgroundLayer();
+    currentBackground = { meta, data };
+    backgroundLayer.style.display = "";
+    backgroundImageElement.style.backgroundImage = `url("${data}")`;
+    backgroundImageElement.style.opacity = String(meta.opacity);
+    backgroundImageElement.style.filter = meta.blur ? `blur(${meta.blur}px)` : "none";
+    backgroundTintElement.style.background = (preset.background && preset.background.tint) || "transparent";
+    document.documentElement.style.setProperty(
+        "--typer-bg-base",
+        (preset.background && preset.background.base) || "#1e1e1e"
+    );
+    document.documentElement.classList.add("m-typer-bg");
+    layoutBackgroundImage();
+    window.removeEventListener("resize", onBackgroundResize);
+    window.addEventListener("resize", onBackgroundResize);
+}
+
+function applyPageLineColor(color) {
+    currentPageLineColor = normalizePageLineColor(color);
+    if (currentPageLineColor) {
+        document.documentElement.style.setProperty("--typer-page-line-color", currentPageLineColor);
+        document.body.classList.add("m-page-line-custom");
+    } else {
+        document.documentElement.style.removeProperty("--typer-page-line-color");
+        document.body.classList.remove("m-page-line-custom");
+    }
+}
+
 function applyEditorTheme(id) {
     currentEditorTheme = normalizeEditorTheme(id);
     var preset = getEditorThemePreset(currentEditorTheme);
+    applyBackgroundLayer(preset);
     var mode = preset.mode;
     if (mode === "system") {
         if (currentAppSkinInfo) updateThemeWithAppSkinInfo(currentAppSkinInfo);
@@ -71,6 +176,16 @@ function applyEditorTheme(id) {
     });
 }
 
+// Single entry point used by the app: keeps the theme registry, the page line
+// override and the background layer in sync with the stored settings.
+function applyThemeState(state) {
+    var settings = state || {};
+    setCustomEditorThemes(settings.customThemes);
+    setBackgroundImageMeta(normalizeBackgroundImage(settings.backgroundImage));
+    applyPageLineColor(settings.pageLineColor);
+    applyEditorTheme(settings.editorTheme);
+}
+
 function updateThemeWithAppSkinInfo(appSkinInfo) {
     currentAppSkinInfo = appSkinInfo;
 
@@ -81,12 +196,12 @@ function updateThemeWithAppSkinInfo(appSkinInfo) {
     var isLight = panelBgColor.red >= 125;
     var fontColor = isLight ? "000000" : "F0F0F0";
     var styleId = "hostStyle";
-    
+
     addRule(styleId, ".hostElt", "background-color: #" + bgdColor);
     addRule(styleId, ".hostElt", "font-size: " + appSkinInfo.baseFontSize + "px;");
     addRule(styleId, ".hostElt", "font-family: " + appSkinInfo.baseFontFamily);
     addRule(styleId, ".hostElt", "color: #" + fontColor);
-    
+
     addRule(styleId, ".hostBgd", "background-color: #" + bgdColor);
     addRule(styleId, ".hostBgdDark", "background-color: #" + darkBgdColor);
     addRule(styleId, ".hostBgdLight", "background-color: #" + lightBgdColor);
@@ -110,12 +225,12 @@ function updateThemeWithAppSkinInfo(appSkinInfo) {
     addRule(styleId, ".hostFont", "font-size: " + appSkinInfo.baseFontSize + "px;");
     addRule(styleId, ".hostFont", "font-family: " + appSkinInfo.baseFontFamily);
     addRule(styleId, ".hostFont", "color: #" + fontColor);
-    
+
     addRule(styleId, ".hostButton", "background-color: #" + darkBgdColor);
     addRule(styleId, ".hostButton:hover", "background-color: #" + bgdColor);
     addRule(styleId, ".hostButton:active", "background-color: #" + darkBgdColor);
     addRule(styleId, ".hostButton", "border-color: #" + lightBgdColor);
-    
+
     if (currentEditorTheme === "system") {
         var topcoatCSS = document.getElementById('topcoat');
         topcoatCSS.href = isLight ? LightTheme : DarkTheme;
@@ -133,9 +248,7 @@ function onAppThemeColorChanged() {
 const csInterface = new window.CSInterface();
 updateThemeWithAppSkinInfo(csInterface.hostEnvironment.appSkinInfo);
 csInterface.addEventListener(window.CSInterface.THEME_COLOR_CHANGED_EVENT, onAppThemeColorChanged);
+applyPageLineColor(currentPageLineColor);
+if (currentEditorTheme !== "system") applyEditorTheme(currentEditorTheme);
 
-window.addEventListener("typer-editor-theme-change", function (event) {
-    applyEditorTheme(event.detail && event.detail.theme);
-});
-
-export { applyEditorTheme };
+export { applyEditorTheme, applyThemeState, applyPageLineColor };

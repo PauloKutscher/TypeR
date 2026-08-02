@@ -307,14 +307,17 @@ body[data-editor-theme]:not([data-editor-theme="system"]) {
 
   .text-line-text {
     background: var(--editor-codeBg) !important;
+  }
 
-    .text-line.m-current & {
-      background: var(--editor-codeCurrent) !important;
-    }
+  // Written flat as well: "&" here stands for the whole "body[…] .text-line-text"
+  // chain, so nesting the line modifiers under it compiled to a selector
+  // starting with .text-line — which never matched.
+  .text-line.m-current .text-line-text {
+    background: var(--editor-codeCurrent) !important;
+  }
 
-    .text-line.m-page & {
-      background: var(--editor-codePage) !important;
-    }
+  .text-line.m-page .text-line-text {
+    background: var(--editor-codePage) !important;
   }
 
   .text-area,
@@ -434,4 +437,37 @@ body[data-editor-theme]:not([data-editor-theme="system"]) {
   ::-webkit-scrollbar-corner {
     background: transparent;
   }
+}
+
+// Page line background chosen in the settings. Applied to every theme, hence
+// outside of the themed block, and last so it wins over the palette value.
+BODY.m-page-line-custom {
+  .text-line.m-page .text-line-text {
+    background: var(--typer-page-line-color) !important;
+  }
+}
+
+// Custom background image. The picture is a fixed layer sitting behind the
+// whole interface rather than a body background: the image theme makes its
+// surfaces translucent, and a body background would paint over the layer.
+HTML.m-typer-bg {
+  background: var(--typer-bg-base, #1e1e1e);
+}
+
+.app-bg-layer {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.app-bg-layer-image {
+  position: absolute;
+  background-repeat: no-repeat;
+}
+
+.app-bg-layer-tint {
+  position: absolute;
+  inset: 0;
 }

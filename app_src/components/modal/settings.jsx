@@ -1,5 +1,5 @@
 import React from "react";
-import { FiX, FiSettings, FiEye, FiEyeOff, FiToggleLeft, FiDatabase, FiAlertTriangle, FiChevronUp, FiChevronDown, FiRotateCcw, FiCheck, FiPlayCircle, FiType } from "react-icons/fi";
+import { FiX, FiSettings, FiEye, FiEyeOff, FiToggleLeft, FiDatabase, FiAlertTriangle, FiChevronUp, FiChevronDown, FiRotateCcw, FiCheck, FiPlayCircle, FiType, FiEdit2, FiPlus, FiImage, FiTrash2 } from "react-icons/fi";
 import { MdSave } from "react-icons/md";
 import { FaKeyboard, FaFileExport, FaFileImport } from "react-icons/fa";
 
@@ -7,11 +7,29 @@ import config from "../../config";
 import { locale, nativeAlert, nativeConfirm, checkUpdate, readStorage, writeToStorage, deleteStorageFile, openFile } from "../../utils";
 import { useContext, defaultUiLayout, normalizeUiLayout } from "../../context";
 import { sanitizeTextShapeRTuning } from "../../textShapeR";
-import { EDITOR_THEME_PRESETS, getEditorThemePreviewColors } from "../../themePresets";
+import {
+  CUSTOM_IMAGE_THEME_ID,
+  EDITOR_THEME_PRESETS,
+  buildImageThemePreset,
+  createCustomThemeFrom,
+  getEditorThemePreviewColors,
+  normalizeCustomThemes,
+} from "../../themePresets";
+import {
+  clearBackgroundImageData,
+  importImageFile,
+  normalizeBackgroundImage,
+  readBackgroundImageData,
+  writeBackgroundImageData,
+} from "../../backgroundImage";
+import ColorField from "./colorField";
+import ThemeEditor from "./themeEditor";
+import BackgroundEditor from "./backgroundEditor";
 import Shortcut from "./shortCut";
 import FontScanPromo from "./fontScanPromo";
 import { shortcutCommands } from "../../shortcutCommands";
 import { isPerfDebugEnabled, setPerfDebugEnabled, reportPerfDebug, resetPerfDebug } from "../../perfDebug";
+import { clearTypeRCache, formatCacheBytes, getTypeRCacheInfo } from "../../cepCache";
 
 // Interactive layout mockup: canvas px per real panel px
 const LAYOUT_CANVAS_SCALE = 0.3;
@@ -48,6 +66,9 @@ const SettingsModal = React.memo(function SettingsModal() {
     resetLineCounterOnPage: state.resetLineCounterOnPage,
     multiTabEnabled: state.multiTabEnabled,
     editorTheme: state.editorTheme,
+    customThemes: state.customThemes,
+    pageLineColor: state.pageLineColor,
+    backgroundImage: state.backgroundImage,
     shortcut: state.shortcut,
     uiLayout: state.uiLayout,
     tabs: state.tabs,
@@ -118,6 +139,24 @@ const SettingsModal = React.memo(function SettingsModal() {
     context.state.multiTabEnabled !== false
   );
   const [editorTheme, setEditorTheme] = React.useState(context.state.editorTheme || "system");
+  // Themes, background and page line color are applied as soon as they change
+  // (an appearance editor without a live result is unusable), so they are read
+  // straight from the state instead of being drafts waiting for "Save".
+  const customThemes = React.useMemo(
+    () => normalizeCustomThemes(context.state.customThemes),
+    [context.state.customThemes]
+  );
+  const backgroundImage = React.useMemo(
+    () => normalizeBackgroundImage(context.state.backgroundImage),
+    [context.state.backgroundImage]
+  );
+  const pageLineColor = context.state.pageLineColor || "";
+  // The picture itself is not part of the state: it lives in its own file
+  const [backgroundData, setBackgroundData] = React.useState(() => readBackgroundImageData());
+  const [editedThemeId, setEditedThemeId] = React.useState(null);
+  const [confirmDeleteThemeId, setConfirmDeleteThemeId] = React.useState(null);
+  const [backgroundEditorOpen, setBackgroundEditorOpen] = React.useState(false);
+  const [backgroundBusy, setBackgroundBusy] = React.useState(false);
   const [shortcutDraft, setShortcutDraft] = React.useState(() => ({ ...context.state.shortcut }));
   const [multiTabConfirmOpen, setMultiTabConfirmOpen] = React.useState(false);
   const [edited, setEdited] = React.useState(false);
@@ -148,10 +187,15 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [selectedState, setSelectedState] = React.useState("");
   const [showDeleteStates, setShowDeleteStates] = React.useState(false);
   const [statesToDelete, setStatesToDelete] = React.useState({});
+  const [cacheInfo, setCacheInfo] = React.useState(getTypeRCacheInfo);
 
   React.useEffect(() => {
     setShortcutDraft({ ...context.state.shortcut });
   }, [context.state.shortcut]);
+
+  React.useEffect(() => {
+    if (activeTab === "data") setCacheInfo(getTypeRCacheInfo());
+  }, [activeTab]);
 
   const shortcutConflicts = React.useMemo(() => {
     const bySignature = {};
@@ -313,9 +357,110 @@ const SettingsModal = React.memo(function SettingsModal() {
     setEdited(true);
   };
 
+  // Keeps the grid selection in sync when the reducer moves the theme itself
+  // (deleting the applied theme falls back to the Photoshop one)
+  React.useEffect(() => {
+    setEditorTheme(context.state.editorTheme);
+  }, [context.state.editorTheme]);
+
   const changeEditorTheme = (theme) => {
     setEditorTheme(theme);
-    setEdited(true);
+    context.dispatch({ type: "setEditorTheme", theme });
+  };
+
+  // Theme list shown in the appearance tab: built-in presets, user themes and
+  // the image theme when one has been configured.
+  const themeList = React.useMemo(() => {
+    const list = EDITOR_THEME_PRESETS.concat(customThemes);
+    return backgroundImage ? list.concat([buildImageThemePreset(backgroundImage)]) : list;
+  }, [customThemes, backgroundImage]);
+
+  const editedTheme = customThemes.find((theme) => theme.id === editedThemeId) || null;
+  const themeToDelete = customThemes.find((theme) => theme.id === confirmDeleteThemeId) || null;
+
+  const commitCustomThemes = (themes, theme) => {
+    context.dispatch({ type: "setCustomThemes", themes, theme });
+  };
+
+  const createCustomTheme = () => {
+    const source = editorTheme === CUSTOM_IMAGE_THEME_ID ? "editor-dark" : editorTheme;
+    const theme = createCustomThemeFrom(source, locale.settingsThemeNewName || "My theme");
+    setEditedThemeId(theme.id);
+    setConfirmDeleteThemeId(null);
+    setBackgroundEditorOpen(false);
+    setEditorTheme(theme.id);
+    commitCustomThemes(customThemes.concat([theme]), theme.id);
+  };
+
+  const updateCustomTheme = (theme) => {
+    commitCustomThemes(customThemes.map((current) => (current.id === theme.id ? theme : current)));
+  };
+
+  const askDeleteCustomTheme = (id) => {
+    setConfirmDeleteThemeId(id);
+  };
+
+  const deleteCustomTheme = (id) => {
+    setConfirmDeleteThemeId(null);
+    setEditedThemeId((current) => (current === id ? null : current));
+    // The reducer falls back to the Photoshop theme when the applied one goes
+    commitCustomThemes(customThemes.filter((theme) => theme.id !== id));
+  };
+
+  const openThemeEditor = (id) => {
+    setBackgroundEditorOpen(false);
+    setConfirmDeleteThemeId(null);
+    setEditedThemeId((current) => (current === id ? null : id));
+  };
+
+  const openBackgroundEditor = () => {
+    setEditedThemeId(null);
+    setConfirmDeleteThemeId(null);
+    setBackgroundEditorOpen((current) => !current);
+  };
+
+  const changePageLineColor = (color) => {
+    context.dispatch({ type: "setPageLineColor", color: color || null });
+  };
+
+  const importBackgroundImage = () => {
+    const pathSelect = window.cep.fs.showOpenDialogEx(false, false, null, null, ["png", "jpg", "jpeg", "webp", "bmp"]);
+    const path = pathSelect?.data?.length ? pathSelect.data[0] : null;
+    if (!path) return;
+    setBackgroundBusy(true);
+    importImageFile(path)
+      .then((picture) => {
+        if (!writeBackgroundImageData(picture.dataUrl)) throw new Error("writeFailed");
+        setBackgroundData(picture.dataUrl);
+        context.dispatch({
+          type: "setBackgroundImage",
+          image: {
+            ...(backgroundImage || {}),
+            name: picture.name,
+            width: picture.width,
+            height: picture.height,
+            // A new picture gets a fresh framing, the previous crop had no
+            // meaning for it
+            crop: null,
+            updatedAt: Date.now(),
+          },
+        });
+        changeEditorTheme(CUSTOM_IMAGE_THEME_ID);
+      })
+      .catch(() => nativeAlert(locale.settingsBackgroundError || "This image could not be loaded.", locale.errorTitle, true))
+      .then(() => setBackgroundBusy(false));
+  };
+
+  const updateBackgroundImage = (image) => {
+    context.dispatch({ type: "setBackgroundImage", image });
+  };
+
+  const removeBackgroundImage = () => {
+    clearBackgroundImageData();
+    setBackgroundData(null);
+    setBackgroundEditorOpen(false);
+    // The reducer falls back to "system" when the image theme was selected
+    context.dispatch({ type: "setBackgroundImage", image: null });
   };
 
   const toggleUiElement = (key) => {
@@ -603,9 +748,8 @@ const SettingsModal = React.memo(function SettingsModal() {
     if (multiTabEnabled !== (context.state.multiTabEnabled !== false)) {
       context.dispatch({ type: "setMultiTabEnabled", value: multiTabEnabled });
     }
-    if (editorTheme !== context.state.editorTheme) {
-      context.dispatch({ type: "setEditorTheme", theme: editorTheme });
-    }
+    // Themes, background image and page line color are not part of the draft:
+    // they are applied and persisted as soon as they change.
     const layoutToSave = buildUiLayoutToSave();
     if (JSON.stringify(layoutToSave) !== JSON.stringify(normalizeUiLayout(context.state.uiLayout))) {
       context.dispatch({ type: "setUiLayout", layout: layoutToSave });
@@ -798,6 +942,42 @@ const SettingsModal = React.memo(function SettingsModal() {
         } else {
           nativeAlert(
             locale.settingsResetStorageError || "Unable to delete the storage file.",
+            locale.errorTitle,
+            true
+          );
+        }
+      }
+    );
+  };
+
+  const clearCache = () => {
+    const size = formatCacheBytes(cacheInfo.bytes);
+    nativeConfirm(
+      (locale.settingsClearCacheConfirm || "Clear {size} of TypeR cache? Your texts, tabs, settings, styles, themes, and saved states will be kept.")
+        .replace("{size}", size),
+      locale.confirmTitle || "Confirmation",
+      (confirmed) => {
+        if (!confirmed) return;
+        const result = clearTypeRCache();
+        setCacheInfo(getTypeRCacheInfo());
+        if (!result.supported) {
+          nativeAlert(
+            locale.settingsClearCacheError || "Unable to access the TypeR cache.",
+            locale.errorTitle,
+            true
+          );
+        } else if (result.ok) {
+          nativeAlert(
+            (locale.settingsClearCacheSuccess || "{size} of cache cleared.")
+              .replace("{size}", formatCacheBytes(result.clearedBytes)),
+            locale.successTitle,
+            false
+          );
+        } else {
+          nativeAlert(
+            (locale.settingsClearCachePartial || "{cleared} cleared; {remaining} is still in use. Restart Photoshop, then try again.")
+              .replace("{cleared}", formatCacheBytes(result.clearedBytes))
+              .replace("{remaining}", formatCacheBytes(result.remainingBytes)),
             locale.errorTitle,
             true
           );
@@ -1219,39 +1399,133 @@ const SettingsModal = React.memo(function SettingsModal() {
             <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupTheme || "Theme"}</div>
               <div className="settings-theme-grid">
-                {EDITOR_THEME_PRESETS.map((theme) => {
+                {themeList.map((theme) => {
                   const preview = getEditorThemePreviewColors(theme);
                   const isActive = editorTheme === theme.id;
+                  const isImage = theme.id === CUSTOM_IMAGE_THEME_ID;
+                  const label = isImage
+                    ? locale.settingsThemeImage || "Custom image"
+                    : theme.label || (locale.settingsThemeUntitled || "Custom theme");
+                  const editable = isImage || theme.custom;
                   return (
-                    <button
-                      type="button"
-                      key={theme.id}
-                      className={"settings-theme-choice" + (isActive ? " m-active" : "")}
-                      onClick={() => changeEditorTheme(theme.id)}
-                      title={theme.label}
-                      style={{ "--theme-card-accent": preview.accent }}
-                    >
-                      <span className="settings-theme-preview" style={{ backgroundColor: preview.surface }}>
-                        <span className="settings-theme-preview-bar" style={{ backgroundColor: preview.panel }}>
-                          <i style={{ backgroundColor: preview.accent }} />
-                          <i style={{ backgroundColor: preview.muted }} />
-                        </span>
-                        <span className="settings-theme-preview-line m-long" style={{ backgroundColor: preview.text }} />
-                        <span className="settings-theme-preview-line" style={{ backgroundColor: preview.muted }} />
-                        <span className="settings-theme-preview-pill" style={{ backgroundColor: preview.accent }} />
-                        {isActive && (
-                          <span
-                            className="settings-theme-check"
-                            style={{ backgroundColor: preview.accent, color: preview.accentText || preview.surface }}
-                          >
-                            <FiCheck size={10} />
+                    <div className="settings-theme-cell" key={theme.id}>
+                      <button
+                        type="button"
+                        className={"settings-theme-choice" + (isActive ? " m-active" : "")}
+                        onClick={() => changeEditorTheme(theme.id)}
+                        title={label}
+                        style={{ "--theme-card-accent": preview.accent }}
+                      >
+                        <span
+                          className="settings-theme-preview"
+                          style={
+                            isImage && backgroundData
+                              ? { backgroundColor: preview.surface, backgroundImage: `url("${backgroundData}")` }
+                              : { backgroundColor: preview.surface }
+                          }
+                        >
+                          <span className="settings-theme-preview-bar" style={{ backgroundColor: preview.panel }}>
+                            <i style={{ backgroundColor: preview.accent }} />
+                            <i style={{ backgroundColor: preview.muted }} />
                           </span>
-                        )}
-                      </span>
-                      <span className="settings-theme-name">{theme.label}</span>
-                    </button>
+                          <span className="settings-theme-preview-line m-long" style={{ backgroundColor: preview.text }} />
+                          <span className="settings-theme-preview-line" style={{ backgroundColor: preview.muted }} />
+                          <span className="settings-theme-preview-pill" style={{ backgroundColor: preview.accent }} />
+                          {isActive && (
+                            <span
+                              className="settings-theme-check"
+                              style={{ backgroundColor: preview.accent, color: preview.accentText || preview.surface }}
+                            >
+                              <FiCheck size={10} />
+                            </span>
+                          )}
+                        </span>
+                        <span className="settings-theme-name">{label}</span>
+                      </button>
+                      {editable && (
+                        <div className="settings-theme-tools">
+                          <button
+                            type="button"
+                            className={
+                              "settings-theme-tool" +
+                              ((isImage ? backgroundEditorOpen : editedThemeId === theme.id) ? " m-active" : "")
+                            }
+                            title={locale.settingsThemeEdit || "Customize"}
+                            onClick={() => (isImage ? openBackgroundEditor() : openThemeEditor(theme.id))}
+                          >
+                            <FiEdit2 size={11} />
+                          </button>
+                          <button
+                            type="button"
+                            className="settings-theme-tool m-danger"
+                            title={locale.delete || "Delete"}
+                            onClick={() => (isImage ? removeBackgroundImage() : askDeleteCustomTheme(theme.id))}
+                          >
+                            <FiTrash2 size={11} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
+                <div className="settings-theme-cell">
+                  <button
+                    type="button"
+                    className="settings-theme-choice m-add"
+                    onClick={createCustomTheme}
+                    title={locale.settingsThemeNew || "New theme"}
+                  >
+                    <span className="settings-theme-preview m-add">
+                      <FiPlus size={20} />
+                    </span>
+                    <span className="settings-theme-name">{locale.settingsThemeNew || "New theme"}</span>
+                  </button>
+                </div>
+                {!backgroundImage && (
+                  <div className="settings-theme-cell">
+                    <button
+                      type="button"
+                      className={"settings-theme-choice m-add" + (backgroundEditorOpen ? " m-active" : "")}
+                      onClick={openBackgroundEditor}
+                      title={locale.settingsThemeImage || "Custom image"}
+                    >
+                      <span className="settings-theme-preview m-add">
+                        <FiImage size={20} />
+                      </span>
+                      <span className="settings-theme-name">{locale.settingsThemeImage || "Custom image"}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+              {editedTheme && (
+                <ThemeEditor
+                  theme={editedTheme}
+                  onChange={updateCustomTheme}
+                  onClose={() => setEditedThemeId(null)}
+                />
+              )}
+              {backgroundEditorOpen && (
+                <BackgroundEditor
+                  image={backgroundImage}
+                  data={backgroundData}
+                  busy={backgroundBusy}
+                  onImport={importBackgroundImage}
+                  onChange={updateBackgroundImage}
+                  onRemove={removeBackgroundImage}
+                  onClose={() => setBackgroundEditorOpen(false)}
+                />
+              )}
+              <div className="settings-color-row">
+                <ColorField
+                  label={locale.settingsPageLineColor || "Page line background"}
+                  value={pageLineColor}
+                  onChange={changePageLineColor}
+                  clearable={true}
+                  onClear={() => changePageLineColor("")}
+                />
+                <span className="settings-color-hint">
+                  {locale.settingsPageLineColorHint || "Background of the lines marked as a page separator."}
+                </span>
               </div>
             </div>
             <div className="settings-group">
@@ -1684,6 +1958,26 @@ const SettingsModal = React.memo(function SettingsModal() {
               )}
             </div>
             <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupCache || "Cache"}</div>
+              <div className="field">
+                <button
+                  type="button"
+                  className="topcoat-button--large"
+                  onClick={clearCache}
+                  disabled={!cacheInfo.supported || cacheInfo.bytes === 0}
+                >
+                  <FiTrash2 size={18} /> {locale.settingsClearCache || "Clear cache"}
+                </button>
+              </div>
+              <div className="field-descr">
+                {(locale.settingsCacheAccumulated || "Accumulated cache: {size}")
+                  .replace("{size}", formatCacheBytes(cacheInfo.bytes))}
+              </div>
+              <div className="field-descr">
+                {locale.settingsClearCacheHint || "Deletes TypeR's temporary browser files without touching texts, tabs, settings, styles, themes, or saved states."}
+              </div>
+            </div>
+            <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupDanger || "Danger zone"}</div>
               <div className="field">
                 <button type="button" className="topcoat-button--large settings-danger-btn" onClick={resetStorage}>
@@ -1741,6 +2035,36 @@ const SettingsModal = React.memo(function SettingsModal() {
             </div>
           </form>
         </div>
+        {themeToDelete && (
+          // In-panel dialog: a Photoshop modal opened on top of the settings
+          // modal is dismissed along with it and never returns an answer.
+          <div className="settings-confirm-overlay" onClick={() => setConfirmDeleteThemeId(null)}>
+            <div className="settings-confirm-dialog hostBgdLight" onClick={(e) => e.stopPropagation()}>
+              <div className="settings-confirm-icon">
+                <FiAlertTriangle size={26} />
+              </div>
+              <div className="settings-confirm-title">
+                {locale.settingsThemeDelete || "Delete theme"}
+              </div>
+              <div className="settings-confirm-text">
+                {(locale.settingsThemeDeleteConfirm || 'Are you sure you want to delete "{name}"?')
+                  .replace("{name}", themeToDelete.label || (locale.settingsThemeUntitled || "Custom theme"))}
+              </div>
+              <div className="settings-confirm-actions">
+                <button type="button" className="topcoat-button--large" onClick={() => setConfirmDeleteThemeId(null)}>
+                  {locale.no || "No"}
+                </button>
+                <button
+                  type="button"
+                  className="topcoat-button--large--cta settings-confirm-danger"
+                  onClick={() => deleteCustomTheme(themeToDelete.id)}
+                >
+                  {locale.yes || "Yes"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         {multiTabConfirmOpen && (
           <div className="settings-confirm-overlay" onClick={cancelDisableMultiTab}>
             <div className="settings-confirm-dialog hostBgdLight" onClick={(e) => e.stopPropagation()}>
