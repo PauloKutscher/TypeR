@@ -11,7 +11,10 @@ import {buildFontGroups} from '../../fontScan';
 import {buildFolderTree, flattenFolderTree} from '../../folderUtils';
 
 const FontScanRModal = React.memo(function FontScanRModal() {
-    const context = useContext();
+    const context = useContext((state) => ({
+        folders: state.folders,
+        openFolders: state.openFolders,
+    }));
     const [step, setStep] = React.useState('pick');
     const [progress, setProgress] = React.useState({current: 0, total: 0, fileName: ''});
     const [groups, setGroups] = React.useState([]);

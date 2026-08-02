@@ -21,7 +21,12 @@ import { buildFolderTree, flattenFolderTree } from "../../folderUtils";
 import FontScanPromo from "./fontScanPromo";
 
 const EditStyleModal = React.memo(function EditStyleModal() {
-  const context = useContext();
+  const context = useContext((state) => ({
+    modalData: state.modalData,
+    folders: state.folders,
+    styleSizeStep: state.styleSizeStep,
+    middleEast: state.middleEast,
+  }));
   const currentData = context.state.modalData;
   const [name, setName] = React.useState(currentData.name || "");
   const [folder, setFolder] = React.useState(currentData.folder || "");

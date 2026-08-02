@@ -6,16 +6,63 @@ import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
 
-import { csInterface, locale, nativeConfirm, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, isPanelIdle, isPanelInteracting, notePanelActivity, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, getUserFonts, refreshUserFonts, scrollToLine, parseMarkdownRuns } from "../../utils";
+import { csInterface, locale, nativeConfirm, setActiveLayerText, setLayerTextFast, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, isPanelIdle, isPanelInteracting, notePanelActivity, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, getUserFonts, refreshUserFonts, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { buildStoredSelectionPayload, getScaledStyle } from "../../textLayerPayload";
 import { applyLinesToSelectedLayers, withShortcutHint } from "../../shortcutCommands";
-import { generateTextShapeRVariants, recordTextShapeRFeedback, setTextShapeRTuning, visibleWidth } from "../../textShapeR";
 import { createFontPreviewRegistry, getFontPreviewFamily } from "../../fontPreview";
 import { notePerfRender } from "../../perfDebug";
 import TextShapeRFitPreview from "../textShapeRFitPreview";
 
+let textShapeREnginePromise = null;
+let panelSnapshotPending = false;
+let panelSnapshotTimer = null;
+let panelSnapshotSignature = "";
+let panelSnapshotCallbacks = [];
+const schedulePanelSnapshot = () => {
+  if (panelSnapshotPending || panelSnapshotTimer) return;
+  panelSnapshotTimer = setTimeout(() => {
+    panelSnapshotTimer = null;
+    panelSnapshotPending = true;
+    const requestedSignature = panelSnapshotSignature;
+    const requestedCallbacks = panelSnapshotCallbacks;
+    panelSnapshotSignature = "";
+    panelSnapshotCallbacks = [];
+    csInterface.evalScript(`getTypeRPanelSnapshot(${JSON.stringify({ signature: requestedSignature })})`, (result) => {
+      panelSnapshotPending = false;
+      let snapshot = { activeLayer: null, selection: null, layers: [] };
+      try {
+        snapshot = JSON.parse(result || "{}") || snapshot;
+      } catch (error) {}
+      requestedCallbacks.forEach((snapshotCallback) => snapshotCallback(snapshot));
+      // Requests arriving while ExtendScript was busy belong to the next
+      // Photoshop state; do not satisfy them with the now-stale response.
+      if (panelSnapshotCallbacks.length) schedulePanelSnapshot();
+    });
+  }, 0);
+};
+const requestPanelSnapshot = (signature, callback) => {
+  panelSnapshotCallbacks.push(callback);
+  if (signature) panelSnapshotSignature = signature;
+  schedulePanelSnapshot();
+};
+const loadTextShapeREngine = () => {
+  if (!textShapeREnginePromise) {
+    textShapeREnginePromise = import(/* webpackChunkName: "text-shaper-engine" */ "../../textShapeR");
+  }
+  return textShapeREnginePromise;
+};
+
 const normalizeLayerText = (text) => String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+
+const getNextUsableLineIndex = (lines, lineIndex) => {
+  const currentLine = lines[lineIndex];
+  if (currentLine?.last) return { index: lineIndex, advanced: false };
+  for (let i = lineIndex + 1; i < lines.length; i++) {
+    if (!lines[i].ignore) return { index: lines[i].rawIndex, advanced: true };
+  }
+  return { index: lineIndex, advanced: false };
+};
 
 const getLayerSourceKey = (source) => JSON.stringify({
   layerId: source.layerId || null,
@@ -44,10 +91,13 @@ const rememberBubbleShape = (cache, key, shape) => {
   cache.set(key, shape);
 };
 
-const getActiveTextLayerSource = (callback) => {
-  csInterface.evalScript("getActiveLayerText()", (result) => {
+const getActiveTextLayerSource = (signature, callback) => {
+  requestPanelSnapshot(signature, ({ activeLayer: data }) => {
     try {
-      const data = JSON.parse(result || "{}");
+      if (data.unchanged) {
+        callback({ unchanged: true, signature: data.signature });
+        return;
+      }
       if (!data?.textProps?.layerText) {
         callback(null);
         return;
@@ -61,7 +111,7 @@ const getActiveTextLayerSource = (callback) => {
           stroke: data.stroke || null,
         },
       };
-      callback({ ...source, key: getLayerSourceKey(source) });
+      callback({ ...source, key: getLayerSourceKey(source), signature: data.signature || "" });
     } catch (error) {
       callback(null);
     }
@@ -75,12 +125,50 @@ const emptyTextStyle = {};
 
 const PreviewBlock = React.memo(function PreviewBlock() {
   notePerfRender("PreviewBlock");
-  const context = useContext();
+  const context = useContext((state) => ({
+    uiLayout: state.uiLayout,
+    currentStyle: state.currentStyle,
+    currentLine: state.currentLine,
+    interpretMarkdown: state.interpretMarkdown,
+    textShapeRTuning: state.textShapeRTuning,
+    textShapeRBubbleAware: state.textShapeRBubbleAware,
+    inlineTextShapeR: state.inlineTextShapeR,
+    currentLineIndex: state.currentLineIndex,
+    multiBubbleMode: state.multiBubbleMode,
+    storedSelections: state.storedSelections,
+    modalType: state.modalType,
+    lines: state.lines,
+    styles: state.styles,
+    textScale: state.textScale,
+    pastePointText: state.pastePointText,
+    internalPadding: state.internalPadding,
+    direction: state.direction,
+    resizeTextBoxOnCenter: state.resizeTextBoxOnCenter,
+    textSizeIncrement: state.textSizeIncrement,
+    showTips: state.showTips,
+    textShapeRPerformanceTipVisible: state.textShapeRPerformanceTipVisible,
+    shortcut: state.shortcut,
+  }));
   const uiVisible = context.state.uiLayout?.visible || {};
   const showPreviewMainControls =
     uiVisible.previewCreateButton !== false ||
     uiVisible.previewAlignButton !== false ||
     uiVisible.previewSizeControls !== false;
+  const batchTrackingEnabled = context.state.inlineTextShapeR && uiVisible.previewWidget !== false;
+  const [textShapeREngine, setTextShapeREngine] = React.useState(null);
+  React.useEffect(() => {
+    if (!context.state.inlineTextShapeR || uiVisible.previewWidget === false || textShapeREngine) return undefined;
+    let active = true;
+    loadTextShapeREngine().then((engine) => {
+      if (!active) return;
+      engine.setDehyphenationEnabled(context.getState().dehyphenateTextShapeR === true);
+      engine.setTextShapeRTuning(context.getState().textShapeRTuning);
+      setTextShapeREngine(engine);
+    });
+    return () => {
+      active = false;
+    };
+  }, [context.state.inlineTextShapeR, uiVisible.previewWidget, textShapeREngine, context.getState]);
   React.useEffect(() => {
     context.dispatch({ type: "showTextShapeRPerformanceTip" });
   }, [context.dispatch]);
@@ -97,6 +185,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     error: "",
   });
   const inlineSourceKey = React.useRef("");
+  const inlineSourceSignature = React.useRef("");
   const inlineLayerIdRef = React.useRef(null);
   const inlineSourcePending = React.useRef(false);
   const inlineEventDebounce = React.useRef(null);
@@ -110,6 +199,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const batchOrderRef = React.useRef([]);
   const batchPending = React.useRef(false);
   const batchQueued = React.useRef(false);
+  const batchEventDebounce = React.useRef(null);
   const batchRunRef = React.useRef(null);
   const batchSelectionRef = React.useRef([]);
   const [batchSelection, setBatchSelection] = React.useState([]);
@@ -156,7 +246,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       .map((line) => line.trim())
       .filter(Boolean);
     if (!lines.length) return null;
-    const maxUnits = Math.max(...lines.map((line) => visibleWidth(line)));
+    if (!textShapeREngine) return null;
+    const maxUnits = Math.max(...lines.map((line) => textShapeREngine.visibleWidth(line)));
     if (!(maxUnits > 0)) return null;
     // Bounds measure glyph extent, not leading: an n-line block spans
     // (n - 1) * leading + glyphHeight where glyphHeight is ~0.62 of the
@@ -168,9 +259,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       unitPx: bounds.width / maxUnits,
       linePx: bounds.height / (lines.length - 1 + glyphRatio),
     };
-  }, [inlineLayerSource.text, inlineLayerSource.bounds]);
+  }, [inlineLayerSource.text, inlineLayerSource.bounds, textShapeREngine]);
   const inlineTextShapeRVariants = React.useMemo(
-    () => generateTextShapeRVariants(inlineLayerSource.text, {
+    () => textShapeREngine ? textShapeREngine.generateTextShapeRVariants(inlineLayerSource.text, {
       limit: 12,
       allowHyphenation: true,
       profile: "balanced",
@@ -178,10 +269,10 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       width: inlineSelectionShape?.width,
       height: inlineSelectionShape?.height,
       calibration: inlineCalibration,
-    }),
+    }) : [],
     // textShapeRTuning is not read here but changes the generator's scoring:
     // its module-level state is updated before the dispatch triggers this
-    [inlineLayerSource.text, inlineSelectionShape, inlineCalibration, context.state.textShapeRTuning]
+    [inlineLayerSource.text, inlineSelectionShape, inlineCalibration, context.state.textShapeRTuning, textShapeREngine]
   );
   const [inlineVariantPage, setInlineVariantPage] = React.useState(0);
   const inlinePageSize = 3;
@@ -210,6 +301,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   }, [markdownEnabled]);
 
   const selectionCheckInterval = React.useRef(null);
+  const selectionEventDebounce = React.useRef(null);
+  const selectionCheckCallbackRef = React.useRef(null);
   const selectionCheckPending = React.useRef(false);
   const selectionPollLastAt = React.useRef(0);
   const [shiftSelectionWarning, setShiftSelectionWarning] = React.useState(false);
@@ -226,10 +319,17 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     setInlineLayerSource((current) => (
       showLoading || (!current.text && !current.error) ? { ...current, loading: true, error: "" } : current
     ));
-    getActiveTextLayerSource((source) => {
+    if (showLoading) inlineSourceSignature.current = "";
+    getActiveTextLayerSource(inlineSourceSignature.current, (source) => {
       inlineSourcePending.current = false;
+      if (source?.unchanged) {
+        inlineSourceSignature.current = source.signature || inlineSourceSignature.current;
+        setInlineLayerSource((current) => (current.loading || current.error ? { ...current, loading: false, error: "" } : current));
+        return;
+      }
       if (!source?.text) {
         inlineSourceKey.current = "";
+        inlineSourceSignature.current = "";
         inlineLayerIdRef.current = null;
         inlineLayerBoundsRef.current = null;
         setInlineLayerSource((current) => {
@@ -240,6 +340,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         return;
       }
       inlineLayerIdRef.current = source.layerId;
+      inlineSourceSignature.current = source.signature || "";
       inlineLayerBoundsRef.current = source.bounds || null;
       if (source.key === inlineSourceKey.current) {
         setInlineLayerSource((current) => (current.loading || current.error ? { ...current, loading: false, error: "" } : current));
@@ -279,7 +380,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       );
     }
     inlineShapePending.current = true;
-    getCurrentSelection((selection) => {
+    requestPanelSnapshot(inlineSourceSignature.current, ({ selection }) => {
       if (selection && selection.width && selection.height) {
         // Without an active text layer there is nothing to shape: skip the
         // outline sampling entirely so drawing selections on non-text layers
@@ -402,17 +503,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       return;
     }
     batchPending.current = true;
-    csInterface.evalScript("getSelectedTextLayers()", (result) => {
+    requestPanelSnapshot(inlineSourceSignature.current, ({ layers }) => {
       batchPending.current = false;
-      let ids = null;
-      try {
-        const data = JSON.parse(result || "{}");
-        if (!data.error) {
-          ids = (data.layers || []).map((layer) => layer.id).filter((id) => typeof id === "number");
-        }
-      } catch (error) {
-        ids = null;
-      }
+      const ids = (layers || []).map((layer) => layer.id).filter((id) => typeof id === "number");
       if (ids) {
         const kept = batchOrderRef.current.filter((id) => ids.indexOf(id) !== -1);
         const added = ids.filter((id) => kept.indexOf(id) === -1);
@@ -468,9 +561,19 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   }, [goToBatchLayer]);
 
   React.useEffect(() => {
+    if (!batchTrackingEnabled) {
+      batchOrderRef.current = [];
+      setBatchSelection((current) => (current.length ? [] : current));
+      return undefined;
+    }
     refreshBatchSelection();
     const unsubscribePhotoshopEvents = addPhotoshopEventListener((event) => {
-      if (isPhotoshopSelectEvent(event)) refreshBatchSelection();
+      if (!isPhotoshopSelectEvent(event)) return;
+      if (batchEventDebounce.current) clearTimeout(batchEventDebounce.current);
+      batchEventDebounce.current = setTimeout(() => {
+        batchEventDebounce.current = null;
+        refreshBatchSelection();
+      }, 120);
     });
     const fallbackTimer = setInterval(() => {
       // Skip while the user is clicking inside the panel: this round-trip runs
@@ -483,8 +586,12 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     return () => {
       unsubscribePhotoshopEvents();
       clearInterval(fallbackTimer);
+      if (batchEventDebounce.current) {
+        clearTimeout(batchEventDebounce.current);
+        batchEventDebounce.current = null;
+      }
     };
-  }, [refreshBatchSelection]);
+  }, [batchTrackingEnabled, refreshBatchSelection]);
 
   React.useEffect(() => {
     if (!context.state.inlineTextShapeR) return undefined;
@@ -585,14 +692,15 @@ const PreviewBlock = React.memo(function PreviewBlock() {
 
   const addSelectionAndAdvance = (selection) => {
     if (!selection) return;
+    const currentLineIndex = context.state.currentLineIndex;
+    const nextLine = context.state.multiBubbleMode
+      ? getNextUsableLineIndex(context.state.lines || [], currentLineIndex)
+      : { index: currentLineIndex, advanced: false };
     context.dispatch({
-      type: "addSelection",
-      selection,
-      lineIndex: context.state.currentLineIndex,
+      type: "addSelectionBatch",
+      entries: [{ selection, lineIndex: currentLineIndex }],
+      nextLineIndex: nextLine.advanced ? nextLine.index : undefined,
     });
-    if (context.state.multiBubbleMode) {
-      context.dispatch({ type: "nextLine", add: true });
-    }
   };
 
   // Resets the stored selections AND the active Photoshop selection: leaving
@@ -651,24 +759,10 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       selectionCheckPending.current = false;
       if (selection) {
         notePanelActivity();
-        const getNextLineIndex = (lineIndex) => {
-          const lines = context.state.lines || [];
-          const currentLine = lines[lineIndex];
-          if (currentLine?.last) {
-            return { index: lineIndex, advanced: false };
-          }
-          for (let i = lineIndex + 1; i < lines.length; i++) {
-            if (!lines[i].ignore) {
-              return { index: lines[i].rawIndex, advanced: true };
-            }
-          }
-          return { index: lineIndex, advanced: false };
-        };
-
         if (selection.multiSelection && selection.multiSelection.length > 0) {
           const storedHashSet = new Set((context.state.storedSelections || []).map((storedSelection) => getSelectionBoundsHash(storedSelection)));
           let nextLineIndex = context.state.currentLineIndex;
-          let addedCount = 0;
+          const entries = [];
 
           for (const multiSelection of selection.multiSelection) {
             const { shiftKey, ...cleanSelection } = multiSelection;
@@ -678,21 +772,20 @@ const PreviewBlock = React.memo(function PreviewBlock() {
             }
 
             storedHashSet.add(selectionHash);
-            context.dispatch({
-              type: "addSelection",
-              selection: cleanSelection,
-              lineIndex: nextLineIndex,
-            });
-            addedCount++;
-            const nextLine = getNextLineIndex(nextLineIndex);
+            entries.push({ selection: cleanSelection, lineIndex: nextLineIndex });
+            const nextLine = getNextUsableLineIndex(context.state.lines || [], nextLineIndex);
             nextLineIndex = nextLine.index;
             if (!nextLine.advanced) {
               break;
             }
           }
 
-          if (addedCount > 0 && nextLineIndex !== context.state.currentLineIndex) {
-            context.dispatch({ type: "setCurrentLineIndex", index: nextLineIndex });
+          if (entries.length > 0) {
+            context.dispatch({
+              type: "addSelectionBatch",
+              entries,
+              nextLineIndex: nextLineIndex !== context.state.currentLineIndex ? nextLineIndex : undefined,
+            });
           }
           return;
         }
@@ -711,11 +804,25 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       }
     });
   }, [context.state.multiBubbleMode, context.state.modalType, context.state.storedSelections, context.state.currentLineIndex, context.state.lines, showShiftTip]);
+  selectionCheckCallbackRef.current = checkForSelectionChange;
 
   React.useEffect(() => {
+    let unsubscribePhotoshopEvents = () => {};
     if (context.state.multiBubbleMode && !context.state.modalType) {
       startSelectionMonitoring();
-      selectionCheckInterval.current = setInterval(checkForSelectionChange, 200);
+      // Selection marquee changes emit Photoshop `setd` notifications. React
+      // to those bursts and keep only a slow safety poll for old hosts whose
+      // event bridge is unreliable, instead of hitting ExtendScript 5x/s.
+      unsubscribePhotoshopEvents = addPhotoshopEventListener(() => {
+        if (selectionEventDebounce.current) clearTimeout(selectionEventDebounce.current);
+        selectionEventDebounce.current = setTimeout(() => {
+          selectionEventDebounce.current = null;
+          if (selectionCheckCallbackRef.current) selectionCheckCallbackRef.current();
+        }, 100);
+      });
+      selectionCheckInterval.current = setInterval(() => {
+        if (selectionCheckCallbackRef.current) selectionCheckCallbackRef.current();
+      }, 1500);
     } else {
       stopSelectionMonitoring();
       selectionCheckPending.current = false;
@@ -726,8 +833,13 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     }
 
     return () => {
+      unsubscribePhotoshopEvents();
       stopSelectionMonitoring();
       selectionCheckPending.current = false;
+      if (selectionEventDebounce.current) {
+        clearTimeout(selectionEventDebounce.current);
+        selectionEventDebounce.current = null;
+      }
       if (selectionCheckInterval.current) {
         clearInterval(selectionCheckInterval.current);
       }
@@ -741,7 +853,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         clearTimeout(clearButtonTimeout.current);
       }
     };
-  }, [context.state.multiBubbleMode, context.state.modalType, checkForSelectionChange]);
+  }, [context.state.multiBubbleMode, context.state.modalType]);
   React.useEffect(() => {
     if (!context.state.multiBubbleMode && shiftSelectionWarning) {
       setShiftSelectionWarning(false);
@@ -927,7 +1039,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         locale.confirmTitle || "Confirmation",
         (confirmed) => {
           if (!confirmed) return;
-          setTextShapeRTuning(null);
+          if (textShapeREngine) textShapeREngine.setTextShapeRTuning(null);
           context.dispatch({ type: "setTextShapeRTuning", value: null });
           flashShapeFeedback(locale.textShapeRMarkBestReset || "Learned shape preferences reset");
         }
@@ -948,7 +1060,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         let tuningState = context.state.textShapeRTuning;
         let learned = 0;
         entries.forEach((entry) => {
-          const result = recordTextShapeRFeedback(entry.text, {
+          const result = textShapeREngine && textShapeREngine.recordTextShapeRFeedback(entry.text, {
             limit: 12,
             allowHyphenation: true,
             profile: "balanced",
@@ -959,7 +1071,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           if (!result) return;
           tuningState = result.tuning;
           // Each sample generates against the tuning the previous one taught
-          setTextShapeRTuning(tuningState);
+          textShapeREngine.setTextShapeRTuning(tuningState);
           learned += 1;
         });
         if (!learned) {
@@ -972,12 +1084,12 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       });
       return;
     }
-    if (!inlineLayerSource.text || inlineLayerSource.loading) return;
+    if (!textShapeREngine || !inlineLayerSource.text || inlineLayerSource.loading) return;
     // textKey only holds manual returns: box (paragraph) layers also wrap
     // automatically, so the visual shape must be read off the host, which
     // materializes those wraps on a throwaway point-text copy of the layer
     getActiveLayerRenderedText((renderedText) => {
-      const result = recordTextShapeRFeedback(renderedText || inlineLayerSource.text, {
+      const result = textShapeREngine.recordTextShapeRFeedback(renderedText || inlineLayerSource.text, {
         limit: 12,
         allowHyphenation: true,
         profile: "balanced",
@@ -989,12 +1101,12 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       if (!result) return;
       // Apply to the generator before dispatching so the re-render (whose memo
       // depends on the stored tuning) already sees the new knobs
-      setTextShapeRTuning(result.tuning);
+      textShapeREngine.setTextShapeRTuning(result.tuning);
       context.dispatch({ type: "setTextShapeRTuning", value: result.tuning });
       flashShapeFeedback((locale.textShapeRMarkBestSaved || "Preference saved ({count} lines) — suggestions will follow this style")
         .replace("{count}", result.chosenLineCount));
     });
-  }, [inlineLayerSource.text, inlineLayerSource.loading, inlineSelectionShape, inlineCalibration, context, flashShapeFeedback]);
+  }, [inlineLayerSource.text, inlineLayerSource.loading, inlineSelectionShape, inlineCalibration, context, flashShapeFeedback, textShapeREngine]);
 
   const handleIncrementChange = React.useCallback((e) => {
     context.dispatch({ type: "setTextSizeIncrement", increment: e.target.value });

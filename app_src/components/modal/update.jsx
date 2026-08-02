@@ -28,7 +28,7 @@ const sanitizeReleaseHtml = (html) => {
 };
 
 const UpdateModal = React.memo(function UpdateModal() {
-  const context = useContext();
+  const context = useContext((state) => ({ modalData: state.modalData }));
   const { version, releases, downloadUrl } = context.state.modalData;
   const [isUpdating, setIsUpdating] = React.useState(false);
   const [updateStatus, setUpdateStatus] = React.useState('');

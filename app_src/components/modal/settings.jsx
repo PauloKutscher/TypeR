@@ -24,7 +24,41 @@ const LAYOUT_BLOCK_ELEMENTS = {
 };
 
 const SettingsModal = React.memo(function SettingsModal() {
-  const context = useContext();
+  const context = useContext((state) => ({
+    pastePointText: state.pastePointText,
+    ignoreLinePrefixes: state.ignoreLinePrefixes,
+    ignoreTags: state.ignoreTags,
+    defaultStyleId: state.defaultStyleId,
+    language: state.language,
+    direction: state.direction,
+    middleEast: state.middleEast,
+    autoClosePSD: state.autoClosePSD,
+    autoScrollStyle: state.autoScrollStyle,
+    currentFolderTagPriority: state.currentFolderTagPriority,
+    resizeTextBoxOnCenter: state.resizeTextBoxOnCenter,
+    checkUpdates: state.checkUpdates,
+    multiBubbleMode: state.multiBubbleMode,
+    showTips: state.showTips,
+    showQuickStyleSize: state.showQuickStyleSize,
+    inlineTextShapeR: state.inlineTextShapeR,
+    dehyphenateTextShapeR: state.dehyphenateTextShapeR,
+    styleSizeStep: state.styleSizeStep,
+    internalPadding: state.internalPadding,
+    interpretMarkdown: state.interpretMarkdown,
+    resetLineCounterOnPage: state.resetLineCounterOnPage,
+    multiTabEnabled: state.multiTabEnabled,
+    editorTheme: state.editorTheme,
+    shortcut: state.shortcut,
+    uiLayout: state.uiLayout,
+    tabs: state.tabs,
+    textShapeRTuning: state.textShapeRTuning,
+    text: state.text,
+    images: state.images,
+    currentLineIndex: state.currentLineIndex,
+    currentStyleId: state.currentStyleId,
+    lastOpenedImagePath: state.lastOpenedImagePath,
+    styles: state.styles,
+  }));
   const [activeTab, setActiveTab] = React.useState("general");
   const [perfDebug, setPerfDebug] = React.useState(isPerfDebugEnabled);
   const [pastePointText, setPastePointText] = React.useState(context.state.pastePointText ? "1" : "");

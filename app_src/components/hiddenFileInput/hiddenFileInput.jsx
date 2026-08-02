@@ -5,7 +5,7 @@ import { useContext } from "../../context";
 const allowed = ".psd,.png,.jpg,.jpeg";
 
 export default React.forwardRef(function HiddenFileInput(_, ref) {
-  const context = useContext();
+  const context = useContext(() => ({}));
 
   const onChange = (e) => {
     const files = Array.from(e.target.files || []).filter((f) =>

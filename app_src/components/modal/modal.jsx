@@ -1,17 +1,32 @@
-import './modal.scss';
-
 import React from 'react';
 import {useContext} from '../../context';
 import {locale} from '../../utils';
 
-const HelpModal = React.lazy(() => import(/* webpackChunkName: "modal-help" */ './help'));
-const WalkthroughModal = React.lazy(() => import(/* webpackChunkName: "modal-walkthrough" */ './walkthrough'));
-const SettingsModal = React.lazy(() => import(/* webpackChunkName: "modal-settings" */ './settings'));
-const EditStyleModal = React.lazy(() => import(/* webpackChunkName: "modal-edit-style" */ './editStyle'));
-const EditFolderModal = React.lazy(() => import(/* webpackChunkName: "modal-edit-folder" */ './editFolder'));
-const ExportModal = React.lazy(() => import(/* webpackChunkName: "modal-export" */ './export'));
-const FontScanRModal = React.lazy(() => import(/* webpackChunkName: "modal-font-scan" */ './fontScanR'));
-const UpdateModal = React.lazy(() => import(/* webpackChunkName: "modal-update" */ './update'));
+const modalLoaders = {
+    help: () => import(/* webpackChunkName: "modal-help" */ './help'),
+    walkthrough: () => import(/* webpackChunkName: "modal-walkthrough" */ './walkthrough'),
+    settings: () => import(/* webpackChunkName: "modal-settings" */ './settings'),
+    editStyle: () => import(/* webpackChunkName: "modal-edit-style" */ './editStyle'),
+    editFolder: () => import(/* webpackChunkName: "modal-edit-folder" */ './editFolder'),
+    export: () => import(/* webpackChunkName: "modal-export" */ './export'),
+    fontScanR: () => import(/* webpackChunkName: "modal-font-scan" */ './fontScanR'),
+    update: () => import(/* webpackChunkName: "modal-update" */ './update'),
+};
+const HelpModal = React.lazy(modalLoaders.help);
+const WalkthroughModal = React.lazy(modalLoaders.walkthrough);
+const SettingsModal = React.lazy(modalLoaders.settings);
+const EditStyleModal = React.lazy(modalLoaders.editStyle);
+const EditFolderModal = React.lazy(modalLoaders.editFolder);
+const ExportModal = React.lazy(modalLoaders.export);
+const FontScanRModal = React.lazy(modalLoaders.fontScanR);
+const UpdateModal = React.lazy(modalLoaders.update);
+let modalStylesPromise = null;
+const loadModalStyles = () => {
+    if (!modalStylesPromise) {
+        modalStylesPromise = import(/* webpackChunkName: "modal-shell" */ './modal.scss');
+    }
+    return modalStylesPromise;
+};
 
 class ModalErrorBoundary extends React.Component {
     constructor(props) {
@@ -50,10 +65,14 @@ class ModalErrorBoundary extends React.Component {
 }
 
 const Modal = React.memo(function Modal() {
-    const context = useContext();
+    const context = useContext((state) => ({
+        modalType: state.modalType,
+        notFirstTime: state.notFirstTime,
+    }));
     const close = React.useCallback(() => {
         context.dispatch({type: 'setModal'});
     }, [context.dispatch]);
+    const [stylesReady, setStylesReady] = React.useState(false);
 
     let modalContent = null;
     let modalType = context.state.modalType;
@@ -72,7 +91,26 @@ const Modal = React.memo(function Modal() {
         }
     }, []);
 
-    return modalContent ? (
+    React.useEffect(() => {
+        if (!modalType || stylesReady) return undefined;
+        let active = true;
+        const modalLoader = modalLoaders[modalType] || (() => Promise.resolve());
+        Promise.all([loadModalStyles(), modalLoader()]).then(
+            () => {
+                if (active) setStylesReady(true);
+            },
+            () => {
+                // Let the error boundary render a useful recovery message even
+                // if a local chunk could not be read.
+                if (active) setStylesReady(true);
+            }
+        );
+        return () => {
+            active = false;
+        };
+    }, [modalType, stylesReady]);
+
+    return modalContent && stylesReady ? (
         <div className={`app-modal${modalType === 'walkthrough' ? ' app-modal--walkthrough' : ''}`}>
             {modalType !== 'walkthrough' && <div className="app-modal-hatch hostBgd"></div>}
             <div className={`app-modal-inner hostBgdLight${modalType === 'walkthrough' ? ' app-modal-inner--walkthrough' : ''}`}>

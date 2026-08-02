@@ -94,6 +94,13 @@
 }
 
 .folder-item {
+  &.m-folder-drop-before {
+    box-shadow: inset 0 2px 0 #288edf;
+  }
+
+  &.m-folder-drop-after {
+    box-shadow: inset 0 -2px 0 #288edf;
+  }
   background: rgba(#000, 0.15);
   border-radius: 5px;
   margin-bottom: 8px;
@@ -303,7 +310,7 @@
   justify-content: center;
   cursor: pointer;
   color: #fff;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, transform 0.2s ease;
   &:hover {
     background: rgba(#000, 0.9);
     transform: scale(1.1);

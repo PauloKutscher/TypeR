@@ -7,7 +7,11 @@ import { locale } from "../../utils";
 import { useContext } from "../../context";
 
 const TabBar = React.memo(function TabBar() {
-  const context = useContext();
+  const context = useContext((state) => ({
+    tabs: state.tabs,
+    currentTabId: state.currentTabId,
+    multiTabEnabled: state.multiTabEnabled,
+  }));
   const tabs = context.state.tabs || [];
   const currentTabId = context.state.currentTabId;
   const [editingId, setEditingId] = React.useState(null);

@@ -31,7 +31,7 @@ const LineItem = React.memo(function LineItem({ line, direction, isCurrent, disp
   }, [dispatch, line.text, direction]);
 
   return (
-    <div className={className}>
+    <div className={className} data-line-index={line.rawIndex}>
       <div className="text-line-num" title={String(lineNum || "")}>{lineNum}</div>
       <div className="text-line-select" title={line.ignore ? "" : locale.selectLine}>
         {line.ignore ? " " : <FiTarget size={14} onClick={handleSelect} />}
@@ -70,13 +70,25 @@ LineItem.propTypes = {
 
 const TextBlock = React.memo(function TextBlock() {
   notePerfRender("TextBlock");
-  const context = useContext();
+  const context = useContext((state) => ({
+    direction: state.direction,
+    interpretMarkdown: state.interpretMarkdown,
+    text: state.text,
+    currentLineIndex: state.currentLineIndex,
+    ignoreTags: state.ignoreTags,
+    lines: state.lines,
+    images: state.images,
+    autoClosePSD: state.autoClosePSD,
+  }));
   const direction = context.state.direction || "ltr";
   const markdownEnabled = context.state.interpretMarkdown !== false;
   const [focused, setFocused] = React.useState(false);
   const lastOpenedPath = React.useRef(null);
   const textAreaRef = React.useRef(null);
   const linesRef = React.useRef(null);
+  const [rowLayout, setRowLayout] = React.useState(null);
+  const [viewport, setViewport] = React.useState({ top: 0, height: 600 });
+  const scrollFrameRef = React.useRef(null);
 
   // Fix: only resize when text changes, not on every render
   React.useEffect(resizeTextArea, [context.state.text]);
@@ -232,6 +244,94 @@ const TextBlock = React.memo(function TextBlock() {
     });
   }, [context.state.lines, context.state.images]);
 
+  // Measure the real wrapped height of each row once, then keep only the rows
+  // near the viewport mounted. The textarea remains the source of the total
+  // scroll height, while spacers preserve the highlight layer's geometry.
+  React.useLayoutEffect(() => {
+    const container = linesRef.current;
+    if (!container || linesWithNums.length < 200) {
+      if (rowLayout) setRowLayout(null);
+      return;
+    }
+    const width = container.clientWidth;
+    const nodes = container.querySelectorAll("[data-line-index]");
+    const needsFullLayout = !rowLayout || rowLayout.heights.length !== linesWithNums.length || Math.abs(rowLayout.width - width) > 1;
+    const heights = needsFullLayout ? new Array(linesWithNums.length).fill(17) : rowLayout.heights.concat([]);
+    let changed = needsFullLayout;
+    for (let i = 0; i < nodes.length; i++) {
+      const index = parseInt(nodes[i].getAttribute("data-line-index"), 10);
+      const height = nodes[i].offsetHeight || 17;
+      if (heights[index] !== height) {
+        heights[index] = height;
+        changed = true;
+      }
+    }
+    if (changed) {
+      const offsets = new Array(heights.length + 1);
+      offsets[0] = 0;
+      for (let i = 0; i < heights.length; i++) offsets[i + 1] = offsets[i] + heights[i];
+      setRowLayout({ heights, offsets, total: offsets[offsets.length - 1], width });
+    }
+  }, [context.state.lines, linesWithNums.length, rowLayout]);
+
+  React.useEffect(() => {
+    const scrollContainer = linesRef.current?.parentElement;
+    if (!scrollContainer || linesWithNums.length < 200) return undefined;
+    const updateViewport = () => {
+      scrollFrameRef.current = null;
+      setViewport((current) => {
+        const next = { top: scrollContainer.scrollTop, height: scrollContainer.clientHeight };
+        return current.top === next.top && current.height === next.height ? current : next;
+      });
+    };
+    const onScroll = () => {
+      if (!scrollFrameRef.current) scrollFrameRef.current = requestAnimationFrame(updateViewport);
+    };
+    updateViewport();
+    scrollContainer.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", updateViewport);
+    return () => {
+      scrollContainer.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", updateViewport);
+      if (scrollFrameRef.current) cancelAnimationFrame(scrollFrameRef.current);
+      scrollFrameRef.current = null;
+    };
+  }, [linesWithNums.length]);
+
+  const virtualWindow = React.useMemo(() => {
+    if (!rowLayout || linesWithNums.length < 200 || rowLayout.heights.length !== linesWithNums.length) {
+      return { start: 0, end: linesWithNums.length, top: 0, bottom: 0 };
+    }
+    const overscan = 450;
+    const minY = Math.max(0, viewport.top - overscan);
+    const maxY = viewport.top + viewport.height + overscan;
+    let low = 0;
+    let high = linesWithNums.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (rowLayout.offsets[middle + 1] < minY) low = middle + 1;
+      else high = middle;
+    }
+    const start = low;
+    low = start;
+    high = linesWithNums.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (rowLayout.offsets[middle] <= maxY) low = middle + 1;
+      else high = middle;
+    }
+    const end = Math.max(start + 1, low);
+    return {
+      start,
+      end,
+      top: rowLayout.offsets[start],
+      bottom: Math.max(0, rowLayout.total - rowLayout.offsets[end]),
+    };
+  }, [linesWithNums.length, rowLayout, viewport]);
+  React.useLayoutEffect(() => {
+    if (linesRef.current) linesRef.current.__typerRowLayout = rowLayout;
+  }, [rowLayout]);
+
   const handlePaste = React.useCallback(
     (event) => {
       const clipboard = event.clipboardData;
@@ -278,7 +378,8 @@ const TextBlock = React.memo(function TextBlock() {
   return (
     <React.Fragment>
       <div className="text-lines" ref={linesRef}>
-        {linesWithNums.map(({ line, lineNum }) => (
+        {virtualWindow.top > 0 && <div className="text-lines-spacer" style={{ height: virtualWindow.top }} />}
+        {linesWithNums.slice(virtualWindow.start, virtualWindow.end).map(({ line, lineNum }) => (
           <LineItem
             key={line.rawIndex}
             line={line}
@@ -289,6 +390,7 @@ const TextBlock = React.memo(function TextBlock() {
             lineNum={lineNum}
           />
         ))}
+        {virtualWindow.bottom > 0 && <div className="text-lines-spacer" style={{ height: virtualWindow.bottom }} />}
       </div>
       <div className={"text-area-overlay" + (focused ? " m-hidden" : "")} dir={direction}>
         {overlayContent}

@@ -7,7 +7,7 @@ import {useContext} from '../../context';
 // Small promo block shown in the create-style/create-folder modals and in the
 // settings, so FontScanR stays discoverable without its own panel button
 const FontScanPromo = React.memo(function FontScanPromo() {
-    const context = useContext();
+  const context = useContext(() => ({}));
     const openFontScanR = () => {
         context.dispatch({type: 'setModal', modal: 'fontScanR'});
     };

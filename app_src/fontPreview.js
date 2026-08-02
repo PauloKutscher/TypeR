@@ -24,26 +24,51 @@ const getTextStyleFontKey = (textStyle = {}) => {
 // all of them (4 regex-based passes per entry) on every lookup used to cost
 // tens of milliseconds per style change, which is what made clicking +/- on a
 // style size feel sluggish. Normalize each font list once, then reuse it.
-const normalizedFontsCache = typeof WeakMap === "function" ? new WeakMap() : null;
+const fontIndexCache = typeof WeakMap === "function" ? new WeakMap() : null;
 const lookupCache = typeof WeakMap === "function" ? new WeakMap() : null;
 
-const getNormalizedFonts = (fonts) => {
+const appendIndexEntry = (index, key, entry) => {
+  if (!key) return;
+  if (!index.has(key)) index.set(key, []);
+  index.get(key).push(entry);
+};
+
+const getFontIndex = (fonts) => {
   const list = fonts || [];
-  const cached = normalizedFontsCache && normalizedFontsCache.get(list);
+  const cached = fontIndexCache && fontIndexCache.get(list);
   if (cached) return cached;
-  const normalized = list.map((font) => ({
-    font,
-    postScriptName: normalizeFontName(font.postScriptName),
-    name: normalizeFontName(font.name),
-    family: normalizeFontName(font.family),
-    style: normalizeFontStyle(font.style),
-  }));
-  if (normalizedFontsCache) normalizedFontsCache.set(list, normalized);
-  return normalized;
+  const index = {
+    postScriptNames: new Map(),
+    names: new Map(),
+    families: new Map(),
+  };
+  list.forEach((font, position) => {
+    const entry = {
+      font,
+      position,
+      postScriptName: normalizeFontName(font.postScriptName),
+      name: normalizeFontName(font.name),
+      family: normalizeFontName(font.family),
+      style: normalizeFontStyle(font.style),
+    };
+    appendIndexEntry(index.postScriptNames, entry.postScriptName, entry);
+    appendIndexEntry(index.names, entry.name, entry);
+    appendIndexEntry(index.families, entry.family, entry);
+  });
+  if (fontIndexCache) fontIndexCache.set(list, index);
+  return index;
 };
 
 const resolveInstalledFont = (fonts, postScriptName, fontName, fontStyle) => {
-  const entries = getNormalizedFonts(fonts);
+  const index = getFontIndex(fonts);
+  const candidatesByPosition = new Map();
+  const collect = (entries) => {
+    (entries || []).forEach((entry) => candidatesByPosition.set(entry.position, entry));
+  };
+  collect(index.postScriptNames.get(postScriptName));
+  collect(index.names.get(fontName));
+  collect(index.families.get(fontName));
+  const entries = Array.from(candidatesByPosition.values()).sort((a, b) => a.position - b.position);
   let best;
   let bestScore = 0;
   // Single pass keeping the first best match: identical to the previous

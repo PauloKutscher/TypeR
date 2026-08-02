@@ -16,7 +16,7 @@ const minPreviewHeight = 80;
 const maxPreviewHeight = 300;
 
 const ResizeableCont = React.memo(function ResizeableCont() {
-  const context = useContext();
+  const context = useContext((state) => ({ uiLayout: state.uiLayout }));
   const uiLayout = context.state.uiLayout;
   const { order, visible, sizes } = uiLayout;
   const appBlock = React.useRef();

@@ -583,7 +583,8 @@
     background: rgba(0, 0, 0, 0.15);
     padding: 9px 10px;
     border-radius: 4px;
-    transition: all 0.15s ease;
+    outline: 1px solid transparent;
+    transition: outline-color 0.15s ease;
     
     &:hover {
         outline: 1px solid rgba(255, 255, 255, 0.25);
@@ -924,7 +925,7 @@
     background: transparent;
     position: relative;
     flex-shrink: 0;
-    transition: all 0.15s ease;
+    transition: opacity 0.15s ease;
     margin-top: 1px;
     opacity: 0.6;
     

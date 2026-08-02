@@ -7,7 +7,12 @@ import { useContext } from "../../context";
 import HiddenFileInput from "../hiddenFileInput/hiddenFileInput";
 
 const AppFooter = React.memo(function AppFooter() {
-  const context = useContext();
+  const context = useContext((state) => ({
+    images: state.images,
+    multiBubbleMode: state.multiBubbleMode,
+    inlineTextShapeR: state.inlineTextShapeR,
+    uiLayout: state.uiLayout,
+  }));
   const openSettings = () => {
     context.dispatch({
       type: "setModal",

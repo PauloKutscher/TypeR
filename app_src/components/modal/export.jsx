@@ -9,7 +9,18 @@ import { buildFolderTree, collectDescendantIds } from "../../folderUtils";
 import { collectFontRefs, exportZipWithFonts } from "../../fontFileExport";
 
 const ExportModal = React.memo(function ExportModal() {
-  const context = useContext();
+  const context = useContext((state) => ({
+    folders: state.folders,
+    styles: state.styles,
+    ignoreLinePrefixes: state.ignoreLinePrefixes,
+    ignoreTags: state.ignoreTags,
+    defaultStyleId: state.defaultStyleId,
+    language: state.language,
+    autoClosePSD: state.autoClosePSD,
+    autoScrollStyle: state.autoScrollStyle,
+    currentFolderTagPriority: state.currentFolderTagPriority,
+    setTextItemKind: state.setTextItemKind,
+  }));
   const [selected, setSelected] = React.useState([]);
   const [selectedFonts, setSelectedFonts] = React.useState([]);
   const [withSettings, setWithSettings] = React.useState(false);

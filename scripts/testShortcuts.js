@@ -8,6 +8,7 @@ const commandSource = fs.readFileSync(path.join(rootDir, "app_src", "shortcutCom
 const contextSource = fs.readFileSync(path.join(rootDir, "app_src", "context.jsx"), "utf8");
 const hotkeySource = fs.readFileSync(path.join(rootDir, "app_src", "hotkeys.jsx"), "utf8");
 const previewSource = fs.readFileSync(path.join(rootDir, "app_src", "components", "previewBlock", "previewBlock.jsx"), "utf8");
+const shortcutEditorSource = fs.readFileSync(path.join(rootDir, "app_src", "components", "modal", "shortCut.jsx"), "utf8");
 
 const commandBlocks = [...commandSource.matchAll(/\{\s*\n\s+id:\s+"([^"]+)"[\s\S]*?\n\s{2}\},/g)];
 const commandIds = commandBlocks.map((match) => match[1]);
@@ -42,6 +43,10 @@ assert(!hotkeySource.includes("bindingOrder"), "Hotkey command order must not be
 assert(
   (previewSource.match(/withShortcutHint\(/g) || []).length >= 3,
   "Paste, align, and apply tooltips must use the configured shortcut"
+);
+assert(
+  /const requestId = \+\+hostQueryRef\.current;\s*if \(!hasMainKey\(localKeys\)\) return;/.test(shortcutEditorSource),
+  "Modifier-only shortcut capture must not be overwritten by Photoshop's stale keyName"
 );
 
 const utilityCalls = [];

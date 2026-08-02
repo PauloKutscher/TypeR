@@ -2621,7 +2621,6 @@ function getSelectedTextLayers() {
   var layers = [];
   var targetLayers = stringIDToTypeID("targetLayers");
   var layerIdProp = stringIDToTypeID("layerID");
-  var nameProp = stringIDToTypeID("name");
   var indexes = [];
   var reference = new ActionReference();
   reference.putProperty(charID.Property, targetLayers);
@@ -2659,20 +2658,71 @@ function getSelectedTextLayers() {
       } else {
         idRef.putIndex(charID.Layer, indexes[j]);
       }
-      var nameRef = new ActionReference();
-      nameRef.putProperty(charID.Property, nameProp);
-      if (indexes[j] === -1) {
-        nameRef.putEnumerated(charID.Layer, charID.Ordinal, charID.Target);
-      } else {
-        nameRef.putIndex(charID.Layer, indexes[j]);
-      }
       layers.push({
         id: executeActionGet(idRef).getInteger(layerIdProp),
-        name: executeActionGet(nameRef).getString(nameProp),
       });
     } catch (layerError) {}
   }
   return jamJSON.stringify({ layers: layers });
+}
+
+function getActiveLayerTextIfChanged(data) {
+  if (!documents.length || !_layerIsTextLayer()) {
+    return jamJSON.stringify({ error: "layer", signature: "" });
+  }
+  var layerId = null;
+  var historyIndex = null;
+  try {
+    layerId = _getActiveLayerId();
+  } catch (layerError) {}
+  try {
+    historyIndex = _getActiveHistoryIndex();
+  } catch (historyError) {}
+  var signature = String(layerId) + ":" + String(historyIndex);
+  if (layerId !== null && historyIndex !== null && data && data.signature === signature) {
+    return jamJSON.stringify({ unchanged: true, signature: signature });
+  }
+  var snapshot = null;
+  try {
+    snapshot = jamJSON.parse(getActiveLayerText());
+  } catch (snapshotError) {}
+  if (!snapshot) return jamJSON.stringify({ error: "layer", signature: signature });
+  snapshot.signature = signature;
+  return jamJSON.stringify(snapshot);
+}
+
+// Shared lightweight snapshot for the panel's selection-driven widgets. A
+// single CEP bridge hop is much cheaper than queueing one call for the marquee
+// and another for the selected text-layer IDs after every Photoshop event.
+function getTypeRSelectionSnapshot() {
+  var selection = null;
+  var selectedLayers = { layers: [] };
+  try {
+    selection = jamJSON.parse(getCurrentSelection());
+  } catch (selectionError) {}
+  try {
+    selectedLayers = jamJSON.parse(getSelectedTextLayers()) || selectedLayers;
+  } catch (layersError) {}
+  return jamJSON.stringify({
+    selection: selection && !selection.error ? selection : null,
+    layers: selectedLayers.layers || []
+  });
+}
+
+function getTypeRPanelSnapshot(data) {
+  var activeLayer = null;
+  var selectionSnapshot = { selection: null, layers: [] };
+  try {
+    activeLayer = jamJSON.parse(getActiveLayerTextIfChanged(data || {}));
+  } catch (activeLayerError) {}
+  try {
+    selectionSnapshot = jamJSON.parse(getTypeRSelectionSnapshot()) || selectionSnapshot;
+  } catch (selectionSnapshotError) {}
+  return jamJSON.stringify({
+    activeLayer: activeLayer,
+    selection: selectionSnapshot.selection,
+    layers: selectionSnapshot.layers || []
+  });
 }
 
 function _getTargetLayerCount() {

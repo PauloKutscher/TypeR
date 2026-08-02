@@ -11,7 +11,11 @@ import {buildFolderTree, flattenFolderTree, collectDescendantIds} from '../../fo
 import FontScanPromo from './fontScanPromo';
 
 const EditFolderModal = React.memo(function EditFolderModal() {
-    const context = useContext();
+    const context = useContext((state) => ({
+        modalData: state.modalData,
+        styles: state.styles,
+        folders: state.folders,
+    }));
     const currentData = context.state.modalData;
     const folderStyleIds = currentData.id ? context.state.styles.filter(s => (s.folder === currentData.id)).map(s => s.id) : [];
     const [name, setName] = React.useState(currentData.name || '');

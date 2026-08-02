@@ -3,7 +3,6 @@ import "./stylesBlock.scss";
 import React from "react";
 import deepClone from "../../deepClone";
 import PropTypes from "prop-types";
-import { ReactSortable } from "react-sortablejs";
 import { FiArrowRightCircle, FiPlus, FiFolderPlus, FiChevronDown, FiChevronUp, FiCopy, FiEye, FiEyeOff, FiMinus, FiInfo, FiX } from "react-icons/fi";
 import { MdEdit, MdLock } from "react-icons/md";
 import { CiExport } from "react-icons/ci";
@@ -21,7 +20,19 @@ const emptyIdSet = new Set();
 
 const StylesBlock = React.memo(function StylesBlock() {
   notePerfRender("StylesBlock");
-  const context = useContext();
+  const context = useContext((state) => ({
+    styles: state.styles,
+    folders: state.folders,
+    currentStyle: state.currentStyle,
+    exportFolderFontTipVisible: state.exportFolderFontTipVisible,
+    exportFolderFontTipDismissed: state.exportFolderFontTipDismissed,
+    showTips: state.showTips,
+    openFolders: state.openFolders,
+    currentStyleId: state.currentStyleId,
+    direction: state.direction,
+    showQuickStyleSize: state.showQuickStyleSize,
+    styleSizeStep: state.styleSizeStep,
+  }));
   const fontTextStyles = React.useMemo(
     () => (context.state.styles || []).map((style) => style.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {}),
     [context.state.styles]
@@ -160,6 +171,8 @@ const StylesBlock = React.memo(function StylesBlock() {
 
 const styleDragMime = "application/x-typer-style-id";
 let currentDraggingStyleId = null;
+const folderDragMime = "application/x-typer-folder-id";
+let currentDraggingFolder = null;
 
 const hasStyleDragData = (event) => {
   if (currentDraggingStyleId) return true;
@@ -199,23 +212,10 @@ const getStyleDropLocation = (event) => {
 };
 
 const FolderTree = React.memo(function FolderTree(props) {
-  const handleOrder = React.useCallback(
-    (items) => {
-      props.dispatch({
-        type: "reorderFolders",
-        parentId: props.parentId,
-        order: items.map((item) => item.id),
-      });
-    },
-    [props.dispatch, props.parentId]
-  );
   if (!props.folders || !props.folders.length) return null;
   return (
-    <ReactSortable
+    <div
       className={"folders-sortable" + (props.depth > 0 ? " m-nested" : "")}
-      list={props.folders}
-      setList={handleOrder}
-      animation={150}
     >
       {props.folders.map((folder) => (
         <FolderItem
@@ -232,9 +232,11 @@ const FolderTree = React.memo(function FolderTree(props) {
           direction={props.direction}
           showQuickStyleSize={props.showQuickStyleSize}
           styleSizeStep={props.styleSizeStep}
+          siblingFolderIds={props.folders.map((item) => item.id)}
+          parentId={props.parentId}
         />
       ))}
-    </ReactSortable>
+    </div>
   );
 });
 FolderTree.propTypes = {
@@ -254,26 +256,49 @@ FolderTree.propTypes = {
 const FolderItem = React.memo(function FolderItem(props) {
   const [dropActive, setDropActive] = React.useState(false);
   const [styleDropTarget, setStyleDropTarget] = React.useState(null);
+  const [folderDropEdge, setFolderDropEdge] = React.useState(null);
   const openFolder = React.useCallback((e) => {
     e.stopPropagation();
     props.dispatch({ type: "setModal", modal: "editFolder", data: props.data });
   }, [props.dispatch, props.data]);
 
   const handleDragOver = React.useCallback((e) => {
+    if (currentDraggingFolder && props.data.id) {
+      if (currentDraggingFolder.id === props.data.id || currentDraggingFolder.parentId !== props.parentId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = "move";
+      const rect = e.currentTarget.getBoundingClientRect();
+      setFolderDropEdge(e.clientY < rect.top + rect.height / 2 ? "before" : "after");
+      return;
+    }
     if (!hasStyleDragData(e)) return;
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
     setDropActive(true);
     setStyleDropTarget(null);
-  }, []);
+  }, [props.data.id, props.parentId]);
 
   const handleDragLeave = React.useCallback((e) => {
     if (e.currentTarget.contains(e.relatedTarget)) return;
     setDropActive(false);
+    setFolderDropEdge(null);
   }, []);
 
   const handleStyleDrop = React.useCallback((e) => {
+    if (currentDraggingFolder && props.data.id) {
+      if (currentDraggingFolder.id === props.data.id || currentDraggingFolder.parentId !== props.parentId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const order = (props.siblingFolderIds || []).filter((id) => id !== currentDraggingFolder.id);
+      const targetIndex = order.indexOf(props.data.id);
+      const insertAt = folderDropEdge === "after" ? targetIndex + 1 : targetIndex;
+      order.splice(Math.max(0, insertAt), 0, currentDraggingFolder.id);
+      setFolderDropEdge(null);
+      props.dispatch({ type: "reorderFolders", parentId: props.parentId, order });
+      return;
+    }
     if (!hasStyleDragData(e)) return;
     e.preventDefault();
     e.stopPropagation();
@@ -282,7 +307,20 @@ const FolderItem = React.memo(function FolderItem(props) {
     const styleId = getDraggedStyleId(e);
     if (!styleId) return;
     props.dispatch({ type: "moveStyleToFolder", id: styleId, folderId: props.data.id || null });
-  }, [props.dispatch, props.data.id]);
+  }, [props.dispatch, props.data.id, props.parentId, props.siblingFolderIds, folderDropEdge]);
+
+  const startFolderDrag = React.useCallback((e) => {
+    if (!props.data.id) return;
+    currentDraggingFolder = { id: props.data.id, parentId: props.parentId || null };
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData(folderDragMime, props.data.id);
+    e.stopPropagation();
+  }, [props.data.id, props.parentId]);
+
+  const endFolderDrag = React.useCallback(() => {
+    currentDraggingFolder = null;
+    setFolderDropEdge(null);
+  }, []);
 
   const styles = props.stylesByFolder.get(props.data.id || "__unsorted__") || [];
   const childFolders = props.data.children || [];
@@ -414,13 +452,21 @@ const FolderItem = React.memo(function FolderItem(props) {
         "folder-item hostBrdContrast" +
         (isOpen ? " m-open" : "") +
         (props.depth ? " m-nested" : "") +
-        (dropActive ? " m-drop-active" : "")
+        (dropActive ? " m-drop-active" : "") +
+        (folderDropEdge ? " m-folder-drop-" + folderDropEdge : "")
       }
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleStyleDrop}
     >
-      <div className="folder-header" style={{ paddingLeft: props.depth ? props.depth * 12 + 4 : 4 }} onClick={toggleFolder}>
+      <div
+        className="folder-header"
+        style={{ paddingLeft: props.depth ? props.depth * 12 + 4 : 4 }}
+        onClick={toggleFolder}
+        draggable={!!props.data.id}
+        onDragStart={startFolderDrag}
+        onDragEnd={endFolderDrag}
+      >
         <div className="folder-marker">{isOpen ? <FiChevronUp size={18} /> : <FiChevronDown size={18} />}</div>
         <div className="folder-title">
           {hasActive ? <strong>{props.data.name}</strong> : <span>{props.data.name}</span>}
@@ -506,6 +552,8 @@ FolderItem.propTypes = {
   direction: PropTypes.string,
   showQuickStyleSize: PropTypes.bool,
   styleSizeStep: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+  siblingFolderIds: PropTypes.array,
+  parentId: PropTypes.oneOfType([PropTypes.string, PropTypes.oneOf([null])]),
 };
 
 // StyleItem deliberately avoids useContext: subscribing to the global context

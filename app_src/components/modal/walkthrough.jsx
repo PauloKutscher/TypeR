@@ -57,7 +57,24 @@ const getSteps = () => [
 ];
 
 const WalkthroughModal = React.memo(function WalkthroughModal() {
-  const context = useContext();
+  const context = useContext((state) => ({
+    modalData: state.modalData,
+    text: state.text,
+    styles: state.styles,
+    currentStyle: state.currentStyle,
+    pastePointText: state.pastePointText,
+    internalPadding: state.internalPadding,
+    direction: state.direction,
+    resizeTextBoxOnCenter: state.resizeTextBoxOnCenter,
+    folders: state.folders,
+    ignoreLinePrefixes: state.ignoreLinePrefixes,
+    ignoreTags: state.ignoreTags,
+    defaultStyleId: state.defaultStyleId,
+    language: state.language,
+    autoClosePSD: state.autoClosePSD,
+    autoScrollStyle: state.autoScrollStyle,
+    currentFolderTagPriority: state.currentFolderTagPriority,
+  }));
   const modalData = context.state.modalData || {};
   const [stepIndex, setStepIndex] = React.useState(modalData.initialStep || 0);
   const [createdStyleId, setCreatedStyleId] = React.useState(modalData.createdStyleId || null);

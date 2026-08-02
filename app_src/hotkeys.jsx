@@ -4,8 +4,8 @@ import { csInterface, getHotkeyPressed, isHostActionPending, isPanelIdle, isPane
 import { useContext } from "./context";
 import { shortcutCommands } from "./shortcutCommands";
 
-const intervalTime = 50;
-// After a few idle minutes the keyboard poll slows to this rate: 20 host
+const intervalTime = 75;
+// After a few idle minutes the keyboard poll slows to this rate: even 13 host
 // round-trips per second against an untouched Photoshop is what makes long
 // background sessions crawl. The first pressed key restores the fast rate.
 const idleIntervalTime = 500;
@@ -38,9 +38,7 @@ const isFormFieldActive = () => {
 };
 
 const HotkeysListner = React.memo(function HotkeysListner() {
-  const context = useContext();
-  const contextRef = React.useRef(context);
-  contextRef.current = context;
+  const context = useContext(() => ({}));
 
   const keyUpRef = React.useRef(true);
   const lastActionRef = React.useRef(0);
@@ -58,7 +56,7 @@ const HotkeysListner = React.memo(function HotkeysListner() {
 
     const checkState = (state) => {
       if (!state) return;
-      const ctx = contextRef.current;
+      const ctx = { state: context.getState(), dispatch: context.dispatch, getState: context.getState };
       const realState = state.split("a");
       realState.shift();
       realState.pop();
@@ -77,7 +75,7 @@ const HotkeysListner = React.memo(function HotkeysListner() {
     const interval = setInterval(() => {
       // Back off while a paste/align/apply runs: polling would queue behind it
       // in the ExtendScript engine and delay the action's completion
-      if (contextRef.current.state.modalType || isFormFieldActive() || hotkeyPollPendingRef.current || isHostActionPending() || document.hidden) return;
+      if (context.getState().modalType || isFormFieldActive() || hotkeyPollPendingRef.current || isHostActionPending() || document.hidden) return;
       // The user is clicking inside the panel: a host round-trip right now
       // would land on Photoshop's main thread while it should be delivering
       // the click, which is exactly what made every button feel laggy
@@ -92,8 +90,8 @@ const HotkeysListner = React.memo(function HotkeysListner() {
     }, intervalTime);
 
     const handleKeyDown = (e) => {
-      if (e.key === "Escape" && contextRef.current.state.modalType) {
-        contextRef.current.dispatch({ type: "setModal" });
+      if (e.key === "Escape" && context.getState().modalType) {
+        context.dispatch({ type: "setModal" });
       }
     };
     document.addEventListener("keydown", handleKeyDown);

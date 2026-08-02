@@ -6,6 +6,7 @@ import { locale, getHotkeyPressed } from "../../utils";
 const MODIFIERS = ["WIN", "CTRL", "ALT", "SHIFT"];
 const SPECIAL_KEYS = { "+": "PLUS", "-": "MINUS", "=": "EQUAL", "/": "DIVIDE", "*": "MULTIPLY" };
 const IGNORED_KEYS = ["Meta", "Control", "Alt", "Shift", "AltGraph", "CapsLock", "Dead", "Process", "Unidentified"];
+const hasMainKey = (keys) => (keys || []).some((key) => !MODIFIERS.includes(String(key).toUpperCase()));
 
 const IS_MAC = typeof navigator !== "undefined" && /mac/i.test(navigator.platform || "");
 
@@ -86,17 +87,22 @@ const Shortcut = (props) => {
     setDisplayKeys(localKeys);
     props.onChange(props.index, localKeys);
 
+    // ScriptUI can keep a stale keyName (commonly APOSTROPHE) while only a
+    // modifier is held. The browser event is authoritative for modifier-only
+    // shortcuts, so do not let the asynchronous host sample overwrite it.
+    const requestId = ++hostQueryRef.current;
+    if (!hasMainKey(localKeys)) return;
+
     // Shortcuts are matched at runtime against ScriptUI's keyboardState key
     // names, which can differ from browser key names (layout, Alt symbols,
     // function keys). Ask the host what it sees for the held combo and store
     // that, so recording and matching share the same vocabulary.
-    const requestId = ++hostQueryRef.current;
     getHotkeyPressed((state) => {
       if (requestId !== hostQueryRef.current) return;
       if (document.activeElement !== input) return;
       const hostKeys = parseHostKeys(state);
       if (!hostKeys.length) return;
-      const hostHasMainKey = hostKeys.some((key) => !MODIFIERS.includes(key));
+      const hostHasMainKey = hasMainKey(hostKeys);
       // The main key may already be released when the host samples the
       // keyboard; fall back to the locally captured name for it
       const keys = hostHasMainKey ? hostKeys : hostKeys.concat(localKeys.filter((key) => !MODIFIERS.includes(key)));

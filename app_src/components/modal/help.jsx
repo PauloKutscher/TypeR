@@ -74,7 +74,7 @@ const KeyCombo = React.memo(function KeyCombo({keys}) {
 });
 
 const HelpModal = React.memo(function HelpModal() {
-    const context = useContext();
+    const context = useContext((state) => ({ shortcut: state.shortcut }));
     const [query, setQuery] = React.useState('');
     const [openId, setOpenId] = React.useState('styles');
     const [videoIsLegacy, setVideoIsLegacy] = React.useState(false);

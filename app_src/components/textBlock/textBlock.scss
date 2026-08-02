@@ -124,6 +124,11 @@ body.light-theme .text-block {
     }
   }
 }
+.text-lines-spacer {
+  position: relative;
+  pointer-events: none;
+  width: 100%;
+}
 .text-line-num {
   text-align: center;
   flex: 0 0 auto;

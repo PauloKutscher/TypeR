@@ -3,7 +3,6 @@ import PropTypes from "prop-types";
 import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, checkUpdate } from "./utils";
 import config from "./config";
 import { getNextLineNumberState } from "./lineNumbering";
-import { setDehyphenationEnabled, setTextShapeRTuning } from "./textShapeR";
 import { normalizeEditorTheme } from "./themePresets";
 import { applyEditorTheme } from "./lib/themeManager";
 import { getDefaultShortcuts } from "./shortcutCommands";
@@ -60,6 +59,10 @@ const storeFields = [
 
 // Fields that belong to each tab (text script + PSD sync)
 const tabFields = ["text", "images", "currentLineIndex", "lastOpenedImagePath", "usedLineStyles"];
+// These values live inside `tabs`. Keeping another top-level copy nearly
+// doubled text-heavy storage files and their JSON serialization cost. They
+// remain readable for migration, but new writes persist only the tab schema.
+const persistedFields = storeFields.filter((field) => !tabFields.includes(field));
 
 const createTab = (name, data = {}) => ({
   id: Math.random().toString(36).substr(2, 8),
@@ -970,6 +973,46 @@ const baseReducer = (state, action) => {
       break;
     }
 
+    case "addSelectionBatch": {
+      const entries = action.entries || [];
+      if (!entries.length) break;
+      const capturedAt = Date.now();
+      const storedSelections = state.storedSelections.concat([]);
+      const usedLineStyles = { ...(state.usedLineStyles || {}) };
+      for (const entry of entries) {
+        if (!entry || !entry.selection) continue;
+        const styleId = entry.styleId || state.currentStyleId;
+        const selectionWithStyle = {
+          ...entry.selection,
+          styleId,
+          capturedAt,
+        };
+        if (typeof entry.lineIndex === "number") {
+          selectionWithStyle.lineIndex = entry.lineIndex;
+          const entryLine = state.lines[entry.lineIndex];
+          if (entryLine && !entryLine.ignore && styleId) {
+            usedLineStyles[entry.lineIndex] = {
+              rawText: entryLine.rawText,
+              styleId,
+            };
+          }
+        }
+        storedSelections.push(selectionWithStyle);
+      }
+      newState.storedSelections = storedSelections;
+      newState.usedLineStyles = usedLineStyles;
+      if (
+        typeof action.nextLineIndex === "number" &&
+        state.lines[action.nextLineIndex] &&
+        !state.lines[action.nextLineIndex].ignore
+      ) {
+        newState.currentLineIndex = action.nextLineIndex;
+        thenScroll = true;
+        thenSelectStyle = true;
+      }
+      break;
+    }
+
     case "clearSelections": {
       if (!action.preserveLine) {
         const restoredLineIndex = getStoredSelectionLineIndex(
@@ -1377,8 +1420,8 @@ const baseReducer = (state, action) => {
   // Phase 6: Storage - only write if a stored field actually changed
   newState.initiated = true;
   let hasStorageChange = false;
-  for (let i = 0; i < storeFields.length; i++) {
-    if (newState[storeFields[i]] !== state[storeFields[i]]) {
+  for (let i = 0; i < persistedFields.length; i++) {
+    if (newState[persistedFields[i]] !== state[persistedFields[i]]) {
       hasStorageChange = true;
       break;
     }
@@ -1386,8 +1429,8 @@ const baseReducer = (state, action) => {
   if (hasStorageChange) {
     const dataToStore = {};
     let shouldDebounceStorage = false;
-    for (let i = 0; i < storeFields.length; i++) {
-      const field = storeFields[i];
+    for (let i = 0; i < persistedFields.length; i++) {
+      const field = persistedFields[i];
       if (newState.hasOwnProperty(field)) {
         dataToStore[field] = newState[field];
       }
@@ -1399,6 +1442,11 @@ const baseReducer = (state, action) => {
         shouldDebounceStorage = true;
       }
     }
+    // Explicit undefined values remove legacy duplicates from the cached
+    // storage object because JSON.stringify omits them on the next commit.
+    tabFields.forEach((field) => {
+      dataToStore[field] = undefined;
+    });
     writeToStorage(dataToStore, false, {
       debounce: shouldDebounceStorage ? 300 : 0,
       idle: shouldDebounceStorage ? 750 : 0,
@@ -1414,16 +1462,78 @@ const reducer = (state, action) =>
   perfMeasure("dispatch", (action && action.type) || "init", () => baseReducer(state, action));
 
 const Context = React.createContext();
-const useContext = () => React.useContext(Context);
+const selectWholeState = (state) => state;
+const shallowEqual = (left, right) => {
+  if (Object.is(left, right)) return true;
+  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  for (let i = 0; i < leftKeys.length; i++) {
+    const key = leftKeys[i];
+    if (!Object.prototype.hasOwnProperty.call(right, key) || !Object.is(left[key], right[key])) return false;
+  }
+  return true;
+};
+
+// React.memo cannot shield a component from a Context update. Keep the
+// provider value stable and let each consumer subscribe only to the state
+// fields it reads; unrelated dispatches then cost no React render at all.
+const useContext = (selector = selectWholeState) => {
+  const store = React.useContext(Context);
+  if (!store) throw new Error("TypeR context is unavailable");
+  const selectorRef = React.useRef(selector);
+  selectorRef.current = selector;
+  const selectedRef = React.useRef(selector(store.getState()));
+  const renderedSelection = selector(store.getState());
+  if (!shallowEqual(selectedRef.current, renderedSelection)) {
+    selectedRef.current = renderedSelection;
+  }
+  const [, forceRender] = React.useReducer((count) => count + 1, 0);
+
+  React.useLayoutEffect(() => {
+    const checkForUpdates = () => {
+      const nextSelection = selectorRef.current(store.getState());
+      if (shallowEqual(selectedRef.current, nextSelection)) return;
+      selectedRef.current = nextSelection;
+      forceRender();
+    };
+    const unsubscribe = store.subscribe(checkForUpdates);
+    checkForUpdates();
+    return unsubscribe;
+  }, [store]);
+
+  return { state: selectedRef.current, dispatch: store.dispatch, getState: store.getState };
+};
 const ContextProvider = React.memo(function ContextProvider(props) {
   const [state, dispatch] = React.useReducer(reducer, initialState);
+  const stateRef = React.useRef(state);
+  const listenersRef = React.useRef(new Set());
+  stateRef.current = state;
+  const contextValue = React.useMemo(() => ({
+    dispatch,
+    getState: () => stateRef.current,
+    subscribe: (listener) => {
+      listenersRef.current.add(listener);
+      return () => listenersRef.current.delete(listener);
+    },
+  }), [dispatch]);
+  React.useLayoutEffect(() => {
+    listenersRef.current.forEach((listener) => listener());
+  }, [state]);
   React.useEffect(() => dispatch({}), []);
   React.useEffect(() => {
-    setDehyphenationEnabled(state.dehyphenateTextShapeR === true);
-  }, [state.dehyphenateTextShapeR]);
-  React.useEffect(() => {
-    setTextShapeRTuning(state.textShapeRTuning);
-  }, [state.textShapeRTuning]);
+    if (!state.inlineTextShapeR) return undefined;
+    let active = true;
+    import(/* webpackChunkName: "text-shaper-engine" */ "./textShapeR").then((engine) => {
+      if (!active) return;
+      engine.setDehyphenationEnabled(state.dehyphenateTextShapeR === true);
+      engine.setTextShapeRTuning(state.textShapeRTuning);
+    });
+    return () => {
+      active = false;
+    };
+  }, [state.inlineTextShapeR, state.dehyphenateTextShapeR, state.textShapeRTuning]);
   React.useEffect(() => {
     const version = state.stylePrefixRefreshVersion || 0;
     if (!version) return undefined;
@@ -1451,7 +1561,6 @@ const ContextProvider = React.memo(function ContextProvider(props) {
       });
     }
   }, [state.checkUpdates]);
-  const contextValue = React.useMemo(() => ({ state, dispatch }), [state, dispatch]);
   return <Context.Provider value={contextValue}>{props.children}</Context.Provider>;
 });
 ContextProvider.propTypes = {

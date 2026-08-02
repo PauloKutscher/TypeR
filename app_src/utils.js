@@ -636,8 +636,6 @@ const refreshUserFonts = (callback) => {
   });
 };
 
-refreshUserFonts();
-
 const getActiveLayerText = (callback) => {
   csInterface.evalScript("getActiveLayerText()", (data) => {
     const dataObj = safeJsonParse(data);
@@ -1331,8 +1329,17 @@ const resizeTextArea = (defer = false) => {
 const scrollToLine = (lineIndex, delay = 100) => {
   lineIndex = lineIndex < 5 ? 0 : lineIndex - 5;
   setTimeout(() => {
-    const line = document.querySelectorAll(".text-line")[lineIndex];
-    if (line) line.scrollIntoView();
+    const line = document.querySelector(`.text-line[data-line-index="${lineIndex}"]`);
+    if (line) {
+      line.scrollIntoView();
+      return;
+    }
+    const textLines = document.querySelector(".text-lines");
+    const layout = textLines && textLines.__typerRowLayout;
+    const scrollContainer = textLines && textLines.parentElement;
+    if (layout && scrollContainer && layout.offsets[lineIndex] != null) {
+      scrollContainer.scrollTop = layout.offsets[lineIndex];
+    }
   }, delay);
 };
 
