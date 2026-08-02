@@ -107,6 +107,9 @@ const STYLE_RESOLUTION = 7;
 const sanitizeStyle = (raw) => {
   if (!raw || typeof raw !== "object") return null;
   const pick = (key, min, max) => {
+    // Number(null) is 0: a never-observed field must round-trip as null, not
+    // silently become a learned 0
+    if (raw[key] == null) return null;
     const value = Number(raw[key]);
     return Number.isFinite(value) ? clamp(value, min, max) : null;
   };
@@ -121,6 +124,9 @@ const sanitizeStyle = (raw) => {
     hyphenRate: pick("hyphenRate", 0, 1), // fraction of breaks hyphenated
     hyphenLineY: pick("hyphenLineY", 0, 1), // preferred hyphen height in block
     punctEndRate: pick("punctEndRate", 0, 1), // breaks landing on punctuation
+    // How self-similar the user's validated silhouettes are (0..1): an
+    // inconsistent style should push candidates around less than a firm one
+    consistency: pick("consistency", 0, 1),
   };
   const hasSignal = style.silhouette || style.density != null || style.stepMean != null
     || style.hyphenRate != null || style.hyphenLineY != null || style.punctEndRate != null;
@@ -146,11 +152,14 @@ const FEATURE_CAPS = {
   wideLines: 130, // fraction of lines close to the width cap
 };
 
+const FEATURE_KEYS = Object.keys(FEATURE_CAPS);
+const PAIR_SCHEMA_VERSION = 1;
+
 const sanitizeWeights = (raw) => {
   if (!raw || typeof raw !== "object") return null;
   const weights = {};
   let hasSignal = false;
-  Object.keys(FEATURE_CAPS).forEach((key) => {
+  FEATURE_KEYS.forEach((key) => {
     const value = Number(raw[key]);
     if (Number.isFinite(value) && value !== 0) {
       weights[key] = clamp(value, -FEATURE_CAPS[key], FEATURE_CAPS[key]);
@@ -158,6 +167,101 @@ const sanitizeWeights = (raw) => {
     }
   });
   return hasSignal ? weights : null;
+};
+
+// Experience replay: every feedback stores its (chosen, rejected) feature
+// vector pairs, and each new feedback re-trains the ranking weights over the
+// whole buffer in a few epochs instead of a single online pass. This sharply
+// reduces last-click drift; once full, the bounded buffer intentionally keeps
+// the most recent lessons so the user's style can still evolve.
+const MAX_TRAINING_PAIRS = 160;
+const TRAINING_EPOCHS = 5;
+// Passive-aggressive margin the chosen shape must win by, and the cap on how
+// far a single pair may move the weights (PA-I aggressiveness)
+const RANK_MARGIN = 12;
+const RANK_AGGRESSIVENESS = 25;
+
+const featuresToVector = (features) => FEATURE_KEYS.map((key) => (
+  Math.round((features[key] || 0) * 1000) / 1000
+));
+
+const sanitizeVector = (raw) => (
+  Array.isArray(raw) && raw.length === FEATURE_KEYS.length
+    && raw.every((value) => Number.isFinite(Number(value)))
+    ? raw.map((value) => clamp(Number(value), 0, 1))
+    : null
+);
+
+const sanitizeTrainingPairs = (raw) => {
+  if (!Array.isArray(raw)) return null;
+  const pairs = [];
+  raw.forEach((entry) => {
+    if (pairs.length >= MAX_TRAINING_PAIRS || !entry || typeof entry !== "object") return;
+    const chosen = sanitizeVector(entry.c);
+    const rejected = sanitizeVector(entry.r);
+    if (chosen && rejected) pairs.push({ c: chosen, r: rejected });
+  });
+  return pairs.length ? pairs : null;
+};
+
+const getPairSortKey = (pair) => `${pair.c.join(",")}|${pair.r.join(",")}`;
+
+// Train in canonical feature order so a given replay buffer always produces
+// the same ranker. The buffer itself remains chronological because its cap is
+// intentionally a recency window once it reaches MAX_TRAINING_PAIRS.
+const sortTrainingPairs = (pairs) => pairs.slice().sort((a, b) => {
+  const left = getPairSortKey(a);
+  const right = getPairSortKey(b);
+  return left < right ? -1 : left > right ? 1 : 0;
+});
+
+const pairSeparation = (weights, pair) => {
+  let separation = 0;
+  for (let index = 0; index < FEATURE_KEYS.length; index++) {
+    const weight = weights[FEATURE_KEYS[index]];
+    if (weight) separation += weight * (pair.r[index] - pair.c[index]);
+  }
+  return separation;
+};
+
+// Fraction of stored preference pairs the weights rank correctly: the
+// training accuracy of the learned ranker, persisted as telemetry and used
+// as a validation guard against updates that make the model globally worse
+const rankingAccuracy = (weights, pairs) => {
+  if (!pairs.length) return 0;
+  let correct = 0;
+  pairs.forEach((pair) => {
+    if (pairSeparation(weights || {}, pair) > 0) correct++;
+  });
+  return correct / pairs.length;
+};
+
+// PA-I updates over the replay buffer: each violated pair moves the weights
+// just enough to restore the margin, scaled down by the pair's own feature
+// distance — big clear mistakes move fast, near-ties barely move at all.
+// Deterministic epoch order keeps training reproducible.
+const trainRankingWeights = (initialWeights, pairs, aggressiveness) => {
+  const weights = { ...(initialWeights || {}) };
+  for (let epoch = 0; epoch < TRAINING_EPOCHS; epoch++) {
+    pairs.forEach((pair) => {
+      const loss = RANK_MARGIN - pairSeparation(weights, pair);
+      if (loss <= 0) return;
+      let normSq = 0;
+      for (let index = 0; index < FEATURE_KEYS.length; index++) {
+        const diff = pair.r[index] - pair.c[index];
+        normSq += diff * diff;
+      }
+      if (normSq < 1e-6) return;
+      const step = Math.min(aggressiveness, loss / normSq);
+      for (let index = 0; index < FEATURE_KEYS.length; index++) {
+        const diff = pair.r[index] - pair.c[index];
+        if (!diff) continue;
+        const key = FEATURE_KEYS[index];
+        weights[key] = clamp((weights[key] || 0) + step * diff, -FEATURE_CAPS[key], FEATURE_CAPS[key]);
+      }
+    });
+  }
+  return weights;
 };
 
 // Exemplar memory: the actual shapes the user validated, kept verbatim with
@@ -181,7 +285,9 @@ const sanitizeExemplars = (raw) => {
     if (!lines || !lines.length) return;
     const units = Number(entry.units);
     if (!Number.isFinite(units) || units <= 0) return;
-    const aspect = Number(entry.aspect);
+    // Number(null) is 0, which would clamp to a bogus 0.1 aspect: a missing
+    // bubble context must survive the round trip as null
+    const aspect = entry.aspect == null ? NaN : Number(entry.aspect);
     const sanitizeCurve = (value) => (
       Array.isArray(value) && value.length === STYLE_RESOLUTION
         && value.every((sample) => Number.isFinite(Number(sample)))
@@ -198,6 +304,9 @@ const sanitizeExemplars = (raw) => {
       // Outline signature of the bubble the shape was validated in: lets the
       // matcher pick exemplars from same-shaped bubbles, not just same ratio
       bubble: sanitizeCurve(entry.bubble),
+      // Times the user re-validated this exact shape: repetition is
+      // reinforcement, a shape kept twice speaks louder than one kept once
+      hits: clamp(Math.round(Number(entry.hits)) || 1, 1, 99),
     });
   });
   return exemplars.length ? exemplars : null;
@@ -205,6 +314,13 @@ const sanitizeExemplars = (raw) => {
 
 const sanitizeTuning = (raw) => {
   const source = raw && typeof raw === "object" ? raw : {};
+  // Unversioned pairs came from the first replay implementation and use the
+  // same feature order as schema 1. Unknown future schemas must not be read as
+  // today's vectors merely because their array length happens to match.
+  const pairSchemaVersion = source.pairSchemaVersion == null
+    ? PAIR_SCHEMA_VERSION
+    : Math.floor(Number(source.pairSchemaVersion));
+  const compatiblePairSchema = pairSchemaVersion === PAIR_SCHEMA_VERSION;
   const pick = (key, min, max) => {
     const value = Number(source[key]);
     return Number.isFinite(value) ? clamp(value, min, max) : TUNING_DEFAULTS[key];
@@ -218,6 +334,15 @@ const sanitizeTuning = (raw) => {
     style: sanitizeStyle(source.style),
     weights: sanitizeWeights(source.weights),
     exemplars: sanitizeExemplars(source.exemplars),
+    pairs: compatiblePairSchema ? sanitizeTrainingPairs(source.pairs) : null,
+    pairSchemaVersion: PAIR_SCHEMA_VERSION,
+    // Training accuracy of the ranking weights over the replay buffer:
+    // telemetry for "how well trained is my TextShapeR"
+    pairAccuracy: (() => {
+      if (!compatiblePairSchema || source.pairAccuracy == null) return null;
+      const value = Number(source.pairAccuracy);
+      return Number.isFinite(value) ? clamp(value, 0, 1) : null;
+    })(),
   };
 };
 
@@ -743,8 +868,15 @@ const meanAdjacentStep = (lengths) => {
 };
 
 // Learned terms fade in over the first few feedbacks: one sample nudges the
-// ranking, four or more make the style a first-class scoring signal
-const getStyleConfidence = () => (tuning.style ? Math.min(1, tuning.samples / 4) : 0);
+// ranking, four or more make the style a first-class scoring signal. A style
+// whose samples contradict each other self-attenuates: confidence follows
+// how consistently the user's kept silhouettes resemble one another.
+const getStyleConfidence = () => {
+  if (!tuning.style) return 0;
+  const base = Math.min(1, tuning.samples / 4);
+  const consistency = tuning.style.consistency;
+  return consistency == null ? base : base * (0.45 + 0.55 * consistency);
+};
 
 const HYPHEN_LINE_END = /[A-Za-zÀ-ÖØ-öø-ÿ]-$/;
 
@@ -826,6 +958,25 @@ const curveDistance = (a, b) => {
   return distance / STYLE_RESOLUTION;
 };
 
+// Exact layouts are only authoritative in a comparable bubble. Reusing an
+// old break pattern in a differently proportioned or differently shaped
+// bubble can otherwise bypass physical-fit checks merely because the dialogue
+// text happens to be identical.
+const exemplarContextMatches = (exemplar, aspect, bubble) => {
+  if (aspect != null) {
+    if (exemplar.aspect == null || Math.abs(Math.log(exemplar.aspect / aspect)) > 0.3) return false;
+  }
+  if (bubble) {
+    if (!exemplar.bubble || curveDistance(bubble, exemplar.bubble) > 0.025) return false;
+  }
+  return true;
+};
+
+const exemplarStorageContextMatches = (exemplar, aspect, bubble) => {
+  if (aspect == null && !bubble) return exemplar.aspect == null && !exemplar.bubble;
+  return exemplarContextMatches(exemplar, aspect, bubble);
+};
+
 // Exemplars whose context (text volume, bubble aspect, bubble outline)
 // resembles the current request: preferences are conditioned on context
 // instead of averaged globally — a squat wide bubble, a tall narrow one and
@@ -833,7 +984,7 @@ const curveDistance = (a, b) => {
 const getMatchedExemplars = (units, aspect, bubble) => {
   const exemplars = tuning.exemplars;
   if (!exemplars || !exemplars.length) return [];
-  const scored = exemplars.map((exemplar) => {
+  const scored = exemplars.map((exemplar, index) => {
     let distance = Math.abs(Math.log(exemplar.units / Math.max(1, units)));
     if (aspect != null && exemplar.aspect != null) {
       distance += Math.abs(Math.log(exemplar.aspect / aspect)) * 0.8;
@@ -847,6 +998,10 @@ const getMatchedExemplars = (units, aspect, bubble) => {
     } else if (bubble || exemplar.bubble) {
       distance += 0.2;
     }
+    // Styles drift: older exemplars (stored first) fade behind recent ones,
+    // and a shape the user re-validated several times pulls harder
+    distance += 0.22 * (1 - (index + 1) / exemplars.length);
+    distance -= Math.min(0.18, Math.log(exemplar.hits || 1) * 0.08);
     return { exemplar, distance };
   });
   scored.sort((a, b) => a.distance - b.distance);
@@ -900,6 +1055,23 @@ const scoreStyleAffinity = (lengths, lines, hyphenCount) => {
       }
       score += (distance / STYLE_RESOLUTION) * 420 * confidence;
     }
+  }
+  if (style.density != null && lengths.length >= 1) {
+    // Text quantity per line is the strongest fingerprint of a typesetter's
+    // style: score each candidate's own density against the learned one
+    // instead of only steering the global line-count target with it
+    const density = lengths.reduce((sum, length) => sum + length, 0) / lengths.length;
+    const offset = Math.abs(Math.log(Math.max(1, density) / style.density));
+    score += Math.max(0, offset - 0.08) * 260 * confidence;
+  }
+  if (style.hyphenRate != null && lengths.length >= 2) {
+    // Learn both sides of the habit. A user who avoids césures makes them
+    // costlier, while one who regularly validates them makes hyphen-free
+    // candidates diverge from the learned style instead of fighting the
+    // permanent generic hyphen penalty alone.
+    const hyphenRate = hyphenCount / (lengths.length - 1);
+    const offset = Math.abs(hyphenRate - style.hyphenRate);
+    score += Math.max(0, offset - 0.08) * 160 * confidence;
   }
   if (style.stepMean != null && lengths.length >= 2) {
     // The user keeps a consistent contrast between neighbouring lines:
@@ -978,10 +1150,15 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
     const preferredScale = 0.4 + tuning.style.punctEndRate * 1.6;
     punctuationBonus *= 1 + (preferredScale - 1) * styleConfidence;
   }
+  // With a bubble outline the per-line targets mirror the bubble contour;
+  // as the learned style gains confidence that contour-hugging objective
+  // fades and the style affinity terms take over the shape choice. Physical
+  // fit stays fully enforced above — this only softens aesthetics.
+  const contourTrust = shapeRows ? 1 - 0.65 * getStyleConfidence() : 1;
   lengths.forEach((length, index) => {
     const target = targets[index] || 1;
     const relative = (length - target) / target;
-    score += relative * relative * 120;
+    score += relative * relative * 120 * contourTrust;
     // Overlong lines break out of the bubble: penalize width past the profile cap
     const widthExcess = Math.max(0, length - maxLineWidth) / maxLineWidth;
     score += widthExcess * widthExcess * 320;
@@ -1006,7 +1183,7 @@ const scoreCandidate = (lines, hyphenCount, profile) => {
     const smoothnessWeight = profile.smoothnessWeight == null ? 160 : profile.smoothnessWeight;
     for (let index = 1; index < lengths.length; index++) {
       const stepError = ((lengths[index] - lengths[index - 1]) - (targets[index] - targets[index - 1])) / maxLength;
-      score += stepError * stepError * smoothnessWeight;
+      score += stepError * stepError * smoothnessWeight * contourTrust;
     }
     // ...but outline following alone lets a noisy wand scan produce lopsided
     // blocks: the shared silhouette aesthetics still apply so the result
@@ -1180,6 +1357,27 @@ const estimateFitLineCount = (totalUnits, fit) => {
     }
   }
   return best || tightest || limit;
+};
+
+// Physically valid line-count range for a calibrated bubble: from the
+// smallest count whose rows hold the whole text up to what the height
+// allows. Within this range the choice belongs to the learned style, not
+// to the bubble — the bubble is a constraint, not an objective.
+const getFitLineCountBounds = (totalUnits, fit) => {
+  const maxByHeight = Math.max(1, Math.floor((fit.height * FIT_MARGIN) / fit.linePx));
+  const limit = Math.min(8, maxByHeight);
+  let tightest = 0;
+  for (let lineCount = 1; lineCount <= limit; lineCount++) {
+    let capacity = 0;
+    for (let index = 0; index < lineCount; index++) {
+      capacity += getFitAvailableUnits(index, lineCount, fit);
+    }
+    if (capacity >= totalUnits) {
+      tightest = lineCount;
+      break;
+    }
+  }
+  return { min: tightest || limit, max: limit };
 };
 
 const buildManualTargets = (tokens, lineCount, settings) => {
@@ -1446,8 +1644,12 @@ const generateTextShapeRVariants = (text, options = {}) => {
   let densityConfidence = styleConfidence;
   if (matchedExemplars.length) {
     // Context-matched exemplars know this case better than the global EMA:
-    // their own text-per-line density dominates the blend
-    const localDensity = matchedExemplars.reduce((sum, exemplar) => sum + exemplar.units / exemplar.lineCount, 0) / matchedExemplars.length;
+    // their own text-per-line density dominates the blend, re-validated
+    // shapes (higher hits) weighing proportionally more
+    const hitTotal = matchedExemplars.reduce((sum, exemplar) => sum + (exemplar.hits || 1), 0) || 1;
+    const localDensity = matchedExemplars.reduce((sum, exemplar) => (
+      sum + (exemplar.units / exemplar.lineCount) * (exemplar.hits || 1)
+    ), 0) / hitTotal;
     learnedDensity = learnedDensity ? localDensity * 0.7 + learnedDensity * 0.3 : localDensity;
     densityConfidence = Math.max(densityConfidence, getExemplarConfidence());
   }
@@ -1462,9 +1664,12 @@ const generateTextShapeRVariants = (text, options = {}) => {
       learnedTarget += (densityLines - learnedTarget) * 0.65 * densityConfidence;
     }
     if (fit) {
-      // The bubble's physical capacity keeps the upper hand: style can move
-      // the calibrated estimate by one line, never further
-      learnedTarget = clamp(learnedTarget, scoringProfile.lineTarget - 1, scoringProfile.lineTarget + 1);
+      // The bubble is a hard constraint, not an objective: counts that
+      // cannot physically hold the text are out, but within the valid range
+      // the learned style decides — the old ±1 clamp around the calibrated
+      // estimate silenced strong learned preferences (e.g. compact stacks)
+      const bounds = getFitLineCountBounds(totalUnits, fit);
+      learnedTarget = clamp(learnedTarget, bounds.min, bounds.max);
     }
     const biasedTarget = clamp(
       Math.round(learnedTarget),
@@ -1586,13 +1791,21 @@ const generateTextShapeRVariants = (text, options = {}) => {
 
   // The user's own validated shapes for this exact text always compete: the
   // DP grid may never produce them, and a shape that never appears in the
-  // list is a shape the ranking can never learn from
+  // list is a shape the ranking can never learn from. Having been validated
+  // by hand is itself strong evidence: a recall bonus lifts these shapes
+  // toward the top instead of letting generic aesthetics out-score them.
+  const EXEMPLAR_RECALL_BONUS = 480;
   if (tuning.exemplars && tuning.exemplars.length) {
     tuning.exemplars.forEach((exemplar) => {
       if (normalizeText(exemplar.lines.join(" ")) !== normalized) return;
+      if (!exemplarContextMatches(exemplar, aspect, bubbleSignature)) return;
       const exemplarText = exemplar.lines.join("\n");
       if (resultMap.has(exemplarText)) {
-        resultMap.get(exemplarText).injected = true;
+        const existing = resultMap.get(exemplarText);
+        if (!existing.injected) {
+          existing.injected = true;
+          existing.score -= EXEMPLAR_RECALL_BONUS;
+        }
         return;
       }
       const tokenLines = exemplar.lines.map((line) => makeBaseTokens(mergePunctuationWords(splitWordsPreservingMarkdown(line))));
@@ -1601,7 +1814,7 @@ const generateTextShapeRVariants = (text, options = {}) => {
         id: `shape-${resultMap.size + 1}`,
         text: exemplarText,
         lines: exemplar.lines.slice(),
-        score: scoreCandidate(tokenLines, exemplar.hyphens, scoringProfile),
+        score: scoreCandidate(tokenLines, exemplar.hyphens, scoringProfile) - EXEMPLAR_RECALL_BONUS,
         hyphenCount: exemplar.hyphens,
         injected: true,
       });
@@ -1665,6 +1878,15 @@ const generateTextShapeRVariants = (text, options = {}) => {
   const picked = [];
   const pickedTexts = new Set();
   const seenLineCounts = new Set();
+  // A shape the user validated for this exact text must never be cut from
+  // the list, whatever its generic score — it is the ground truth here
+  sorted.forEach((variant) => {
+    if (!variant.injected || picked.length >= limit) return;
+    if (fit && !variant.fits) return;
+    picked.push(variant);
+    pickedTexts.add(variant.text);
+    seenLineCounts.add(variant.lines.length);
+  });
   sorted.forEach((variant) => {
     if (picked.length >= limit) return;
     const count = variant.lines.length;
@@ -1768,14 +1990,21 @@ const recordTextShapeRFeedback = (layerText, options = {}, currentTuning = null)
   const lineDelta = clamp(chosenLines.length - top.lines.length, -2, 2);
   next.lineTargetBias = clamp(next.lineTargetBias + alpha * (lineDelta - next.lineTargetBias), -2, 2);
 
-  // Hyphenation preference: the user broke a word themselves, or kept their
-  // shape hyphen-free while the top suggestions used hyphens
+  // Hyphenation preference, aimed at the habit itself: the sample's césure
+  // rate derives a target penalty scale (hyphen-free → expensive césures,
+  // frequent césures → cheap) and the knob eases toward that target instead
+  // of drifting through fixed multiplicative bumps. Texts where hyphenation
+  // was never even an option teach nothing about the habit.
   const chosenHyphens = chosenLines.slice(0, -1).filter((line) => /[A-Za-zÀ-ÖØ-öø-ÿ]-$/.test(line)).length;
-  const suggestedHyphens = variants.slice(0, 3).some((variant) => variant.hyphenCount > 0);
-  if (chosenHyphens > 0) {
-    next.hyphenPenaltyScale = clamp(next.hyphenPenaltyScale * 0.85, 0.4, 2.5);
-  } else if (suggestedHyphens) {
-    next.hyphenPenaltyScale = clamp(next.hyphenPenaltyScale * 1.15, 0.4, 2.5);
+  const hyphenWasOption = chosenHyphens > 0 || variants.some((variant) => variant.hyphenCount > 0);
+  if (hyphenWasOption) {
+    const sampleRate = chosenLines.length > 1 ? chosenHyphens / (chosenLines.length - 1) : 0;
+    const targetScale = clamp(1.9 - sampleRate * 1.45, 0.4, 2.5);
+    next.hyphenPenaltyScale = clamp(
+      next.hyphenPenaltyScale + alpha * 0.6 * (targetScale - next.hyphenPenaltyScale),
+      0.4,
+      2.5
+    );
   }
 
   const lengths = chosenLines.map(visibleWidth);
@@ -1814,6 +2043,13 @@ const recordTextShapeRFeedback = (layerText, options = {}, currentTuning = null)
   if (chosenLines.length >= 2) {
     const curve = resampleSilhouette(lengths);
     if (curve) {
+      if (style.silhouette && style.silhouette.length === STYLE_RESOLUTION) {
+        // How close this sample sits to the running style BEFORE folding it
+        // in: the EMA of that similarity is the style's self-consistency,
+        // which later scales how assertive the learned style terms may be
+        const sampleConsistency = clamp(1 - curveDistance(curve, style.silhouette) * 18, 0, 1);
+        style.consistency = clamp(emaValue(style.consistency, sampleConsistency), 0, 1);
+      }
       style.silhouette = style.silhouette && style.silhouette.length === STYLE_RESOLUTION
         ? style.silhouette.map((value, index) => clamp(emaValue(value, curve[index]), 0.02, 1))
         : curve;
@@ -1835,58 +2071,84 @@ const recordTextShapeRFeedback = (layerText, options = {}, currentTuning = null)
   }
   next.style = sanitizeStyle(style);
 
-  // Pairwise learning-to-rank: the kept shape must score better (lower
-  // penalty) than every shape the generator proposed instead. Each violated
-  // pair pushes the interpretable feature weights toward the user's choice,
-  // bounded per feature so no learned habit can outweigh physical fit
+  // Pairwise learning-to-rank with experience replay: this sample's
+  // (chosen, rejected) feature pairs join the stored buffer, then the
+  // weights re-train over the whole buffer with passive-aggressive margin
+  // updates. Old feedbacks keep teaching alongside new ones — the ranker
+  // converges on the whole preference history instead of being nudged by
+  // its last sample. Canonical training order makes the ranker reproducible
+  // for a given bounded preference buffer.
   const chosenText = chosenLines.join("\n");
   const rankProfile = {
     lineTarget: top.lines.length,
     maxLineWidth: (PROFILE_PRESETS[options.profile] || PROFILE_PRESETS.balanced).maxLineWidth || 28,
   };
-  const weights = { ...(next.weights || {}) };
   const chosenFeatures = extractShapeFeatures(lengths, chosenLines, chosenHyphens, rankProfile);
+  const chosenVector = featuresToVector(chosenFeatures);
+  const freshPairs = [];
   variants.slice(0, 5).forEach((variant) => {
     if (variant.text === chosenText) return;
     const variantFeatures = extractShapeFeatures(variant.lines.map(visibleWidth), variant.lines, variant.hyphenCount, rankProfile);
-    let separation = 0;
-    for (const key in FEATURE_CAPS) {
-      separation += (weights[key] || 0) * ((variantFeatures[key] || 0) - (chosenFeatures[key] || 0));
-    }
-    // Already ranked correctly with margin: leave the weights alone
-    if (separation >= 8) return;
-    for (const key in FEATURE_CAPS) {
-      const diff = (variantFeatures[key] || 0) - (chosenFeatures[key] || 0);
-      if (!diff) continue;
-      weights[key] = clamp((weights[key] || 0) + 10 * diff, -FEATURE_CAPS[key], FEATURE_CAPS[key]);
-    }
+    freshPairs.push({ c: chosenVector, r: featuresToVector(variantFeatures) });
   });
-  next.weights = sanitizeWeights(weights);
+  const matchedRank = variants.findIndex((variant) => variant.text === chosenText);
+  const pairs = (next.pairs || []).concat(freshPairs).slice(-MAX_TRAINING_PAIRS);
+  if (pairs.length) {
+    const trainingPairs = sortTrainingPairs(pairs);
+    // Rebuild from the buffer rather than warm-starting from the previous
+    // weights: equal stored evidence now produces equal weights regardless of
+    // the path that led to it.
+    const trained = trainRankingWeights(null, trainingPairs, RANK_AGGRESSIVENESS);
+    const trainedAccuracy = rankingAccuracy(trained, trainingPairs);
+    next.weights = sanitizeWeights(trained);
+    next.pairAccuracy = Math.round(trainedAccuracy * 1000) / 1000;
+  }
+  next.pairs = pairs.length ? pairs : null;
+  next.pairSchemaVersion = PAIR_SCHEMA_VERSION;
 
   // Exemplar memory: keep the shape itself with its context, so similar
-  // future requests are scored against it instead of a global average
-  const exemplars = (next.exemplars || []).filter((exemplar) => exemplar.lines.join("\n") !== chosenText);
+  // future requests are scored against it instead of a global average.
+  // Re-validating a shape the memory already holds reinforces it (hits)
+  // and refreshes its recency instead of duplicating it.
+  const exemplarAspect = options.width > 0 && options.height > 0
+    ? clamp(options.height / options.width, 0.1, 10)
+    : null;
+  const exemplarBubble = getBubbleSignature(normalizeShapeRows(options.shapeProfile).filter((row) => row.width > 0));
+  const sameTextAndContext = (exemplar) => (
+    normalizeText(exemplar.lines.join(" ")) === normalizeText(flatText)
+      && exemplarStorageContextMatches(exemplar, exemplarAspect, exemplarBubble)
+  );
+  const previousExemplar = (next.exemplars || []).find((exemplar) => (
+    exemplar.lines.join("\n") === chosenText && sameTextAndContext(exemplar)
+  ));
+  // A new layout for the same dialogue in the same bubble replaces the stale
+  // choice. Distinct bubble contexts keep their own exemplar.
+  const exemplars = (next.exemplars || []).filter((exemplar) => !sameTextAndContext(exemplar));
   exemplars.push({
     lines: chosenLines.slice(),
     units: totalUnits,
     lineCount: chosenLines.length,
-    aspect: options.width > 0 && options.height > 0 ? clamp(options.height / options.width, 0.1, 10) : null,
+    aspect: exemplarAspect,
     hyphens: chosenHyphens,
     curve: chosenLines.length >= 2 ? resampleSilhouette(lengths) : null,
     // Bubble-aware context: the outline of the selection this shape was
     // validated in, so same-shaped bubbles recall it first
-    bubble: getBubbleSignature(normalizeShapeRows(options.shapeProfile).filter((row) => row.width > 0)),
+    bubble: exemplarBubble,
+    hits: previousExemplar ? (previousExemplar.hits || 1) + 1 : 1,
   });
   next.exemplars = sanitizeExemplars(exemplars.slice(-MAX_EXEMPLARS));
 
   next.samples += 1;
-  const matchedRank = variants.findIndex((variant) => variant.text === chosenLines.join("\n"));
   return {
     tuning: next,
     chosenLineCount: chosenLines.length,
     topLineCount: top.lines.length,
     matchedRank: matchedRank >= 0 ? matchedRank + 1 : null,
     chosenHyphens,
+    // Training telemetry: ranking accuracy over the replay buffer and style
+    // self-consistency — "how well trained is my TextShapeR"
+    pairAccuracy: next.pairAccuracy,
+    styleConsistency: next.style && next.style.consistency != null ? next.style.consistency : null,
   };
 };
 

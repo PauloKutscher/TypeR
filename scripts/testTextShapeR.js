@@ -37,6 +37,7 @@ const {
   generateManualTextShapeRVariant,
   generateTextShapeRVariants,
   recordTextShapeRFeedback,
+  sanitizeTextShapeRTuning,
   setTextShapeRTuning,
   visibleLength,
   visibleWidth,
@@ -247,6 +248,21 @@ assert.ok(convergedRank >= 0 && convergedRank <= 2,
   `hand-made shape should rank in the top 3 after convergence, got ${convergedRank + 1}\n${convergedVariants[0].text}`);
 // Re-learning the same shape must update its exemplar, not duplicate it
 assert.strictEqual(convergedTuning.exemplars.length, 1, "same shape must not duplicate exemplars");
+// Experience replay: feedback pairs are stored so later feedbacks re-train
+// on the whole history, and the training accuracy is persisted as telemetry
+assert.ok(Array.isArray(convergedTuning.pairs) && convergedTuning.pairs.length > 0,
+  "preference pairs should be stored for replay training");
+assert.ok(convergedTuning.pairs.every((pair) => pair.c.length === 12 && pair.r.length === 12),
+  "stored pairs should hold full feature vectors");
+assert.ok(convergedTuning.pairAccuracy >= 0.8,
+  `replay training should rank most stored pairs correctly, got ${convergedTuning.pairAccuracy}`);
+// Re-validating the exact same shape is reinforcement: hits accumulate on
+// the single exemplar instead of duplicating it
+assert.ok(convergedTuning.exemplars[0].hits >= 4,
+  `repeated validation should increment the exemplar's hits, got ${convergedTuning.exemplars[0].hits}`);
+// A perfectly self-consistent style must be recognized as such
+assert.ok(convergedTuning.style.consistency >= 0.95,
+  `repeating one shape should read as a consistent style, got ${convergedTuning.style.consistency}`);
 // The learned density generalizes: another text of similar volume should
 // also lean toward the same text-per-line budget rather than a fixed count
 const transferVariants = generateTextShapeRVariants(
@@ -285,6 +301,43 @@ assert.strictEqual(bubbleFeedback.tuning.exemplars[0].bubble.length, 7,
   "the bubble outline signature should be stored with the exemplar");
 assert.ok(Math.abs(bubbleFeedback.tuning.exemplars[0].aspect - 340 / 300) < 1e-6,
   "the bubble aspect should be stored with the exemplar");
+setTextShapeRTuning(bubbleFeedback.tuning);
+const sameBubbleRecall = generateTextShapeRVariants(feedbackText, {
+  limit: 12,
+  profile: "balanced",
+  shapeProfile: { rows: ellipseRows },
+  width: 300,
+  height: 340,
+});
+assert.ok(sameBubbleRecall.some((variant) => variant.text === chosenShape && variant.injected),
+  "an exact layout should be recalled in the bubble where it was learned");
+const pointedRows = [0.12, 0.3, 0.65, 1, 0.65, 0.3, 0.12].map((width, index, rows) => ({
+  y: (index + 0.5) / rows.length,
+  left: 0.5 - width / 2,
+  right: 0.5 + width / 2,
+  width,
+}));
+const differentBubbleRecall = generateTextShapeRVariants(feedbackText, {
+  limit: 12,
+  profile: "balanced",
+  shapeProfile: { rows: pointedRows },
+  width: 300,
+  height: 340,
+  calibration: bubbleCalibration,
+});
+assert.ok(!differentBubbleRecall.some((variant) => variant.text === chosenShape && variant.injected),
+  "an exact layout learned in another bubble must not bypass current fit constraints");
+const replacementShape = "Je crois que nous\ndevrions vraiment\npartir avant que\nla nuit tombe sur\nla ville.";
+const replacementFeedback = recordTextShapeRFeedback(replacementShape, {
+  limit: 12,
+  profile: "balanced",
+  shapeProfile: { rows: ellipseRows },
+  width: 300,
+  height: 340,
+}, bubbleFeedback.tuning);
+assert.strictEqual(replacementFeedback.tuning.exemplars.length, 1,
+  "a newer layout for the same text and bubble should replace the stale exemplar");
+assert.strictEqual(replacementFeedback.tuning.exemplars[0].lines.join("\n"), replacementShape);
 // Without a selection the exemplar simply carries no bubble context
 assert.strictEqual(batchTuning.exemplars[0].bubble, null);
 setTextShapeRTuning(null);
@@ -318,6 +371,85 @@ setTextShapeRTuning({
   ],
 });
 assert.ok(generateTextShapeRVariants(feedbackText, { limit: 12 }).length > 0);
+// Garbage replay pairs must sanitize instead of breaking training
+setTextShapeRTuning({
+  samples: 2,
+  pairs: [null, "x", { c: [1, 2], r: "y" }, { c: new Array(12).fill(0.5), r: new Array(12).fill(9) }],
+  pairAccuracy: "not-a-number",
+});
+const afterGarbagePairs = recordTextShapeRFeedback(chosenShape, { limit: 12, profile: "balanced" }, {
+  samples: 2,
+  pairs: [null, { c: [1, 2], r: "y" }, { c: new Array(12).fill(0.5), r: new Array(12).fill(0.7) }],
+});
+assert.ok(afterGarbagePairs && afterGarbagePairs.tuning.pairs.length > 0,
+  "feedback on top of garbage pairs should still train");
+assert.ok(afterGarbagePairs.tuning.pairAccuracy >= 0 && afterGarbagePairs.tuning.pairAccuracy <= 1);
+assert.strictEqual(afterGarbagePairs.tuning.pairSchemaVersion, 1,
+  "persisted replay vectors should carry an explicit schema version");
+const unknownPairSchema = sanitizeTextShapeRTuning({
+  samples: 2,
+  pairSchemaVersion: 99,
+  pairs: [{ c: new Array(12).fill(0.2), r: new Array(12).fill(0.8) }],
+  pairAccuracy: 1,
+});
+assert.strictEqual(unknownPairSchema.pairs, null,
+  "unknown replay schemas must not be interpreted using the current feature order");
+assert.strictEqual(unknownPairSchema.pairAccuracy, null);
+const replayPairA = { c: new Array(12).fill(0.1), r: new Array(12).fill(0.7) };
+const replayPairB = { c: new Array(12).fill(0.3), r: new Array(12).fill(0.6) };
+const trainFromPairOrder = (pairs) => {
+  const seed = { samples: 2, pairSchemaVersion: 1, pairs };
+  setTextShapeRTuning(seed);
+  return recordTextShapeRFeedback(chosenShape, { limit: 12, profile: "balanced" }, seed).tuning;
+};
+const forwardReplay = trainFromPairOrder([replayPairA, replayPairB]);
+const reverseReplay = trainFromPairOrder([replayPairB, replayPairA]);
+assert.deepStrictEqual(forwardReplay.weights, reverseReplay.weights,
+  "the same replay evidence should produce identical ranking weights regardless of stored order");
+assert.strictEqual(forwardReplay.pairAccuracy, reverseReplay.pairAccuracy);
+setTextShapeRTuning(null);
+// Replay stability: a long consistent history must not be wrecked by a
+// single contradictory click — accuracy over the buffer stays high
+let guardTuning = null;
+for (let pass = 0; pass < 4; pass++) {
+  guardTuning = recordTextShapeRFeedback(chosenShape, { limit: 12, profile: "balanced" }, guardTuning).tuning;
+}
+const contradiction = recordTextShapeRFeedback(
+  "Je crois que nous devrions vraiment partir avant que\nla nuit tombe sur la ville.",
+  { limit: 12, profile: "balanced" },
+  guardTuning
+);
+assert.ok(contradiction.tuning.pairAccuracy >= 0.6,
+  `one contradictory feedback should not wreck the trained ranking, accuracy ${contradiction.tuning.pairAccuracy}`);
+setTextShapeRTuning(null);
+// The bubble is a constraint, not an objective: a strongly learned compact
+// style must survive bubble-aware mode. Train a tall-stack preference on one
+// text, then generate another text inside a round calibrated bubble — the
+// top suggestion should keep the learned density (many short lines) instead
+// of snapping back to the bubble's own few-wide-lines estimate.
+let compactTuning = null;
+for (let pass = 0; pass < 4; pass++) {
+  compactTuning = recordTextShapeRFeedback(chosenShape, { limit: 12, profile: "balanced" }, compactTuning).tuning;
+}
+setTextShapeRTuning(compactTuning);
+// A wide bubble is the adversarial case: its physical estimate wants 2-3
+// long lines while the learned style wants a compact stack
+const styledBubbleVariants = generateTextShapeRVariants(
+  "Il faudra bien finir par leur dire ce qui est arrivé cette nuit-là dans la forêt.",
+  {
+    limit: 12,
+    profile: "balanced",
+    shapeProfile: { rows: ellipseRows },
+    width: 520,
+    height: 300,
+    calibration: bubbleCalibration,
+  }
+);
+const styledBubbleTop = styledBubbleVariants[0];
+assert.ok(styledBubbleTop.lines.length >= 5,
+  `learned compact style should survive bubble-aware mode, got ${styledBubbleTop.lines.length} lines:\n${styledBubbleTop.text}`);
+assert.ok(styledBubbleTop.lines.length * bubbleCalibration.linePx <= 300,
+  `styled bubble top must still physically fit:\n${styledBubbleTop.text}`);
 setTextShapeRTuning(null);
 
 console.log("TextShapeR tests passed");
