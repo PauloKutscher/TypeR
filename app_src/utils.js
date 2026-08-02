@@ -1,4 +1,5 @@
 import "./lib/CSInterface";
+import { resolveStylePointText } from "./textLayerPayload";
 
 const csInterface = new window.CSInterface();
 const path = csInterface.getSystemPath(window.SystemPath.EXTENSION);
@@ -425,6 +426,7 @@ let storageCache = null;
 let storageReadError = null;
 let pendingStorageData = null;
 let pendingStorageTimer = null;
+let pendingStorageIdleDelay = 0;
 
 const loadStorageCache = () => {
   if (storageCache !== null) {
@@ -462,14 +464,25 @@ const commitStorageData = (data, rewrite) => {
   return !result.err;
 };
 
-const flushStorageWrite = () => {
+const flushStorageWrite = (force = false) => {
   if (pendingStorageTimer) {
     clearTimeout(pendingStorageTimer);
     pendingStorageTimer = null;
   }
   if (!pendingStorageData) return true;
+  if (!force && pendingStorageIdleDelay > 0) {
+    const idleFor = Date.now() - lastPanelActivityAt;
+    if (idleFor < pendingStorageIdleDelay) {
+      pendingStorageTimer = setTimeout(
+        flushStorageWrite,
+        pendingStorageIdleDelay - idleFor
+      );
+      return true;
+    }
+  }
   const data = pendingStorageData;
   pendingStorageData = null;
+  pendingStorageIdleDelay = 0;
   const success = commitStorageData(data, false);
   if (!success) {
     pendingStorageData = Object.assign({}, data, pendingStorageData || {});
@@ -479,12 +492,16 @@ const flushStorageWrite = () => {
 
 const writeToStorage = (data, rewrite, options = {}) => {
   if (rewrite) {
-    flushStorageWrite();
+    flushStorageWrite(true);
     return commitStorageData(data, true);
   }
   const debounce = options.debounce || 0;
   if (debounce > 0) {
     pendingStorageData = Object.assign({}, pendingStorageData || {}, data);
+    pendingStorageIdleDelay = Math.max(
+      pendingStorageIdleDelay,
+      options.idle || 0
+    );
     storageCache = Object.assign({}, loadStorageCache().data, pendingStorageData);
     storageReadError = null;
     if (pendingStorageTimer) clearTimeout(pendingStorageTimer);
@@ -496,11 +513,11 @@ const writeToStorage = (data, rewrite, options = {}) => {
 };
 
 if (window.addEventListener) {
-  window.addEventListener("beforeunload", flushStorageWrite);
+  window.addEventListener("beforeunload", () => flushStorageWrite(true));
 }
 
 const deleteStorageFile = () => {
-  flushStorageWrite();
+  flushStorageWrite(true);
   const result = window.cep.fs.deleteFile(storagePath);
   storageCache = {};
   storageReadError = null;
@@ -612,6 +629,13 @@ const getActiveLayerText = (callback) => {
     const dataObj = safeJsonParse(data);
     if (!data || !dataObj.textProps) nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
     else callback(dataObj);
+  });
+};
+
+const getSelectedTextLayers = (callback = () => {}) => {
+  csInterface.evalScript("getSelectedTextLayers()", (data) => {
+    const dataObj = safeJsonParse(data);
+    callback(Array.isArray(dataObj.layers) ? dataObj.layers : []);
   });
 };
 
@@ -879,6 +903,33 @@ const setActiveLayerText = (text, style, direction, callback = () => {}) => {
   }));
 };
 
+const setSelectedTextLayers = (items, direction, callback = () => {}, restoreLayerIds = []) => {
+  if (!Array.isArray(items) || items.length < 2) {
+    nativeAlert(locale.errorSelectMultipleTextLayers, locale.errorTitle, true);
+    callback(false);
+    return false;
+  }
+
+  const normalizedItems = items.map((item) => {
+    const parsed = buildRichTextPayload(item.text);
+    return {
+      layerId: item.layerId,
+      text: parsed.text,
+      style: item.style || { textProps: getDefaultStyle(), stroke: getDefaultStroke() },
+      direction,
+      richTextRuns: parsed.richTextRuns,
+    };
+  });
+  const data = JSON.stringify({
+    items: normalizedItems,
+    restoreLayerIds: Array.isArray(restoreLayerIds) ? restoreLayerIds : [],
+  });
+  csInterface.evalScript("setSelectedTextLayers(" + data + ")", trackHostAction((error) => {
+    if (error) nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
+    callback(!error);
+  }));
+};
+
 // Fast text-only apply for TextShapeR: passes the layer style snapshot the
 // panel already holds so the host can skip its full layer re-read and every
 // style/stroke re-apply — only the line breaking changes
@@ -1047,6 +1098,7 @@ const createTextLayerInSelection = (text, style, pointText, padding, direction, 
   if (!style) {
     style = { textProps: getDefaultStyle(), stroke: getDefaultStroke() };
   }
+  const resolvedPointText = resolveStylePointText(style, pointText);
   const parsed = buildRichTextPayload(text);
   const data = JSON.stringify({
     text: parsed.text,
@@ -1055,7 +1107,7 @@ const createTextLayerInSelection = (text, style, pointText, padding, direction, 
     direction,
     richTextRuns: parsed.richTextRuns,
   });
-  csInterface.evalScript("createTextLayerInSelection(" + data + ", " + !!pointText + ")", trackHostAction((error) => {
+  csInterface.evalScript("createTextLayerInSelection(" + data + ", " + resolvedPointText + ")", trackHostAction((error) => {
     if (error === "smallSelection") nativeAlert(locale.errorSmallSelection, locale.errorTitle, true);
     else if (error) nativeAlert(locale.errorNoSelection, locale.errorTitle, true);
     callback(!error);
@@ -1090,6 +1142,7 @@ const createTextLayersInStoredSelections = (texts, styles, selections, pointText
     texts: parsedTexts.map((entry) => entry.text),
     richTextRuns: parsedTexts.map((entry) => entry.richTextRuns),
     styles,
+    pointModes: styles.map((style) => resolveStylePointText(style, pointText)),
     selections,
     padding: padding || 0,
     direction,
@@ -1355,4 +1408,4 @@ const scanPsdFonts = (path, callback) => {
   );
 };
 
-export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, notePanelActivity, isPanelIdle, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
+export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, notePanelActivity, isPanelIdle, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };

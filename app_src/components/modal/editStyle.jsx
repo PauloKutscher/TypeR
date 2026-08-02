@@ -25,6 +25,9 @@ const EditStyleModal = React.memo(function EditStyleModal() {
   const currentData = context.state.modalData;
   const [name, setName] = React.useState(currentData.name || "");
   const [folder, setFolder] = React.useState(currentData.folder || "");
+  const [textType, setTextType] = React.useState(
+    ["point", "paragraph"].includes(currentData.textType) ? currentData.textType : "inherit"
+  );
   const [textProps, setTextProps] = React.useState(currentData.textProps || getDefaultStyle());
   const [prefixes, setPrefixes] = React.useState(currentData.prefixes?.join("\n") || "");
   const [prefixColor, setPrefixColor] = React.useState(currentData.prefixColor || config.defaultPrefixColor);
@@ -58,6 +61,11 @@ const EditStyleModal = React.memo(function EditStyleModal() {
     setEdited(true);
   };
 
+  const changeTextType = (e) => {
+    setTextType(e.target.value);
+    setEdited(true);
+  };
+
   const copyLayerStyle = () => {
     getActiveLayerText((data) => {
       if (!data.textProps.layerText?.textStyleRange.length) return;
@@ -78,15 +86,18 @@ const EditStyleModal = React.memo(function EditStyleModal() {
       delete data.textProps.layerText.bounds;
       delete data.textProps.layerText.warp;
       setTextProps(data.textProps);
+      if (data.textType === "point" || data.textType === "paragraph") {
+        setTextType(data.textType);
+      }
       if (data.stroke) setStroke(data.stroke);
       setEdited(true);
     });
   };
 
-  const changeTextProps = (newProps) => {
+  const changeTextProps = React.useCallback((newProps) => {
     setTextProps(newProps);
     setEdited(true);
-  };
+  }, []);
 
   const changePrefixes = (e) => {
     setPrefixes(e.target.value);
@@ -123,7 +134,7 @@ const EditStyleModal = React.memo(function EditStyleModal() {
       ...stroke,
       enabled: stroke.size > 0 ? true : false,
     };
-    const data = { name, folder, textProps, prefixes, prefixColor, stroke: fixedStroke };
+    const data = { name, folder, textType, textProps, prefixes, prefixColor, stroke: fixedStroke };
     if (currentData.create) {
       data.id = Math.random().toString(36).substr(2, 8);
     } else {
@@ -193,12 +204,32 @@ const EditStyleModal = React.memo(function EditStyleModal() {
               </div>
             </div>
             <div className="field hostBrdTopContrast">
+              <div className="field-label">{locale.editStyleTextTypeLabel}</div>
+              <div className="field-input">
+                <select
+                  value={textType}
+                  onChange={changeTextType}
+                  className="topcoat-textarea"
+                  aria-label={locale.editStyleTextTypeLabel}
+                >
+                  <option value="inherit">{locale.editStyleTextTypeInherit}</option>
+                  <option value="paragraph">{locale.editStyleTextTypeParagraph}</option>
+                  <option value="point">{locale.editStyleTextTypePoint}</option>
+                </select>
+              </div>
+              <div className="field-descr">{locale.editStyleTextTypeDescr}</div>
+            </div>
+            <div className="field hostBrdTopContrast">
               <div className="field-label">{locale.editStyleCopyLabel}</div>
               <button type="button" className="style-edit-copy-btn topcoat-button--large" onClick={copyLayerStyle}>
                 <FiCopy size={18} /> {locale.editStyleCopyButton}
               </button>
               <div className="field-descr">{locale.editStyleCopyDescr}</div>
-              <StyleDetails textProps={textProps} setTextProps={changeTextProps} />
+              <StyleDetails
+                textProps={textProps}
+                setTextProps={changeTextProps}
+                styleSizeStep={context.state.styleSizeStep}
+              />
             </div>
             <div className="field hostBrdTopContrast">
               <div className="field-label">{locale.editStylePrefixesLabel}</div>
@@ -272,11 +303,10 @@ const EditStyleModal = React.memo(function EditStyleModal() {
 });
 
 const StyleDetails = React.memo(function StyleDetails(props) {
-  const context = useContext();
-  const fonts = getUserFonts();
+  const fonts = React.useMemo(() => getUserFonts(), []);
   const textStyle = props.textProps.layerText.textStyleRange[0].textStyle;
   const paragStyle = props.textProps.layerText.paragraphStyleRange[0].paragraphStyle;
-  const sizeStep = Number(context.state.styleSizeStep) > 0 ? Number(context.state.styleSizeStep) : 1;
+  const sizeStep = Number(props.styleSizeStep) > 0 ? Number(props.styleSizeStep) : 1;
   const currentFont = fonts.find((font) => font.postScriptName === textStyle.fontPostScriptName) || {
     family: "[" + (textStyle.fontName || "none") + "]",
     style: "[" + (textStyle.fontStyleName || "none") + "]",
@@ -286,8 +316,14 @@ const StyleDetails = React.memo(function StyleDetails(props) {
   const [family, setFamily] = React.useState(currentFont.family || "");
   const [colorPickerOpen, setColorPickerOpen] = React.useState(false);
 
-  const families = fonts.reduce((fams, font) => (fams.includes(font.family) ? fams : fams.concat(font.family)), []);
-  const familyFonts = fonts.filter((font) => font.family === family);
+  const families = React.useMemo(
+    () => Array.from(new Set(fonts.map((font) => font.family))),
+    [fonts]
+  );
+  const familyFonts = React.useMemo(
+    () => fonts.filter((font) => font.family === family),
+    [family, fonts]
+  );
   const unit = props.textProps.typeUnit.substr(0, 3);
 
   React.useEffect(() => setFamily(currentFont.family), [currentFont.family]);
@@ -669,6 +705,7 @@ const StyleDetails = React.memo(function StyleDetails(props) {
 StyleDetails.propTypes = {
   textProps: PropTypes.object.isRequired,
   setTextProps: PropTypes.func.isRequired,
+  styleSizeStep: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
 };
 
 export default EditStyleModal;

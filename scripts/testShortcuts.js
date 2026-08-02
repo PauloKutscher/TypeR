@@ -17,6 +17,7 @@ const expectedNewCommands = [
   "previousStyle",
   "nextStyle",
   "applyStyle",
+  "applyMultiple",
   "removeLastSelection",
   "clearSelections",
   "toggleTextShapeR",
@@ -56,12 +57,32 @@ const mockRequire = (request) => {
       createTextLayerInSelection: (...args) => utilityCalls.push(["create", ...args]),
       createTextLayersInStoredSelections: (...args) => utilityCalls.push(["createMany", ...args]),
       deselectDocument: (...args) => utilityCalls.push(["deselect", ...args]),
+      getSelectedTextLayers: (callback) => {
+        utilityCalls.push(["getSelectedTextLayers"]);
+        callback([{ id: 10 }, { id: 20 }]);
+      },
+      locale: {
+        errorSelectMultipleTextLayers: "Select layers",
+        errorNotEnoughLinesForMultiPaste: "Not enough lines",
+        multiPastePartial: "{applied}/{selected}",
+        errorTitle: "Error",
+      },
+      nativeAlert: (...args) => utilityCalls.push(["alert", ...args]),
       setActiveLayerText: (...args) => utilityCalls.push(["setText", ...args]),
+      setSelectedTextLayers: (items, direction, callback, restoreLayerIds) => {
+        utilityCalls.push(["setSelectedTextLayers", items, direction, restoreLayerIds]);
+        callback(true);
+      },
     };
   }
   if (request === "./textLayerPayload") {
     return {
       buildStoredSelectionPayload: () => ({ texts: [], styles: [] }),
+      buildSelectedLayerPayload: ({ layerIds }) => ({
+        items: layerIds.map((layerId, index) => ({ layerId, text: `line-${index}` })),
+        lineEntries: layerIds.map((_, index) => ({ lineIndex: index, styleId: "style-1" })),
+        nextLineIndex: 2,
+      }),
       getScaledStyle: (style) => style,
     };
   }
@@ -83,6 +104,8 @@ const baseContext = {
     direction: "rtl",
     inlineTextShapeR: false,
     multiBubbleMode: true,
+    lines: [{ text: "line-0" }, { text: "line-1" }, { text: "line-2" }],
+    currentLineIndex: 0,
     storedSelections: [{ id: "selection-1" }, { id: "selection-2" }],
     tabs: [{ id: "tab-1" }, { id: "tab-2" }, { id: "tab-3" }],
     currentTabId: "tab-2",
@@ -93,6 +116,25 @@ const baseContext = {
 
 getCommand("applyStyle").handler(baseContext);
 assert.deepStrictEqual(utilityCalls.shift(), ["setText", "", baseContext.state.currentStyle, "rtl"]);
+getCommand("applyMultiple").handler(baseContext);
+assert.deepStrictEqual(utilityCalls.shift(), ["getSelectedTextLayers"]);
+assert.deepStrictEqual(utilityCalls.shift(), [
+  "setSelectedTextLayers",
+  [
+    { layerId: 10, text: "line-0" },
+    { layerId: 20, text: "line-1" },
+  ],
+  "rtl",
+  [10, 20],
+]);
+assert.deepStrictEqual(dispatches.shift(), {
+  type: "commitLineBatch",
+  entries: [
+    { lineIndex: 0, styleId: "style-1" },
+    { lineIndex: 1, styleId: "style-1" },
+  ],
+  nextLineIndex: 2,
+});
 getCommand("removeLastSelection").handler(baseContext);
 assert.deepStrictEqual(dispatches.shift(), { type: "removeSelection", index: 1 });
 assert.deepStrictEqual(utilityCalls.shift(), ["deselect"]);

@@ -77,6 +77,10 @@ var _hostState = {
     data: null,
     result: "",
   },
+  setSelectedTextLayers: {
+    data: null,
+    result: "",
+  },
   setTextShapeRText: {
     data: null,
     result: "",
@@ -309,10 +313,35 @@ function _selectLayerById(layerId) {
   executeAction(charID.Select, descriptor, DialogModes.NO);
 }
 
+function _selectLayersById(layerIds) {
+  if (!layerIds || !layerIds.length) return;
+  for (var i = 0; i < layerIds.length; i++) {
+    var reference = new ActionReference();
+    reference.putIdentifier(charID.Layer, layerIds[i]);
+    var descriptor = new ActionDescriptor();
+    descriptor.putReference(charID.Null, reference);
+    descriptor.putBoolean(stringIDToTypeID("makeVisible"), false);
+    if (i > 0) {
+      descriptor.putEnumerated(
+        stringIDToTypeID("selectionModifier"),
+        stringIDToTypeID("selectionModifierType"),
+        stringIDToTypeID("addToSelection")
+      );
+    }
+    executeAction(charID.Select, descriptor, DialogModes.NO);
+  }
+}
+
 function _textLayerIsPointText() {
   var textKey = _getCurrent(charID.Layer, charID.Text).getObjectValue(charID.Text);
   var textType = textKey.getList(stringIDToTypeID("textShape")).getObjectValue(0).getEnumerationValue(charID.TextShapeType);
   return textType === charID.Point;
+}
+
+function _resolveStylePointText(style, fallbackPointText) {
+  if (style && style.textType === "point") return true;
+  if (style && style.textType === "paragraph") return false;
+  return !!fallbackPointText;
 }
 
 function _getTextLayerSize() {
@@ -1098,6 +1127,7 @@ function _setActiveLayerText() {
   _forEachSelectedLayer(function () {
     var oldBounds = _getCurrentTextLayerBounds();
     var isPoint = _textLayerIsPointText();
+    var targetPoint = _resolveStylePointText(dataStyle, isPoint);
     if (isPoint) _changeToBoxText();
     var oldTextParams = jamText.getLayerText();
     var newTextParams;
@@ -1247,7 +1277,7 @@ function _setActiveLayerText() {
     if (dataStyle && dataStyle.stroke) {
       _setLayerStroke(dataStyle.stroke);
     }
-    if (isPoint) {
+    if (targetPoint) {
       _changeToPointText();
     } else {
       var textSize = 12;
@@ -1792,6 +1822,7 @@ function getActiveLayerText() {
   return jamJSON.stringify({
     layerId: layerId,
     bounds: bounds,
+    textType: _textLayerIsPointText() ? "point" : "paragraph",
     textProps: jamText.getLayerText(),
     stroke: stroke,
   });
@@ -1947,6 +1978,120 @@ function setActiveLayerText(data) {
   state.data = data;
   state.result = "";
   app.activeDocument.suspendHistory("TyperTools Change", "_setActiveLayerText()");
+  return state.result;
+}
+
+function _setSelectedTextLayers() {
+  var state = _hostState.setSelectedTextLayers;
+  var items = state.data && state.data.items ? state.data.items : [];
+  var requestedRestoreIds = state.data && state.data.restoreLayerIds
+    ? state.data.restoreLayerIds
+    : [];
+  var restoreIds = [];
+  state.result = "";
+
+  if (!documents.length) {
+    state.result = "doc";
+    return;
+  }
+  if (items.length < 2) {
+    state.result = "layer";
+    return;
+  }
+
+  var restoreSource = requestedRestoreIds.length ? requestedRestoreIds : items;
+  for (var restoreIndex = 0; restoreIndex < restoreSource.length; restoreIndex++) {
+    var restoreValue = requestedRestoreIds.length
+      ? restoreSource[restoreIndex]
+      : restoreSource[restoreIndex].layerId;
+    var restoreId = parseInt(restoreValue, 10);
+    if (!isNaN(restoreId)) restoreIds.push(restoreId);
+  }
+
+  // Validate every target before changing any layer. The history rollback in
+  // setSelectedTextLayers remains the safety net for errors raised while the
+  // text/style is actually being applied.
+  for (var validateIndex = 0; validateIndex < items.length; validateIndex++) {
+    var validateId = parseInt(items[validateIndex].layerId, 10);
+    if (isNaN(validateId)) {
+      state.result = "layer";
+      break;
+    }
+    try {
+      _selectLayerById(validateId);
+      if (!_layerIsTextLayer() || app.activeDocument.activeLayer.allLocked) {
+        state.result = "layer";
+        break;
+      }
+    } catch (validateError) {
+      state.result = "scriptError: " +
+        (validateError && validateError.message ? validateError.message : validateError);
+      break;
+    }
+  }
+
+  if (state.result) {
+    if (restoreIds.length) {
+      try {
+        _selectLayersById(restoreIds);
+      } catch (validateRestoreError) {}
+    }
+    return;
+  }
+
+  for (var i = 0; i < items.length; i++) {
+    var layerId = parseInt(items[i].layerId, 10);
+    if (isNaN(layerId)) {
+      state.result = "layer";
+      break;
+    }
+    try {
+      _selectLayerById(layerId);
+      if (!_layerIsTextLayer()) {
+        state.result = "layer";
+        break;
+      }
+      _hostState.setActiveLayerText.data = items[i];
+      _hostState.setActiveLayerText.result = "";
+      _setActiveLayerText();
+      if (_hostState.setActiveLayerText.result) {
+        state.result = _hostState.setActiveLayerText.result;
+        break;
+      }
+    } catch (applyError) {
+      state.result = "scriptError: " + (applyError && applyError.message ? applyError.message : applyError);
+      break;
+    }
+  }
+
+  if (restoreIds.length) {
+    try {
+      _selectLayersById(restoreIds);
+    } catch (restoreError) {}
+  }
+}
+
+function setSelectedTextLayers(data) {
+  var state = _hostState.setSelectedTextLayers;
+  state.data = data;
+  state.result = "";
+  if (!documents.length) return "doc";
+  var originalHistoryState = null;
+  try {
+    originalHistoryState = app.activeDocument.activeHistoryState;
+  } catch (historyReadError) {}
+  app.activeDocument.suspendHistory("TyperTools Multiple Paste", "_setSelectedTextLayers()");
+  if (state.result && originalHistoryState) {
+    try {
+      app.activeDocument.activeHistoryState = originalHistoryState;
+    } catch (historyRollbackError) {}
+    var restoreIds = data && data.restoreLayerIds ? data.restoreLayerIds : [];
+    if (restoreIds.length) {
+      try {
+        _selectLayersById(restoreIds);
+      } catch (rollbackRestoreError) {}
+    }
+  }
   return state.result;
 }
 
@@ -2786,7 +2931,9 @@ function _createTextLayersInStoredSelections() {
       _createAndSetLayerText(data, dimensions.width, dimensions.height);
 
       var bounds = _getCurrentTextLayerBounds();
-      if (state.point) {
+      var pointModes = state.data.pointModes || [];
+      var pointText = pointModes[i] === undefined ? state.point : !!pointModes[i];
+      if (pointText) {
         _changeToPointText();
       } else {
         _resizeTextBoxToContent(dimensions.width, bounds);

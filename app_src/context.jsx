@@ -8,6 +8,7 @@ import { normalizeEditorTheme } from "./themePresets";
 import { applyEditorTheme } from "./lib/themeManager";
 import { getDefaultShortcuts } from "./shortcutCommands";
 import { getStoredSelectionLineIndex } from "./multiBubbleHistory";
+import { getAutomaticTagStyles } from "./folderUtils";
 
 const storage = readStorage();
 const storeFields = [
@@ -253,6 +254,7 @@ const initialState = {
   shortcut: { ...defaultShortcut, ...(storage.data?.shortcut || {}) },
   uiLayout: normalizeUiLayout(storage.data?.uiLayout),
   editorTheme: normalizeEditorTheme(storage.data?.editorTheme),
+  stylePrefixRefreshVersion: 0,
 };
 
 // Multi-tab migration: wrap pre-tab data into a single tab, or restore the
@@ -271,6 +273,7 @@ if (!Array.isArray(initialState.tabs) || !initialState.tabs.length) {
 const reducer = (state, action) => {
   let thenScroll = false;
   let thenSelectStyle = false;
+  let forceStylePrefixRefresh = false;
   const newState = Object.assign({}, state);
   switch (action.type) {
     case "removeFirstTime": {
@@ -386,6 +389,29 @@ const reducer = (state, action) => {
       break;
     }
 
+    case "commitLineBatch": {
+      const usedLineStyles = { ...(state.usedLineStyles || {}) };
+      for (const entry of action.entries || []) {
+        const batchLine = state.lines[entry.lineIndex];
+        if (!batchLine || batchLine.ignore || !entry.styleId) continue;
+        usedLineStyles[entry.lineIndex] = {
+          rawText: batchLine.rawText,
+          styleId: entry.styleId,
+        };
+      }
+      newState.usedLineStyles = usedLineStyles;
+      if (
+        typeof action.nextLineIndex === "number" &&
+        state.lines[action.nextLineIndex] &&
+        !state.lines[action.nextLineIndex].ignore
+      ) {
+        newState.currentLineIndex = action.nextLineIndex;
+      }
+      thenScroll = true;
+      thenSelectStyle = true;
+      break;
+    }
+
     case "nextPage": {
       if (!state.text) break;
       // Find the next "Page X" marker.
@@ -434,6 +460,12 @@ const reducer = (state, action) => {
 
     case "setCurrentStyleId": {
       newState.currentStyleId = action.id;
+      break;
+    }
+
+    case "refreshStylePrefixes": {
+      if (action.version !== state.stylePrefixRefreshVersion) return state;
+      forceStylePrefixRefresh = true;
       break;
     }
 
@@ -1067,8 +1099,8 @@ const reducer = (state, action) => {
 
   const needsStyleProcessing = !state.initiated || stylesChanged || foldersChanged;
 
-  // Selecting a style only affects line parsing through the current folder's
-  // prefix priority: skip the full text re-parse when that folder is unchanged
+  // Selecting a style only affects line parsing through current-folder tag
+  // isolation: skip the full text re-parse when that folder is unchanged
   // so clicking a style stays instant even with long scripts
   let stylePrefixContextChanged = styleIdChanged;
   if (styleIdChanged && !stylesChanged && state.initiated) {
@@ -1085,9 +1117,23 @@ const reducer = (state, action) => {
     }
   }
 
+  // A direct style navigation must paint its active state before a potentially
+  // long script re-parse. The provider schedules the folder-prefix refresh
+  // after the browser has had a chance to render, and supersedes stale clicks.
+  const deferStylePrefixRefresh =
+    stylePrefixContextChanged &&
+    (action.type === "setCurrentStyleId" ||
+      action.type === "previousStyle" ||
+      action.type === "nextStyle");
+  if (deferStylePrefixRefresh) {
+    newState.stylePrefixRefreshVersion = (state.stylePrefixRefreshVersion || 0) + 1;
+    stylePrefixContextChanged = false;
+  }
+
   const needsLineProcessing = needsStyleProcessing || textChanged ||
     ignoreLinePrefixesChanged || ignoreTagsChanged || currentFolderTagPriorityChanged ||
-    imagesChanged || stylePrefixContextChanged || usedLineStylesChanged || resetLineCounterOnPageChanged;
+    imagesChanged || stylePrefixContextChanged || usedLineStylesChanged ||
+    resetLineCounterOnPageChanged || forceStylePrefixRefresh;
 
   // Phase 1: Style/folder validation and sorting (only when styles or folders changed)
   if (needsStyleProcessing) {
@@ -1150,30 +1196,19 @@ const reducer = (state, action) => {
   // Phase 2: Prefix building + line parsing (only when relevant fields changed)
   if (needsLineProcessing) {
     const stylePrefixes = [];
-    const folderPrefixes = [];
-    const folderOnlyPrefixes = [];
-    const unsortedPrefixes = [];
-    const activeStyleForPrefixes =
-      newState.styles.find((style) => style.id === newState.currentStyleId) ||
-      state.currentStyle ||
-      null;
-    const currentFolder = activeStyleForPrefixes ? activeStyleForPrefixes.folder || null : null;
-    for (const style of newState.styles) {
+    const automaticTagStyles = getAutomaticTagStyles(
+      newState.styles,
+      newState.currentStyleId,
+      newState.currentFolderTagPriority !== false
+    );
+    for (const style of automaticTagStyles) {
       if (style.prefixesDisabled) continue;
-      const folder = style.folder || null;
       for (const prefix of style.prefixes || []) {
         if (!prefix) continue;
-        const data = { prefix, style, folder };
-        stylePrefixes.push(data);
-        if (folder) folderOnlyPrefixes.push(data);
-        else unsortedPrefixes.push(data);
-        if (folder === currentFolder) folderPrefixes.push(data);
+        stylePrefixes.push({ prefix, style });
       }
     }
     const stylePrefixIndex = buildPrefixIndex(stylePrefixes);
-    const folderPrefixIndex = buildPrefixIndex(folderPrefixes);
-    const folderOnlyPrefixIndex = buildPrefixIndex(folderOnlyPrefixes);
-    const unsortedPrefixIndex = buildPrefixIndex(unsortedPrefixes);
 
     // Pre-compile a single regex for all ignoreTags instead of split/join per tag per line
     const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1187,19 +1222,15 @@ const reducer = (state, action) => {
     let lastTextLine = null;
     let previousStyle = null;
     const usedLineStyles = newState.usedLineStyles || {};
+    const stylesById = new Map(newState.styles.map((style) => [style.id, style]));
     const getUsedStyle = (rawIndex, rawText) => {
       const usedLineStyle = usedLineStyles[rawIndex];
       if (!usedLineStyle || usedLineStyle.rawText !== rawText) return null;
-      return newState.styles.find((style) => style.id === usedLineStyle.styleId) || null;
+      return stylesById.get(usedLineStyle.styleId) || null;
     };
     const nextLines = rawLines.map((rawText, rawIndex) => {
       const ignorePrefix = newState.ignoreLinePrefixes.find((pr) => rawText.startsWith(pr)) || "";
-      const hasStylePrefix = (
-        newState.currentFolderTagPriority !== false
-          ? findPrefixMatch(folderPrefixIndex, rawText)
-          : (findPrefixMatch(unsortedPrefixIndex, rawText) ||
-             findPrefixMatch(folderOnlyPrefixIndex, rawText))
-      ) || findPrefixMatch(stylePrefixIndex, rawText);
+      const hasStylePrefix = findPrefixMatch(stylePrefixIndex, rawText);
 
       let stylePrefix = "";
       let style = null;
@@ -1311,7 +1342,9 @@ const reducer = (state, action) => {
   if (newState.currentStyle && newState.currentStyleId !== state.currentStyleId) {
     const folder = newState.currentStyle.folder || "unsorted";
     if (!newState.openFolders.includes(folder)) newState.openFolders.push(folder);
-    if (newState.autoScrollStyle) scrollToStyle(newState.currentStyleId);
+    if (newState.autoScrollStyle && action.type !== "setCurrentStyleId") {
+      scrollToStyle(newState.currentStyleId);
+    }
   }
   if (thenScroll) {
     scrollToLine(newState.currentLineIndex);
@@ -1365,7 +1398,10 @@ const reducer = (state, action) => {
         shouldDebounceStorage = true;
       }
     }
-    writeToStorage(dataToStore, false, { debounce: shouldDebounceStorage ? 300 : 0 });
+    writeToStorage(dataToStore, false, {
+      debounce: shouldDebounceStorage ? 300 : 0,
+      idle: shouldDebounceStorage ? 750 : 0,
+    });
   }
 
   return newState;
@@ -1382,6 +1418,14 @@ const ContextProvider = React.memo(function ContextProvider(props) {
   React.useEffect(() => {
     setTextShapeRTuning(state.textShapeRTuning);
   }, [state.textShapeRTuning]);
+  React.useEffect(() => {
+    const version = state.stylePrefixRefreshVersion || 0;
+    if (!version) return undefined;
+    const timer = setTimeout(() => {
+      dispatch({ type: "refreshStylePrefixes", version });
+    }, 75);
+    return () => clearTimeout(timer);
+  }, [state.stylePrefixRefreshVersion]);
   React.useEffect(() => {
     const direction = state.direction === "rtl" ? "rtl" : "ltr";
     document.documentElement.setAttribute("dir", direction);

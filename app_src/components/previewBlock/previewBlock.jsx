@@ -1,15 +1,15 @@
 import "./previewBlock.scss";
 
 import React from "react";
-import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiChevronsRight, FiPlay, FiRefreshCw, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiRotateCcw, FiStar, FiX } from "react-icons/fi";
+import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiChevronsRight, FiPlay, FiRefreshCw, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiRotateCcw, FiStar, FiX, FiLayers } from "react-icons/fi";
 import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
 
-import { csInterface, locale, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, isPanelIdle, notePanelActivity, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, getUserFonts, refreshUserFonts, scrollToLine, parseMarkdownRuns } from "../../utils";
+import { csInterface, locale, nativeConfirm, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, isPanelIdle, notePanelActivity, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, getUserFonts, refreshUserFonts, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { buildStoredSelectionPayload, getScaledStyle } from "../../textLayerPayload";
-import { withShortcutHint } from "../../shortcutCommands";
+import { applyLinesToSelectedLayers, withShortcutHint } from "../../shortcutCommands";
 import { generateTextShapeRVariants, recordTextShapeRFeedback, setTextShapeRTuning, visibleWidth } from "../../textShapeR";
 import { createFontPreviewRegistry, getFontPreviewFamily } from "../../fontPreview";
 import TextShapeRFitPreview from "../textShapeRFitPreview";
@@ -411,19 +411,29 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   }, [goToBatchLayer]);
 
   React.useEffect(() => {
+    refreshBatchSelection();
+    const unsubscribePhotoshopEvents = addPhotoshopEventListener((event) => {
+      if (isPhotoshopSelectEvent(event)) refreshBatchSelection();
+    });
+    const fallbackTimer = setInterval(() => {
+      if (!document.hidden && !isHostActionPending() && !hasReceivedPhotoshopEvents()) {
+        refreshBatchSelection();
+      }
+    }, 2500);
+    return () => {
+      unsubscribePhotoshopEvents();
+      clearInterval(fallbackTimer);
+    };
+  }, [refreshBatchSelection]);
+
+  React.useEffect(() => {
     if (!context.state.inlineTextShapeR) return undefined;
     refreshInlineLayerSource();
     refreshInlineSelectionShape();
-    refreshBatchSelection();
 
     // Primary signal: Photoshop notifies the panel when a layer is selected
     // or edited. Debounced because 'setd' events arrive in bursts.
-    const unsubscribePhotoshopEvents = addPhotoshopEventListener((event) => {
-      // The batch diff runs on every layer-select event, undebounced:
-      // collapsing quick successive layer clicks would lose the order the
-      // user picked them in. 'setd' bursts (selection drags, text edits)
-      // never change which layers are targeted, so skip the diff for them.
-      if (isPhotoshopSelectEvent(event)) refreshBatchSelection();
+    const unsubscribePhotoshopEvents = addPhotoshopEventListener(() => {
       if (inlineEventDebounce.current) clearTimeout(inlineEventDebounce.current);
       inlineEventDebounce.current = setTimeout(() => {
         inlineEventDebounce.current = null;
@@ -450,7 +460,6 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       if (Date.now() - inlineLastRefreshAt.current >= idleDelay) {
         refreshInlineLayerSource();
         refreshInlineSelectionShape();
-        refreshBatchSelection();
       }
     }, 1200);
 
@@ -465,7 +474,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       inlineSourcePending.current = false;
       inlineShapePending.current = false;
     };
-  }, [context.state.inlineTextShapeR, refreshInlineLayerSource, refreshInlineSelectionShape, refreshBatchSelection, clearInlineShapeSettle]);
+  }, [context.state.inlineTextShapeR, refreshInlineLayerSource, refreshInlineSelectionShape, clearInlineShapeSettle]);
 
   React.useEffect(() => {
     setInlineVariantPage(0);
@@ -728,6 +737,10 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     }
   };
 
+  const applyMultipleLines = React.useCallback(() => {
+    applyLinesToSelectedLayers(context, batchOrderRef.current);
+  }, [context]);
+
   const currentLineClick = React.useCallback(() => {
     if (line.rawIndex === void 0) return;
     scrollToLine(line.rawIndex);
@@ -845,9 +858,16 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   }, []);
   const markLayerShapeAsBest = React.useCallback((event) => {
     if (event?.shiftKey) {
-      setTextShapeRTuning(null);
-      context.dispatch({ type: "setTextShapeRTuning", value: null });
-      flashShapeFeedback(locale.textShapeRMarkBestReset || "Learned shape preferences reset");
+      nativeConfirm(
+        locale.confirmResetTextShapeR || "Reset all learned text shape preferences?",
+        locale.confirmTitle || "Confirmation",
+        (confirmed) => {
+          if (!confirmed) return;
+          setTextShapeRTuning(null);
+          context.dispatch({ type: "setTextShapeRTuning", value: null });
+          flashShapeFeedback(locale.textShapeRMarkBestReset || "Learned shape preferences reset");
+        }
+      );
       return;
     }
     if (event?.altKey || event?.ctrlKey) {
@@ -992,6 +1012,16 @@ const PreviewBlock = React.memo(function PreviewBlock() {
               <MdCenterFocusWeak size={18} /> {locale.alignLayer}
             </button>
           )}
+          {batchSelection.length >= 2 && (
+            <button
+              type="button"
+              className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large"
+              title={withShortcutHint(locale.multiPasteExistingDescr, context.state.shortcut.applyMultiple)}
+              onClick={applyMultipleLines}
+            >
+              <FiLayers size={18} /> {locale.multiPasteExistingButton}
+            </button>
+          )}
           {uiVisible.previewSizeControls !== false && (
             <div className="preview-top_change-size-cont">
               <button className="topcoat-icon-button--large" title={locale.layerTextSizeMinus} onClick={handleDecrease}>
@@ -1085,7 +1115,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                   className={"preview-textshaper-markbest" + (context.state.textShapeRTuning?.samples ? " is-active" : "")}
                   onClick={markLayerShapeAsBest}
                   disabled={!inlineLayerSource.text || inlineLayerSource.loading || !!batchRun}
-                  title={locale.textShapeRMarkBest || "Learn this layer's line breaks. Alt-click: all text layers. Shift-click: reset."}
+                  title={locale.textShapeRMarkBest || "Learn text shape. Alt-click: all layers + bubble outlines. Ctrl-click: all layers (fast). Shift-click: reset."}
                 >
                   <FiStar size={11} />
                 </button>

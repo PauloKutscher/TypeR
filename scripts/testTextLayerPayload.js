@@ -40,10 +40,16 @@ const loadAppModule = (relativePath) => {
   return mod.exports;
 };
 
-const { getScaledStyle, buildStoredSelectionPayload } = loadAppModule("app_src/textLayerPayload.js");
+const {
+  getScaledStyle,
+  resolveStylePointText,
+  buildSelectedLayerPayload,
+  buildStoredSelectionPayload,
+} = loadAppModule("app_src/textLayerPayload.js");
 
-const makeStyle = (id, size = 20, leading = 24) => ({
+const makeStyle = (id, size = 20, leading = 24, textType = "inherit") => ({
   id,
+  textType,
   textProps: {
     layerText: {
       textStyleRange: [{ textStyle: { size, leading } }],
@@ -60,6 +66,10 @@ assert.notStrictEqual(scaled, baseStyle);
 assert.strictEqual(scaled.textProps.layerText.textStyleRange[0].textStyle.size, 10);
 assert.strictEqual(scaled.textProps.layerText.textStyleRange[0].textStyle.leading, 12);
 assert.strictEqual(baseStyle.textProps.layerText.textStyleRange[0].textStyle.size, 20);
+assert.strictEqual(resolveStylePointText(makeStyle("point", 20, 24, "point"), false), true);
+assert.strictEqual(resolveStylePointText(makeStyle("paragraph", 20, 24, "paragraph"), true), false);
+assert.strictEqual(resolveStylePointText(baseStyle, true), true);
+assert.strictEqual(resolveStylePointText(null, false), false);
 
 const partialStyle = {
   id: "partial",
@@ -138,5 +148,45 @@ const exhaustedPayload = buildStoredSelectionPayload({
 });
 assert.deepStrictEqual(exhaustedPayload.texts, []);
 assert.deepStrictEqual(exhaustedPayload.styles, []);
+
+const selectedLayerPayload = buildSelectedLayerPayload({
+  layerIds: [101, 102, 103],
+  lines,
+  currentLineIndex: 0,
+  currentStyle,
+  textScale: 50,
+});
+assert.deepStrictEqual(
+  selectedLayerPayload.items.map((item) => [item.layerId, item.text, item.style.id]),
+  [
+    [101, "first", "tagged"],
+    [102, "second", "tagged"],
+    [103, "third", "tagged"],
+  ]
+);
+assert.deepStrictEqual(selectedLayerPayload.lineEntries, [
+  { lineIndex: 1, styleId: "tagged" },
+  { lineIndex: 2, styleId: "tagged" },
+  { lineIndex: 3, styleId: "tagged" },
+]);
+assert.strictEqual(selectedLayerPayload.nextLineIndex, 3);
+assert.strictEqual(
+  selectedLayerPayload.items[0].style.textProps.layerText.textStyleRange[0].textStyle.size,
+  9
+);
+
+const partialSelectedLayerPayload = buildSelectedLayerPayload({
+  layerIds: [201, 202, 203],
+  lines: [
+    { text: "one", rawText: "one", ignore: false, style: taggedStyle },
+    { text: "note", rawText: "note", ignore: true },
+    { text: "two", rawText: "two", ignore: false },
+  ],
+  currentLineIndex: 1,
+  currentStyle,
+});
+assert.deepStrictEqual(partialSelectedLayerPayload.items.map((item) => item.layerId), [201]);
+assert.deepStrictEqual(partialSelectedLayerPayload.lineEntries, [{ lineIndex: 2, styleId: "current" }]);
+assert.strictEqual(partialSelectedLayerPayload.nextLineIndex, 2);
 
 console.log("textLayerPayload tests passed");

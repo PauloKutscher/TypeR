@@ -615,6 +615,7 @@ const SettingsModal = React.memo(function SettingsModal() {
                 name: style.name,
                 id: Math.random().toString(36).substring(2, 8),
                 folder: folderId,
+                textType: style.textType || "inherit",
                 textProps: style.textProps,
                 prefixes: style.prefixes || [],
                 prefixColor: style.prefixColor,
@@ -651,6 +652,7 @@ const SettingsModal = React.memo(function SettingsModal() {
               id: Math.random().toString(36).substring(2, 8),
               name: style.name,
               folder: style.folder ? idMap[style.folder] : null,
+              textType: style.textType || "inherit",
               textProps: style.textProps,
               prefixes: style.prefixes || [],
               prefixColor: style.prefixColor,
@@ -1411,7 +1413,8 @@ const SettingsModal = React.memo(function SettingsModal() {
                   currentFolderTagPriority,
                   changeCurrentFolderTagPriority,
                   locale.settingsCurrentFolderTagPriorityLabel,
-                  locale.settingsCurrentFolderTagPriorityHint || "Gives priority to styles from current folder"
+                  locale.settingsCurrentFolderTagPriorityHint ||
+                    "Prevents script tags from selecting a style from another folder"
                 )}
                 {renderToggle(
                   showQuickStyleSize,

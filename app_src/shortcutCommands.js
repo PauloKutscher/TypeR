@@ -4,9 +4,13 @@ import {
   createTextLayerInSelection,
   createTextLayersInStoredSelections,
   deselectDocument,
+  getSelectedTextLayers,
+  locale,
+  nativeAlert,
   setActiveLayerText,
+  setSelectedTextLayers,
 } from "./utils";
-import { buildStoredSelectionPayload, getScaledStyle } from "./textLayerPayload";
+import { buildSelectedLayerPayload, buildStoredSelectionPayload, getScaledStyle } from "./textLayerPayload";
 
 const createInSelection = (ctx) => {
   const storedSelections = ctx.state.storedSelections || [];
@@ -65,6 +69,52 @@ const insertLineText = (ctx) => {
   const line = ctx.state.currentLine || { text: "" };
   setActiveLayerText(line.text, null, ctx.state.direction, (ok) => {
     if (ok) ctx.dispatch({ type: "nextLine", add: true });
+  });
+};
+
+const applyLinesToSelectedLayers = (ctx, preferredOrder = []) => {
+  getSelectedTextLayers((layers) => {
+    const selectedIds = layers
+      .map((layer) => layer.id)
+      .filter((id) => typeof id === "number");
+    const orderedIds = preferredOrder
+      .filter((id) => selectedIds.indexOf(id) !== -1)
+      .concat(selectedIds.filter((id) => preferredOrder.indexOf(id) === -1));
+
+    if (orderedIds.length < 2) {
+      nativeAlert(locale.errorSelectMultipleTextLayers, locale.errorTitle, true);
+      return;
+    }
+
+    const payload = buildSelectedLayerPayload({
+      layerIds: orderedIds,
+      lines: ctx.state.lines,
+      currentLineIndex: ctx.state.currentLineIndex,
+      currentStyle: ctx.state.currentStyle,
+      textScale: ctx.state.textScale,
+    });
+    if (payload.items.length < 2) {
+      nativeAlert(locale.errorNotEnoughLinesForMultiPaste, locale.errorTitle, true);
+      return;
+    }
+
+    setSelectedTextLayers(payload.items, ctx.state.direction, (ok) => {
+      if (!ok) return;
+      ctx.dispatch({
+        type: "commitLineBatch",
+        entries: payload.lineEntries,
+        nextLineIndex: payload.nextLineIndex,
+      });
+      if (payload.items.length < orderedIds.length) {
+        nativeAlert(
+          locale.multiPastePartial
+            .replace("{applied}", payload.items.length)
+            .replace("{selected}", orderedIds.length),
+          locale.warningTitle,
+          true
+        );
+      }
+    }, orderedIds);
   });
 };
 
@@ -179,6 +229,13 @@ const shortcutCommands = [
     handler: insertLineText,
   },
   {
+    id: "applyMultiple",
+    label: "shortcut_applyMultiple",
+    defaultKeys: [],
+    repeatDelay: 0,
+    handler: applyLinesToSelectedLayers,
+  },
+  {
     id: "toggleMultiBubble",
     label: "shortcut_toggleMultiBubble",
     defaultKeys: ["CTRL", "ALT", "M"],
@@ -284,4 +341,5 @@ export {
   shortcutKeyLabels,
   formatShortcut,
   withShortcutHint,
+  applyLinesToSelectedLayers,
 };

@@ -16,6 +16,7 @@ import { collectFontRefs, exportZipWithFonts } from "../../fontFileExport";
 import { createFontPreviewRegistry, getFontPreviewFamily } from "../../fontPreview";
 
 const FontPreviewContext = React.createContext({ aliases: {}, css: "", revision: 0 });
+const emptyIdSet = new Set();
 
 const StylesBlock = React.memo(function StylesBlock() {
   const context = useContext();
@@ -55,6 +56,24 @@ const StylesBlock = React.memo(function StylesBlock() {
   }, [context.state.styles]);
   const unsortedStyles = stylesByFolder.get("__unsorted__") || [];
   const folderTree = React.useMemo(() => buildFolderTree(context.state.folders), [context.state.folders]);
+  const foldersById = React.useMemo(
+    () => new Map((context.state.folders || []).map((folder) => [folder.id, folder])),
+    [context.state.folders]
+  );
+  const currentStyleFolderId = context.state.currentStyle?.folder || null;
+  const currentStylePath = React.useMemo(
+    () => {
+      const ids = new Set();
+      let folderId = currentStyleFolderId;
+      while (folderId && !ids.has(folderId)) {
+        ids.add(folderId);
+        folderId = foldersById.get(folderId)?.parentId || null;
+      }
+      return ids;
+    },
+    [currentStyleFolderId, foldersById]
+  );
+  const unsortedFolder = React.useMemo(() => ({ name: locale.noFolderTitle }), []);
   const hasContent = context.state.folders.length || context.state.styles.length;
   const showExportFontTip =
     context.state.exportFolderFontTipVisible &&
@@ -89,8 +108,35 @@ const StylesBlock = React.memo(function StylesBlock() {
       <div className="folders-list">
         {hasContent ? (
           <React.Fragment>
-            {unsortedStyles.length > 0 && <FolderItem data={{ name: locale.noFolderTitle }} depth={0} stylesByFolder={stylesByFolder} />}
-            <FolderTree folders={folderTree} parentId={null} depth={0} stylesByFolder={stylesByFolder} />
+            {unsortedStyles.length > 0 && (
+              <FolderItem
+                data={unsortedFolder}
+                depth={0}
+                stylesByFolder={stylesByFolder}
+                dispatch={context.dispatch}
+                openFolders={context.state.openFolders}
+                branchActiveStyleId={
+                  currentStyleFolderId === null ? context.state.currentStyleId : null
+                }
+                currentStylePath={emptyIdSet}
+                direction={context.state.direction}
+                showQuickStyleSize={context.state.showQuickStyleSize}
+                styleSizeStep={context.state.styleSizeStep}
+              />
+            )}
+            <FolderTree
+              folders={folderTree}
+              parentId={null}
+              depth={0}
+              stylesByFolder={stylesByFolder}
+              dispatch={context.dispatch}
+              openFolders={context.state.openFolders}
+              currentStyleId={context.state.currentStyleId}
+              currentStylePath={currentStylePath}
+              direction={context.state.direction}
+              showQuickStyleSize={context.state.showQuickStyleSize}
+              styleSizeStep={context.state.styleSizeStep}
+            />
           </React.Fragment>
         ) : (
           <div className="styles-empty">
@@ -150,19 +196,41 @@ const getStyleDropLocation = (event) => {
   };
 };
 
-const FolderTree = React.memo(function FolderTree({ folders, parentId, depth, stylesByFolder }) {
-  const context = useContext();
-  if (!folders || !folders.length) return null;
+const FolderTree = React.memo(function FolderTree(props) {
   const handleOrder = React.useCallback(
     (items) => {
-      context.dispatch({ type: "reorderFolders", parentId, order: items.map((item) => item.id) });
+      props.dispatch({
+        type: "reorderFolders",
+        parentId: props.parentId,
+        order: items.map((item) => item.id),
+      });
     },
-    [context.dispatch, parentId]
+    [props.dispatch, props.parentId]
   );
+  if (!props.folders || !props.folders.length) return null;
   return (
-    <ReactSortable className={"folders-sortable" + (depth > 0 ? " m-nested" : "")} list={folders} setList={handleOrder} animation={150}>
-      {folders.map((folder) => (
-        <FolderItem key={folder.id} data={folder} depth={depth} stylesByFolder={stylesByFolder} />
+    <ReactSortable
+      className={"folders-sortable" + (props.depth > 0 ? " m-nested" : "")}
+      list={props.folders}
+      setList={handleOrder}
+      animation={150}
+    >
+      {props.folders.map((folder) => (
+        <FolderItem
+          key={folder.id}
+          data={folder}
+          depth={props.depth}
+          stylesByFolder={props.stylesByFolder}
+          dispatch={props.dispatch}
+          openFolders={props.openFolders}
+          branchActiveStyleId={props.currentStylePath.has(folder.id) ? props.currentStyleId : null}
+          currentStylePath={
+            props.currentStylePath.has(folder.id) ? props.currentStylePath : emptyIdSet
+          }
+          direction={props.direction}
+          showQuickStyleSize={props.showQuickStyleSize}
+          styleSizeStep={props.styleSizeStep}
+        />
       ))}
     </ReactSortable>
   );
@@ -172,16 +240,22 @@ FolderTree.propTypes = {
   parentId: PropTypes.oneOfType([PropTypes.string, PropTypes.oneOf([null])]),
   depth: PropTypes.number.isRequired,
   stylesByFolder: PropTypes.object.isRequired,
+  dispatch: PropTypes.func.isRequired,
+  openFolders: PropTypes.array.isRequired,
+  currentStyleId: PropTypes.string,
+  currentStylePath: PropTypes.object.isRequired,
+  direction: PropTypes.string,
+  showQuickStyleSize: PropTypes.bool,
+  styleSizeStep: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
 };
 
 const FolderItem = React.memo(function FolderItem(props) {
-  const context = useContext();
   const [dropActive, setDropActive] = React.useState(false);
   const [styleDropTarget, setStyleDropTarget] = React.useState(null);
   const openFolder = React.useCallback((e) => {
     e.stopPropagation();
-    context.dispatch({ type: "setModal", modal: "editFolder", data: props.data });
-  }, [context.dispatch, props.data]);
+    props.dispatch({ type: "setModal", modal: "editFolder", data: props.data });
+  }, [props.dispatch, props.data]);
 
   const handleDragOver = React.useCallback((e) => {
     if (!hasStyleDragData(e)) return;
@@ -205,8 +279,8 @@ const FolderItem = React.memo(function FolderItem(props) {
     setStyleDropTarget(null);
     const styleId = getDraggedStyleId(e);
     if (!styleId) return;
-    context.dispatch({ type: "moveStyleToFolder", id: styleId, folderId: props.data.id || null });
-  }, [context.dispatch, props.data.id]);
+    props.dispatch({ type: "moveStyleToFolder", id: styleId, folderId: props.data.id || null });
+  }, [props.dispatch, props.data.id]);
 
   const styles = props.stylesByFolder.get(props.data.id || "__unsorted__") || [];
   const childFolders = props.data.children || [];
@@ -253,14 +327,14 @@ const FolderItem = React.memo(function FolderItem(props) {
       const { position } = getStyleDropLocation(e);
       setDropActive(false);
       setStyleDropTarget(null);
-      context.dispatch({
+      props.dispatch({
         type: "moveStyleToFolder",
         id: draggedStyleId,
         folderId: props.data.id || null,
         order: getStyleOrder(draggedStyleId, targetStyleId, position),
       });
     },
-    [context.dispatch, getStyleOrder, props.data.id]
+    [props.dispatch, getStyleOrder, props.data.id]
   );
 
   const clearStyleDropTarget = React.useCallback((e) => {
@@ -279,6 +353,7 @@ const FolderItem = React.memo(function FolderItem(props) {
     exportedFolder.name = props.data.name;
     const exportedStyles = styles.map((style) => ({
       name: style.name,
+      textType: style.textType || "inherit",
       textProps: style.textProps,
       prefixes: style.prefixes || [],
       prefixColor: style.prefixColor,
@@ -308,29 +383,37 @@ const FolderItem = React.memo(function FolderItem(props) {
     }
     window.cep.fs.writeFile(pathSelect.data, JSON.stringify(exportedFolder));
     // Plain export done: surface the Ctrl+Click zip shortcut once in a while
-    context.dispatch({ type: "showExportFolderFontTip" });
-  }, [props.data.name, styles, context.dispatch]);
+    props.dispatch({ type: "showExportFolderFontTip" });
+  }, [props.data.name, styles, props.dispatch]);
 
   const duplicateFolder = React.useCallback((e) => {
     e.stopPropagation();
-    context.dispatch({ type: "duplicateFolder", id: props.data.id });
-  }, [context.dispatch, props.data.id]);
+    props.dispatch({ type: "duplicateFolder", id: props.data.id });
+  }, [props.dispatch, props.data.id]);
 
   const addSubfolder = React.useCallback((e) => {
     e.stopPropagation();
-    context.dispatch({ type: "setModal", modal: "editFolder", data: { create: true, parentId: props.data.id } });
-  }, [context.dispatch, props.data.id]);
+    props.dispatch({ type: "setModal", modal: "editFolder", data: { create: true, parentId: props.data.id } });
+  }, [props.dispatch, props.data.id]);
 
   const toggleFolder = React.useCallback(() => {
-    context.dispatch({ type: "toggleFolder", id: props.data.id });
-  }, [context.dispatch, props.data.id]);
+    props.dispatch({ type: "toggleFolder", id: props.data.id });
+  }, [props.dispatch, props.data.id]);
 
-  const isUnsorted = !props.data.id;
-  const isOpen = props.data.id ? context.state.openFolders.includes(props.data.id) : context.state.openFolders.includes("unsorted");
-  const hasActive = context.state.currentStyleId ? !!styles.find((s) => s.id === context.state.currentStyleId) : false;
+  const isOpen = props.data.id
+    ? props.openFolders.includes(props.data.id)
+    : props.openFolders.includes("unsorted");
+  const hasActive = props.branchActiveStyleId
+    ? styles.some((style) => style.id === props.branchActiveStyleId)
+    : false;
   return (
     <div
-      className={"folder-item hostBrdContrast" + (isOpen ? " m-open" : "") + (props.depth ? " m-nested" : "") + (dropActive ? " m-drop-active" : "")}
+      className={
+        "folder-item hostBrdContrast" +
+        (isOpen ? " m-open" : "") +
+        (props.depth ? " m-nested" : "") +
+        (dropActive ? " m-drop-active" : "")
+      }
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleStyleDrop}
@@ -366,7 +449,19 @@ const FolderItem = React.memo(function FolderItem(props) {
         <div className="folder-content">
           {!!childFolders.length && props.data.id && (
             <div className="folder-subfolders hostBrdTopContrast">
-              <FolderTree folders={childFolders} parentId={props.data.id} depth={props.depth + 1} stylesByFolder={props.stylesByFolder} />
+              <FolderTree
+                folders={childFolders}
+                parentId={props.data.id}
+                depth={props.depth + 1}
+                stylesByFolder={props.stylesByFolder}
+                dispatch={props.dispatch}
+                openFolders={props.openFolders}
+                currentStyleId={props.branchActiveStyleId}
+                currentStylePath={props.currentStylePath}
+                direction={props.direction}
+                showQuickStyleSize={props.showQuickStyleSize}
+                styleSizeStep={props.styleSizeStep}
+              />
             </div>
           )}
           <div className={"folder-styles hostBrdTopContrast" + (childFolders.length && props.data.id ? " m-with-subfolders" : "")}>
@@ -374,16 +469,16 @@ const FolderItem = React.memo(function FolderItem(props) {
               {styles.map((style) => (
                 <StyleItem
                   key={style.id}
-                  active={context.state.currentStyleId === style.id}
+                  active={props.branchActiveStyleId === style.id}
                   dropEdge={styleDropTarget?.id === style.id ? styleDropTarget.edge : null}
                   onDragOverStyle={handleStyleItemDragOver}
                   onDropStyle={handleStyleItemDrop}
                   onDragLeaveStyle={clearStyleDropTarget}
                   style={style}
-                  dispatch={context.dispatch}
-                  direction={context.state.direction}
-                  showQuickStyleSize={context.state.showQuickStyleSize}
-                  styleSizeStep={context.state.styleSizeStep}
+                  dispatch={props.dispatch}
+                  direction={props.direction}
+                  showQuickStyleSize={props.showQuickStyleSize}
+                  styleSizeStep={props.styleSizeStep}
                 />
               ))}
               {!styles.length && (
@@ -402,6 +497,13 @@ FolderItem.propTypes = {
   data: PropTypes.object.isRequired,
   depth: PropTypes.number.isRequired,
   stylesByFolder: PropTypes.object.isRequired,
+  dispatch: PropTypes.func.isRequired,
+  openFolders: PropTypes.array.isRequired,
+  branchActiveStyleId: PropTypes.string,
+  currentStylePath: PropTypes.object.isRequired,
+  direction: PropTypes.string,
+  showQuickStyleSize: PropTypes.bool,
+  styleSizeStep: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
 };
 
 // StyleItem deliberately avoids useContext: subscribing to the global context

@@ -14,6 +14,61 @@ const getScaledStyle = (style, textScale) => {
   return scaledStyle;
 };
 
+const resolveStylePointText = (style, fallbackPointText = false) => {
+  if (style?.textType === "point") return true;
+  if (style?.textType === "paragraph") return false;
+  return !!fallbackPointText;
+};
+
+const getNextUsableLineIndex = (lines, startIndex) => {
+  for (let index = Math.max(0, startIndex); index < lines.length; index++) {
+    if (lines[index] && !lines[index].ignore) return index;
+  }
+  return null;
+};
+
+const buildSelectedLayerPayload = ({
+  layerIds = [],
+  lines = [],
+  currentLineIndex = 0,
+  currentStyle = null,
+  textScale = null,
+}) => {
+  const items = [];
+  const lineEntries = [];
+  let lineIndex = Math.max(0, currentLineIndex);
+  let activeStyle = currentStyle;
+
+  for (let layerIndex = 0; layerIndex < layerIds.length; layerIndex++) {
+    const usableLineIndex = getNextUsableLineIndex(lines, lineIndex);
+    if (usableLineIndex === null) break;
+
+    const targetLine = lines[usableLineIndex];
+    const targetStyle = targetLine.usedStyle || targetLine.style || activeStyle;
+    if (targetStyle) activeStyle = targetStyle;
+    items.push({
+      layerId: layerIds[layerIndex],
+      text: targetLine.text,
+      style: getScaledStyle(targetStyle, textScale),
+    });
+    lineEntries.push({
+      lineIndex: usableLineIndex,
+      styleId: targetStyle?.id || null,
+    });
+    lineIndex = usableLineIndex + 1;
+  }
+
+  const nextLineIndex = getNextUsableLineIndex(lines, lineIndex);
+  const lastEntry = lineEntries[lineEntries.length - 1];
+  return {
+    items,
+    lineEntries,
+    nextLineIndex: nextLineIndex === null
+      ? (lastEntry ? lastEntry.lineIndex : currentLineIndex)
+      : nextLineIndex,
+  };
+};
+
 const buildStoredSelectionPayload = ({
   storedSelections = [],
   lines = [],
@@ -66,4 +121,9 @@ const buildStoredSelectionPayload = ({
   return { texts, styles: layerStyles };
 };
 
-export { getScaledStyle, buildStoredSelectionPayload };
+export {
+  getScaledStyle,
+  resolveStylePointText,
+  buildSelectedLayerPayload,
+  buildStoredSelectionPayload,
+};

@@ -91,7 +91,7 @@ Styles can be created manually or copied from an existing Photoshop text layer. 
 - text color and outline/stroke settings;
 - Arabic and Middle Eastern typography offsets.
 
-Styles can be grouped into nested folders, duplicated, reordered, and prioritized by the active folder. Automatic prefix matching can also be disabled per style without removing it from the library. This makes it practical to keep several series, teams, or language conventions in one setup.
+Styles can be grouped into nested folders, duplicated, and reordered. By default, automatic prefix matching only uses styles from the exact folder containing the active style, so script tags cannot switch to another folder. This isolation can be disabled in **Settings → Behavior**, and automatic prefix matching can also be disabled per style.
 
 ### Placement, centering, and batch insertion
 
@@ -99,11 +99,12 @@ Draw a Photoshop selection around a bubble with your preferred selection tool. T
 
 - create a styled text layer from the active script line and advance automatically;
 - replace the text and style of one or more selected text layers;
+- distribute consecutive script lines across selected text layers in selection order;
 - insert only the text while preserving the layer's current style;
 - center one or more selected text layers in the selection and optionally resize their text boxes;
 - keep configurable internal padding between the text and the bubble edge;
 - capture multiple bubbles and create consecutive text layers in one action;
-- create either point text or paragraph text layers.
+- create either point text or paragraph text layers, globally or with a per-style override.
 
 Font size controls can update the active layer without opening Photoshop's Character panel. If no selection exists during alignment, TypeR can also try to detect the surrounding bubble with a contiguous Magic Wand selection.
 
@@ -219,6 +220,7 @@ Every binding is customizable in **Settings → Shortcuts**. `Win` is TypeR's la
 | Select the previous style | Not assigned |
 | Select the next style | Not assigned |
 | Apply only the active style to the selected text layer | Not assigned |
+| Paste consecutive lines into selected text layers | Not assigned |
 | Remove the last multi-bubble selection | Not assigned |
 | Clear all multi-bubble selections | Not assigned |
 | Toggle TextShapeR | Not assigned |
