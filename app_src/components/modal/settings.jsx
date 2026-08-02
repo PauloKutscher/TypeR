@@ -11,6 +11,7 @@ import { EDITOR_THEME_PRESETS, getEditorThemePreviewColors } from "../../themePr
 import Shortcut from "./shortCut";
 import FontScanPromo from "./fontScanPromo";
 import { shortcutCommands } from "../../shortcutCommands";
+import { isPerfDebugEnabled, setPerfDebugEnabled, reportPerfDebug, resetPerfDebug } from "../../perfDebug";
 
 // Interactive layout mockup: canvas px per real panel px
 const LAYOUT_CANVAS_SCALE = 0.3;
@@ -25,6 +26,7 @@ const LAYOUT_BLOCK_ELEMENTS = {
 const SettingsModal = React.memo(function SettingsModal() {
   const context = useContext();
   const [activeTab, setActiveTab] = React.useState("general");
+  const [perfDebug, setPerfDebug] = React.useState(isPerfDebugEnabled);
   const [pastePointText, setPastePointText] = React.useState(context.state.pastePointText ? "1" : "");
   const [ignoreLinePrefixes, setIgnoreLinePrefixes] = React.useState(
     context.state.ignoreLinePrefixes.join("\n")
@@ -844,6 +846,26 @@ const SettingsModal = React.memo(function SettingsModal() {
     setShowDeleteStates(false);
   };
 
+  // Performance logger: writes its own flag, never goes through the panel
+  // storage, so it can be switched on even to diagnose the storage itself
+  const changePerfDebug = (e) => {
+    setPerfDebug(setPerfDebugEnabled(e.target.checked));
+  };
+
+  const showPerfReport = () => {
+    const report = reportPerfDebug();
+    const slowest = report.hostCalls[0];
+    nativeAlert(
+      [
+        `${locale.settingsPerfDebugReportClicks || "Click to paint"}: ${report.clickToPaint.avgMs}ms (max ${report.clickToPaint.worstMs}ms, ${report.clickToPaint.samples})`,
+        `${locale.settingsPerfDebugReportHost || "Slowest Photoshop call"}: ${slowest ? `${slowest.name} ${slowest.avgMs}ms x${slowest.calls}` : "-"}`,
+        `${locale.settingsPerfDebugReportFrames || "Long frames"}: ${report.longFrames.count} (max ${report.longFrames.worstMs}ms)`,
+      ].join("\n"),
+      locale.settingsPerfDebugReport || "Performance report",
+      false
+    );
+  };
+
   const tabs = [
     { id: "general", label: locale.settingsTabGeneral || "General", icon: FiSettings },
     { id: "text", label: locale.settingsTabText || "Text", icon: FiType },
@@ -1604,6 +1626,28 @@ const SettingsModal = React.memo(function SettingsModal() {
               <div className="field-descr">
                 {locale.settingsShapeTuningHint || "Share the line-break style TypeR learned from your feedback as a small .json file. Importing replaces your current learning."}
               </div>
+            </div>
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupDiagnostics || "Diagnostics"}</div>
+              <div className="settings-checkbox-grid">
+                {renderToggle(
+                  perfDebug,
+                  changePerfDebug,
+                  locale.settingsPerfDebugLabel || "Performance logger",
+                  locale.settingsPerfDebugHint ||
+                    "Measures Photoshop calls, redraws and click latency. Leave it off unless the panel feels slow."
+                )}
+              </div>
+              {perfDebug && (
+                <div className="field" style={{ display: "flex", gap: 8 }}>
+                  <button className="topcoat-button--large" onClick={showPerfReport}>
+                    {locale.settingsPerfDebugReport || "Performance report"}
+                  </button>
+                  <button className="topcoat-button--large" onClick={resetPerfDebug}>
+                    {locale.settingsPerfDebugReset || "Reset counters"}
+                  </button>
+                </div>
+              )}
             </div>
             <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupDanger || "Danger zone"}</div>

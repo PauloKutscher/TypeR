@@ -6,12 +6,13 @@ import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
 
-import { csInterface, locale, nativeConfirm, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, isPanelIdle, notePanelActivity, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, getUserFonts, refreshUserFonts, scrollToLine, parseMarkdownRuns } from "../../utils";
+import { csInterface, locale, nativeConfirm, setActiveLayerText, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, isPanelIdle, isPanelInteracting, notePanelActivity, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, getUserFonts, refreshUserFonts, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { buildStoredSelectionPayload, getScaledStyle } from "../../textLayerPayload";
 import { applyLinesToSelectedLayers, withShortcutHint } from "../../shortcutCommands";
 import { generateTextShapeRVariants, recordTextShapeRFeedback, setTextShapeRTuning, visibleWidth } from "../../textShapeR";
 import { createFontPreviewRegistry, getFontPreviewFamily } from "../../fontPreview";
+import { notePerfRender } from "../../perfDebug";
 import TextShapeRFitPreview from "../textShapeRFitPreview";
 
 const normalizeLayerText = (text) => String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
@@ -23,6 +24,25 @@ const getLayerSourceKey = (source) => JSON.stringify({
   paragraphStyleRange: source.style?.textProps?.layerText?.paragraphStyleRange || null,
   stroke: source.style?.stroke || null,
 });
+
+// Detected bubbles are memoized per layer so revisiting a layer never pays for
+// a second wand scan. Bounded: a long session on a busy chapter must not grow
+// this map forever, and the oldest entries are the least likely to come back.
+const BUBBLE_CACHE_LIMIT = 120;
+
+// Bounds are rounded so sub-pixel jitter in Photoshop's reported layer bounds
+// does not invalidate a perfectly good scan, while a real move or resize does
+const getBubbleCacheKey = (layerId, bounds, fallbackKey) => {
+  if (layerId == null) return `bubble:${fallbackKey}`;
+  if (!bounds) return `bubble:${layerId}`;
+  const round = (value) => Math.round(Number(value) || 0);
+  return `bubble:${layerId}:${round(bounds.left)},${round(bounds.top)},${round(bounds.width)},${round(bounds.height)}`;
+};
+
+const rememberBubbleShape = (cache, key, shape) => {
+  if (cache.size >= BUBBLE_CACHE_LIMIT) cache.delete(cache.keys().next().value);
+  cache.set(key, shape);
+};
 
 const getActiveTextLayerSource = (callback) => {
   csInterface.evalScript("getActiveLayerText()", (result) => {
@@ -48,7 +68,13 @@ const getActiveTextLayerSource = (callback) => {
   });
 };
 
+// Shared fallbacks: a fresh `{}` per render would invalidate every memo that
+// depends on the text style, and rebuilding the font-preview registry on each
+// render is what made the whole panel repaint on unrelated dispatches
+const emptyTextStyle = {};
+
 const PreviewBlock = React.memo(function PreviewBlock() {
+  notePerfRender("PreviewBlock");
   const context = useContext();
   const uiVisible = context.state.uiLayout?.visible || {};
   const showPreviewMainControls =
@@ -60,8 +86,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   }, [context.dispatch]);
   const style = context.state.currentStyle || {};
   const line = context.state.currentLine || { text: "" };
-  const textStyle = style.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {};
-  const styleObject = getStyleObject(textStyle);
+  const textStyle = style.textProps?.layerText?.textStyleRange?.[0]?.textStyle || emptyTextStyle;
+  const styleObject = React.useMemo(() => getStyleObject(textStyle), [textStyle]);
   const [inlineLayerSource, setInlineLayerSource] = React.useState({
     text: "",
     style: null,
@@ -77,6 +103,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const inlineLastRefreshAt = React.useRef(0);
   const inlineShapePending = React.useRef(false);
   const inlineShapeKey = React.useRef("");
+  const inlineLayerBoundsRef = React.useRef(null);
+  const bubbleShapeCache = React.useRef(new Map());
   const inlineShapeSettle = React.useRef({ hash: "", timer: null });
   const [inlineSelectionShape, setInlineSelectionShape] = React.useState(null);
   const batchOrderRef = React.useRef([]);
@@ -88,8 +116,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const [batchRun, setBatchRun] = React.useState(null);
   batchRunRef.current = batchRun;
   batchSelectionRef.current = batchSelection;
-  const inlineTextStyle = inlineLayerSource.style?.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {};
-  const inlineStyleObject = getStyleObject(inlineTextStyle);
+  const inlineTextStyle = inlineLayerSource.style?.textProps?.layerText?.textStyleRange?.[0]?.textStyle || emptyTextStyle;
+  const inlineStyleObject = React.useMemo(() => getStyleObject(inlineTextStyle), [inlineTextStyle]);
   const [installedFonts, setInstalledFonts] = React.useState(getUserFonts);
   React.useEffect(() => {
     const cachedFonts = getUserFonts();
@@ -99,18 +127,23 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     }
     refreshUserFonts(setInstalledFonts);
   }, []);
-  const fontPreviewRegistry = React.useMemo(
-    () => createFontPreviewRegistry(installedFonts, [textStyle, inlineTextStyle], 0, "preview"),
-    [installedFonts, textStyle, inlineTextStyle]
-  );
-  const previewStyleObject = {
+  const registryRef = React.useRef(null);
+  const fontPreviewRegistry = React.useMemo(() => {
+    const next = createFontPreviewRegistry(installedFonts, [textStyle, inlineTextStyle], 0, "preview");
+    // Keeping the previous object when the CSS is identical avoids re-injecting
+    // the <style> block, which forces a full style recalculation of the panel
+    if (registryRef.current && registryRef.current.css === next.css) return registryRef.current;
+    registryRef.current = next;
+    return next;
+  }, [installedFonts, textStyle, inlineTextStyle]);
+  const previewStyleObject = React.useMemo(() => ({
     ...styleObject,
     fontFamily: getFontPreviewFamily(textStyle, fontPreviewRegistry),
-  };
-  const inlinePreviewStyleObject = {
+  }), [styleObject, textStyle, fontPreviewRegistry]);
+  const inlinePreviewStyleObject = React.useMemo(() => ({
     ...inlineStyleObject,
     fontFamily: getFontPreviewFamily(inlineTextStyle, fontPreviewRegistry),
-  };
+  }), [inlineStyleObject, inlineTextStyle, fontPreviewRegistry]);
   const markdownEnabled = context.state.interpretMarkdown !== false;
   // Calibrate measure units against the layer's real rendered pixels: the
   // current text and its bounds give px-per-unit and px-per-line, which lets
@@ -198,6 +231,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       if (!source?.text) {
         inlineSourceKey.current = "";
         inlineLayerIdRef.current = null;
+        inlineLayerBoundsRef.current = null;
         setInlineLayerSource((current) => {
           const error = locale.textShapeRLayerNoText || "Select a Photoshop text layer first.";
           if (!current.text && current.error === error && !current.loading) return current;
@@ -206,6 +240,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         return;
       }
       inlineLayerIdRef.current = source.layerId;
+      inlineLayerBoundsRef.current = source.bounds || null;
       if (source.key === inlineSourceKey.current) {
         setInlineLayerSource((current) => (current.loading || current.error ? { ...current, loading: false, error: "" } : current));
         return;
@@ -235,7 +270,14 @@ const PreviewBlock = React.memo(function PreviewBlock() {
 
   const refreshInlineSelectionShape = React.useCallback((force = false) => {
     if (inlineShapePending.current) return;
-    if (force) inlineShapeKey.current = "";
+    if (force) {
+      // Explicit refresh: the user is telling us the detection is stale, so
+      // the memoized bubble for this layer must not short-circuit the rescan
+      inlineShapeKey.current = "";
+      bubbleShapeCache.current.delete(
+        getBubbleCacheKey(inlineLayerIdRef.current, inlineLayerBoundsRef.current, inlineSourceKey.current)
+      );
+    }
     inlineShapePending.current = true;
     getCurrentSelection((selection) => {
       if (selection && selection.width && selection.height) {
@@ -304,29 +346,44 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       // (same detection as align-without-selection). Cached per layer ID, not
       // per layer content: the bubble doesn't move when the text changes, so
       // applying a shape must not pay for a new wand scan.
-      const bubbleKey = `bubble:${inlineLayerIdRef.current != null ? inlineLayerIdRef.current : inlineSourceKey.current}`;
+      const bubbleKey = getBubbleCacheKey(inlineLayerIdRef.current, inlineLayerBoundsRef.current, inlineSourceKey.current);
       if (bubbleKey === inlineShapeKey.current) {
         inlineShapePending.current = false;
+        return;
+      }
+      // Layers already scanned in this session are served from memory. Each
+      // wand scan is one Photoshop history state, and on a full-resolution page
+      // every state holds a snapshot: without this, walking back and forth
+      // through the layers of a page churned the scratch file until the whole
+      // session crawled. Keyed on the layer bounds too, so a moved or resized
+      // layer is rescanned, and the refresh button clears the entry.
+      const memoized = bubbleShapeCache.current.get(bubbleKey);
+      if (memoized !== undefined) {
+        inlineShapePending.current = false;
+        inlineShapeKey.current = bubbleKey;
+        setInlineSelectionShape(memoized);
         return;
       }
       csInterface.evalScript(`getActiveLayerBubbleShape(${JSON.stringify({ samples: 21, tolerance: 20 })})`, (result) => {
         inlineShapePending.current = false;
         try {
           const data = JSON.parse(result || "{}");
+          // A transient "a selection is active" answer says nothing about the
+          // bubble: never memoize it, or the layer stays shapeless afterwards
           if (data && data.error === "hasSelection") return;
           // Cache failures too: retrying the wand on every poll would spam
           // the document with temporary selections
           inlineShapeKey.current = bubbleKey;
-          if (!data || data.error || !data.bounds) {
-            setInlineSelectionShape((current) => (current ? null : current));
-            return;
-          }
-          setInlineSelectionShape({
-            profile: data,
-            width: data.bounds.width,
-            height: data.bounds.height,
-            source: "bubble",
-          });
+          const shape = !data || data.error || !data.bounds
+            ? null
+            : {
+              profile: data,
+              width: data.bounds.width,
+              height: data.bounds.height,
+              source: "bubble",
+            };
+          rememberBubbleShape(bubbleShapeCache.current, bubbleKey, shape);
+          setInlineSelectionShape((current) => (shape || current ? shape : current));
         } catch (error) {}
       });
     });
@@ -416,6 +473,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       if (isPhotoshopSelectEvent(event)) refreshBatchSelection();
     });
     const fallbackTimer = setInterval(() => {
+      // Skip while the user is clicking inside the panel: this round-trip runs
+      // on the same Photoshop thread that has to deliver the click
+      if (isPanelInteracting()) return;
       if (!document.hidden && !isHostActionPending() && !hasReceivedPhotoshopEvents()) {
         refreshBatchSelection();
       }
@@ -451,8 +511,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     // Fallback polling for hosts where the event bridge stays silent; slows
     // down to a keep-alive once real Photoshop events are flowing.
     const pollTimer = setInterval(() => {
-      // Never queue refresh work behind a running paste/align action
-      if (document.hidden || isHostActionPending()) return;
+      // Never queue refresh work behind a running paste/align action, nor in
+      // the middle of a click the panel is still waiting to be handled
+      if (document.hidden || isHostActionPending() || isPanelInteracting()) return;
       // Panel idle for minutes (Photoshop probably in the background): drop
       // to a slow keep-alive so the host is not polled for hours. Any event
       // or interaction refreshes immediately through the other paths.
@@ -577,6 +638,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
 
   const checkForSelectionChange = React.useCallback(() => {
     if (!context.state.multiBubbleMode || context.state.modalType || document.hidden || selectionCheckPending.current || isHostActionPending()) return;
+    // A click just happened inside the panel: let Photoshop's main thread
+    // deliver it before spending a round-trip on selection polling
+    if (isPanelInteracting()) return;
     // Idle backoff: 5 polls per second only while the user is actually
     // working; a first selection after a long pause restores the fast rate
     if (isPanelIdle() && Date.now() - selectionPollLastAt.current < 1000) return;

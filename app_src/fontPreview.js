@@ -20,29 +20,72 @@ const getTextStyleFontKey = (textStyle = {}) => {
   return fontStyle ? `${fontName}|${fontStyle}` : fontName;
 };
 
+// A typesetter's Photoshop reports thousands of installed fonts. Normalizing
+// all of them (4 regex-based passes per entry) on every lookup used to cost
+// tens of milliseconds per style change, which is what made clicking +/- on a
+// style size feel sluggish. Normalize each font list once, then reuse it.
+const normalizedFontsCache = typeof WeakMap === "function" ? new WeakMap() : null;
+const lookupCache = typeof WeakMap === "function" ? new WeakMap() : null;
+
+const getNormalizedFonts = (fonts) => {
+  const list = fonts || [];
+  const cached = normalizedFontsCache && normalizedFontsCache.get(list);
+  if (cached) return cached;
+  const normalized = list.map((font) => ({
+    font,
+    postScriptName: normalizeFontName(font.postScriptName),
+    name: normalizeFontName(font.name),
+    family: normalizeFontName(font.family),
+    style: normalizeFontStyle(font.style),
+  }));
+  if (normalizedFontsCache) normalizedFontsCache.set(list, normalized);
+  return normalized;
+};
+
+const resolveInstalledFont = (fonts, postScriptName, fontName, fontStyle) => {
+  const entries = getNormalizedFonts(fonts);
+  let best;
+  let bestScore = 0;
+  // Single pass keeping the first best match: identical to the previous
+  // rank-then-sort, since ties were already resolved by list order
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    let score = 0;
+
+    if (postScriptName && entry.postScriptName === postScriptName) {
+      score = fontStyle && entry.style && entry.style !== fontStyle ? 70 : 100;
+    }
+    if (fontName && entry.name === fontName) score = Math.max(score, fontStyle && entry.style === fontStyle ? 90 : 60);
+    if (fontName && entry.family === fontName) score = Math.max(score, fontStyle && entry.style === fontStyle ? 80 : 50);
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = entry.font;
+      if (score === 100) break;
+    }
+  }
+  return bestScore ? best : undefined;
+};
+
 const findInstalledFont = (fonts, textStyle) => {
   const postScriptName = normalizeFontName(textStyle.fontPostScriptName);
   const fontName = normalizeFontName(textStyle.fontName);
   const fontStyle = normalizeFontStyle(textStyle.fontStyleName);
+  if (!postScriptName && !fontName) return undefined;
 
-  const rankedFonts = (fonts || []).map((font, index) => {
-    const installedPostScriptName = normalizeFontName(font.postScriptName);
-    const installedName = normalizeFontName(font.name);
-    const installedFamily = normalizeFontName(font.family);
-    const installedStyle = normalizeFontStyle(font.style);
-    let score = 0;
+  const list = fonts || [];
+  if (!lookupCache) return resolveInstalledFont(list, postScriptName, fontName, fontStyle);
 
-    if (postScriptName && installedPostScriptName === postScriptName) {
-      score = fontStyle && installedStyle && installedStyle !== fontStyle ? 70 : 100;
-    }
-    if (fontName && installedName === fontName) score = Math.max(score, fontStyle && installedStyle === fontStyle ? 90 : 60);
-    if (fontName && installedFamily === fontName) score = Math.max(score, fontStyle && installedStyle === fontStyle ? 80 : 50);
-
-    return { font, index, score };
-  });
-
-  rankedFonts.sort((a, b) => b.score - a.score || a.index - b.index);
-  return rankedFonts[0]?.score ? rankedFonts[0].font : undefined;
+  let cache = lookupCache.get(list);
+  if (!cache) {
+    cache = new Map();
+    lookupCache.set(list, cache);
+  }
+  const cacheKey = `${postScriptName}|${fontName}|${fontStyle}`;
+  if (cache.has(cacheKey)) return cache.get(cacheKey);
+  const resolved = resolveInstalledFont(list, postScriptName, fontName, fontStyle);
+  cache.set(cacheKey, resolved);
+  return resolved;
 };
 
 const quoteFontFamily = (value) => `"${escapeCssString(value)}"`;

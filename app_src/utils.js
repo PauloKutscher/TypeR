@@ -115,10 +115,24 @@ const notePanelActivity = () => {
 };
 const isPanelIdle = () => Date.now() - lastPanelActivityAt > PANEL_IDLE_AFTER;
 
+// Every evalScript runs on Photoshop's main thread, and that same thread feeds
+// mouse/keyboard events to the panel's CEF window. Background polling firing in
+// the middle of a click is what makes buttons (style selection, quick size,
+// folder toggles) feel unresponsive. Any direct interaction opens a short
+// window during which low-priority pollers stay quiet and let the UI breathe.
+const PANEL_INTERACTION_WINDOW = 350;
+let lastPanelInteractionAt = 0;
+const notePanelInteraction = () => {
+  lastPanelInteractionAt = Date.now();
+  lastPanelActivityAt = lastPanelInteractionAt;
+};
+const isPanelInteracting = () => Date.now() - lastPanelInteractionAt < PANEL_INTERACTION_WINDOW;
+
 if (window.addEventListener) {
-  window.addEventListener("pointerdown", notePanelActivity, true);
+  window.addEventListener("pointerdown", notePanelInteraction, true);
+  window.addEventListener("pointerup", notePanelInteraction, true);
   window.addEventListener("keydown", notePanelActivity, true);
-  window.addEventListener("wheel", notePanelActivity, { capture: true, passive: true });
+  window.addEventListener("wheel", notePanelInteraction, { capture: true, passive: true });
   window.addEventListener("focus", notePanelActivity);
 }
 
@@ -1185,7 +1199,36 @@ const foregroundWatcher = {
   time: 0,
   started: false,
   restartTimer: null,
+  child: null,
+  stopped: false,
 };
+
+// The watcher is a real OS process, and CEP does not clean it up for us: the
+// panel reloads on several settings changes and is torn down when the user
+// closes it, so without this every reload left another hidden powershell.exe
+// polling GetForegroundWindow four times a second for the rest of the
+// Photoshop session. A few of those is enough to make a long session drag.
+const stopForegroundWatcher = () => {
+  foregroundWatcher.stopped = true;
+  if (foregroundWatcher.restartTimer) {
+    clearTimeout(foregroundWatcher.restartTimer);
+    foregroundWatcher.restartTimer = null;
+  }
+  const child = foregroundWatcher.child;
+  foregroundWatcher.child = null;
+  foregroundWatcher.started = false;
+  if (!child) return;
+  try {
+    child.kill();
+  } catch (e) {
+    // A watcher that refuses to die must not block the panel from unloading
+  }
+};
+
+if (window.addEventListener) {
+  window.addEventListener("beforeunload", stopForegroundWatcher);
+  window.addEventListener("unload", stopForegroundWatcher);
+}
 
 const toBase64Utf16le = (str) => {
   let bin = "";
@@ -1197,7 +1240,7 @@ const toBase64Utf16le = (str) => {
 };
 
 const startForegroundWatcher = () => {
-  if (foregroundWatcher.started) return;
+  if (foregroundWatcher.started || foregroundWatcher.stopped) return;
   if (!navigator.platform || navigator.platform.indexOf("Win") !== 0) return;
   const nodeRequire = (window.cep_node && window.cep_node.require) || (typeof window.require === "function" ? window.require : null);
   if (!nodeRequire) return;
@@ -1222,6 +1265,7 @@ const startForegroundWatcher = () => {
       windowsHide: true,
       stdio: ["ignore", "pipe", "ignore"],
     });
+    foregroundWatcher.child = child;
     child.stdout.on("data", (data) => {
       const lines = data.toString().split(/\r?\n/).filter((line) => line.length);
       if (lines.length) {
@@ -1230,6 +1274,8 @@ const startForegroundWatcher = () => {
       }
     });
     const scheduleRestart = () => {
+      if (foregroundWatcher.stopped) return;
+      foregroundWatcher.child = null;
       foregroundWatcher.started = false;
       foregroundWatcher.time = 0;
       if (foregroundWatcher.restartTimer) return;
@@ -1408,4 +1454,4 @@ const scanPsdFonts = (path, callback) => {
   );
 };
 
-export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, notePanelActivity, isPanelIdle, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
+export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, notePanelActivity, isPanelIdle, notePanelInteraction, isPanelInteracting, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };

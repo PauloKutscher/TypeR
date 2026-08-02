@@ -229,6 +229,7 @@ const EditStyleModal = React.memo(function EditStyleModal() {
                 textProps={textProps}
                 setTextProps={changeTextProps}
                 styleSizeStep={context.state.styleSizeStep}
+                middleEast={context.state.middleEast}
               />
             </div>
             <div className="field hostBrdTopContrast">
@@ -530,7 +531,7 @@ const StyleDetails = React.memo(function StyleDetails(props) {
           </div>
         </div>
       </div>
-      {context.state.middleEast && (
+      {props.middleEast && (
         <div className="style-edit-props-row">
           <div className="style-edit-props-col">
             <div className="style-edit-props-icon double" title={locale.editStyleDiacXOffset}>
@@ -706,6 +707,7 @@ StyleDetails.propTypes = {
   textProps: PropTypes.object.isRequired,
   setTextProps: PropTypes.func.isRequired,
   styleSizeStep: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+  middleEast: PropTypes.bool,
 };
 
 export default EditStyleModal;

@@ -9,6 +9,7 @@ import { applyEditorTheme } from "./lib/themeManager";
 import { getDefaultShortcuts } from "./shortcutCommands";
 import { getStoredSelectionLineIndex } from "./multiBubbleHistory";
 import { getAutomaticTagStyles } from "./folderUtils";
+import { perfMeasure } from "./perfDebug";
 
 const storage = readStorage();
 const storeFields = [
@@ -270,7 +271,7 @@ if (!Array.isArray(initialState.tabs) || !initialState.tabs.length) {
   initialState.storedSelections = storage.data?.storedSelections || [];
 }
 
-const reducer = (state, action) => {
+const baseReducer = (state, action) => {
   let thenScroll = false;
   let thenSelectStyle = false;
   let forceStylePrefixRefresh = false;
@@ -1406,6 +1407,11 @@ const reducer = (state, action) => {
 
   return newState;
 };
+
+// Zero-cost wrapper while the profiler is off: it only times the reducer when
+// the perf logger has been enabled from the settings
+const reducer = (state, action) =>
+  perfMeasure("dispatch", (action && action.type) || "init", () => baseReducer(state, action));
 
 const Context = React.createContext();
 const useContext = () => React.useContext(Context);

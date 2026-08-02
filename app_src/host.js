@@ -121,7 +121,12 @@ var _hostState = {
   },
   lastOpenedDocId: null,
   suspendedRun: null,
+  pathScanFails: 0,
+  pathScanBackoffAt: 0,
 };
+
+// How long the fast path-based shape scan stays disabled after 3 failures
+var _PATH_SCAN_RETRY_MS = 3 * 60 * 1000;
 
 // Bubble detection and outline sampling fire dozens of selection, channel
 // and modify operations, and Photoshop records every one of them as a
@@ -2413,9 +2418,22 @@ function _deleteWorkPath() {
 // legacy fallback need it back. Everything risky runs through ActionManager
 // with DialogModes.NO - a host that refuses the path conversion fails
 // silently into the legacy sampler instead of popping alerts, and after 3
-// failures the fast path stops trying for the session.
+// failures the fast path backs off for a while.
+//
+// The back-off is timed, not permanent: the legacy sampler costs ~60 Photoshop
+// operations per scan against ~4 here, so a session that tripped the counter on
+// three transient failures (a locked layer, a busy document, a scan racing an
+// undo) used to stay 15x slower until Photoshop restarted - the single biggest
+// cause of "TypeR gets slower the longer it runs". Retrying every few minutes
+// costs one cheap probe and restores the fast path as soon as the host is happy
+// again.
 function _sampleSelectionShapeViaPath(bounds, sampleCount, restoreSelection) {
-  if ((_hostState.pathScanFails || 0) >= 3) return null;
+  if ((_hostState.pathScanFails || 0) >= 3) {
+    var now = new Date().getTime();
+    if (now - (_hostState.pathScanBackoffAt || 0) < _PATH_SCAN_RETRY_MS) return null;
+    // Cooldown elapsed: allow one probe. A failure re-arms the back-off.
+    _hostState.pathScanFails = 2;
+  }
   var doc = app.activeDocument;
   // Never clobber a work path the user is keeping around
   if (_findWorkPath(doc)) return null;
@@ -2466,6 +2484,9 @@ function _sampleSelectionShapeViaPath(bounds, sampleCount, restoreSelection) {
   } catch (removeError) {}
   if (!rows) {
     _hostState.pathScanFails = (_hostState.pathScanFails || 0) + 1;
+    if (_hostState.pathScanFails >= 3) {
+      _hostState.pathScanBackoffAt = new Date().getTime();
+    }
     _hostState.lastPathScanError = failure;
     return null;
   }

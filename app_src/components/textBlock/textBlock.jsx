@@ -7,6 +7,7 @@ import { FiArrowRightCircle, FiTarget } from "react-icons/fi";
 import config from "../../config";
 import { locale, setActiveLayerText, resizeTextArea, scrollToLine, openFile, convertHtmlToMarkdown, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
+import { notePerfRender } from "../../perfDebug";
 
 const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -68,6 +69,7 @@ LineItem.propTypes = {
 };
 
 const TextBlock = React.memo(function TextBlock() {
+  notePerfRender("TextBlock");
   const context = useContext();
   const direction = context.state.direction || "ltr";
   const markdownEnabled = context.state.interpretMarkdown !== false;

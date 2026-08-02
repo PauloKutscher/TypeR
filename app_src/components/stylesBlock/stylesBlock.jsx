@@ -14,11 +14,13 @@ import { useContext } from "../../context";
 import { buildFolderTree } from "../../folderUtils";
 import { collectFontRefs, exportZipWithFonts } from "../../fontFileExport";
 import { createFontPreviewRegistry, getFontPreviewFamily } from "../../fontPreview";
+import { notePerfRender } from "../../perfDebug";
 
 const FontPreviewContext = React.createContext({ aliases: {}, css: "", revision: 0 });
 const emptyIdSet = new Set();
 
 const StylesBlock = React.memo(function StylesBlock() {
+  notePerfRender("StylesBlock");
   const context = useContext();
   const fontTextStyles = React.useMemo(
     () => (context.state.styles || []).map((style) => style.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {}),

@@ -1,6 +1,6 @@
 import React from "react";
 
-import { csInterface, getHotkeyPressed, isHostActionPending, isPanelIdle, notePanelActivity } from "./utils";
+import { csInterface, getHotkeyPressed, isHostActionPending, isPanelIdle, isPanelInteracting, notePanelActivity } from "./utils";
 import { useContext } from "./context";
 import { shortcutCommands } from "./shortcutCommands";
 
@@ -78,6 +78,10 @@ const HotkeysListner = React.memo(function HotkeysListner() {
       // Back off while a paste/align/apply runs: polling would queue behind it
       // in the ExtendScript engine and delay the action's completion
       if (contextRef.current.state.modalType || isFormFieldActive() || hotkeyPollPendingRef.current || isHostActionPending() || document.hidden) return;
+      // The user is clicking inside the panel: a host round-trip right now
+      // would land on Photoshop's main thread while it should be delivering
+      // the click, which is exactly what made every button feel laggy
+      if (isPanelInteracting()) return;
       if (isPanelIdle() && Date.now() - lastPollAtRef.current < idleIntervalTime) return;
       lastPollAtRef.current = Date.now();
       hotkeyPollPendingRef.current = true;
