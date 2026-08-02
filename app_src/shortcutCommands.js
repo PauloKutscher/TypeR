@@ -5,6 +5,7 @@ import {
   createTextLayersInStoredSelections,
   deselectDocument,
   getSelectedTextLayers,
+  getTypeRSelectionSnapshot,
   locale,
   nativeAlert,
   setActiveLayerText,
@@ -12,7 +13,51 @@ import {
 } from "./utils";
 import { buildSelectedLayerPayload, buildStoredSelectionPayload, getScaledStyle } from "./textLayerPayload";
 
-const createInSelection = (ctx) => {
+const applyLinesToLayers = (ctx, layers, preferredOrder = []) => {
+  const selectedIds = layers
+    .map((layer) => layer.id)
+    .filter((id) => typeof id === "number");
+  const orderedIds = preferredOrder
+    .filter((id) => selectedIds.indexOf(id) !== -1)
+    .concat(selectedIds.filter((id) => preferredOrder.indexOf(id) === -1));
+
+  if (orderedIds.length < 2) {
+    nativeAlert(locale.errorSelectMultipleTextLayers, locale.errorTitle, true);
+    return;
+  }
+
+  const payload = buildSelectedLayerPayload({
+    layerIds: orderedIds,
+    lines: ctx.state.lines,
+    currentLineIndex: ctx.state.currentLineIndex,
+    currentStyle: ctx.state.currentStyle,
+    textScale: ctx.state.textScale,
+  });
+  if (payload.items.length < 2) {
+    nativeAlert(locale.errorNotEnoughLinesForMultiPaste, locale.errorTitle, true);
+    return;
+  }
+
+  setSelectedTextLayers(payload.items, ctx.state.direction, (ok) => {
+    if (!ok) return;
+    ctx.dispatch({
+      type: "commitLineBatch",
+      entries: payload.lineEntries,
+      nextLineIndex: payload.nextLineIndex,
+    });
+    if (payload.items.length < orderedIds.length) {
+      nativeAlert(
+        locale.multiPastePartial
+          .replace("{applied}", payload.items.length)
+          .replace("{selected}", orderedIds.length),
+        locale.warningTitle,
+        true
+      );
+    }
+  }, orderedIds);
+};
+
+const pasteInSelection = (ctx, preferredOrder = []) => {
   const storedSelections = ctx.state.storedSelections || [];
 
   if (ctx.state.multiBubbleMode && storedSelections.length > 0) {
@@ -43,18 +88,25 @@ const createInSelection = (ctx) => {
     return;
   }
 
-  const line = ctx.state.currentLine || { text: "" };
-  const style = getScaledStyle(ctx.state.currentStyle, ctx.state.textScale);
-  createTextLayerInSelection(
-    line.text,
-    style,
-    ctx.state.pastePointText,
-    ctx.state.internalPadding || 0,
-    ctx.state.direction,
-    (ok) => {
-      if (ok) ctx.dispatch({ type: "nextLine", add: true });
+  getTypeRSelectionSnapshot(({ selection, layers }) => {
+    if (!selection && layers.length >= 2) {
+      applyLinesToLayers(ctx, layers, preferredOrder);
+      return;
     }
-  );
+
+    const line = ctx.state.currentLine || { text: "" };
+    const style = getScaledStyle(ctx.state.currentStyle, ctx.state.textScale);
+    createTextLayerInSelection(
+      line.text,
+      style,
+      ctx.state.pastePointText,
+      ctx.state.internalPadding || 0,
+      ctx.state.direction,
+      (ok) => {
+        if (ok) ctx.dispatch({ type: "nextLine", add: true });
+      }
+    );
+  });
 };
 
 const applyLineAndStyle = (ctx) => {
@@ -74,47 +126,7 @@ const insertLineText = (ctx) => {
 
 const applyLinesToSelectedLayers = (ctx, preferredOrder = []) => {
   getSelectedTextLayers((layers) => {
-    const selectedIds = layers
-      .map((layer) => layer.id)
-      .filter((id) => typeof id === "number");
-    const orderedIds = preferredOrder
-      .filter((id) => selectedIds.indexOf(id) !== -1)
-      .concat(selectedIds.filter((id) => preferredOrder.indexOf(id) === -1));
-
-    if (orderedIds.length < 2) {
-      nativeAlert(locale.errorSelectMultipleTextLayers, locale.errorTitle, true);
-      return;
-    }
-
-    const payload = buildSelectedLayerPayload({
-      layerIds: orderedIds,
-      lines: ctx.state.lines,
-      currentLineIndex: ctx.state.currentLineIndex,
-      currentStyle: ctx.state.currentStyle,
-      textScale: ctx.state.textScale,
-    });
-    if (payload.items.length < 2) {
-      nativeAlert(locale.errorNotEnoughLinesForMultiPaste, locale.errorTitle, true);
-      return;
-    }
-
-    setSelectedTextLayers(payload.items, ctx.state.direction, (ok) => {
-      if (!ok) return;
-      ctx.dispatch({
-        type: "commitLineBatch",
-        entries: payload.lineEntries,
-        nextLineIndex: payload.nextLineIndex,
-      });
-      if (payload.items.length < orderedIds.length) {
-        nativeAlert(
-          locale.multiPastePartial
-            .replace("{applied}", payload.items.length)
-            .replace("{selected}", orderedIds.length),
-          locale.warningTitle,
-          true
-        );
-      }
-    }, orderedIds);
+    applyLinesToLayers(ctx, layers, preferredOrder);
   });
 };
 
@@ -135,7 +147,7 @@ const shortcutCommands = [
     label: "shortcut_add",
     defaultKeys: ["WIN", "CTRL"],
     repeatDelay: 0,
-    handler: createInSelection,
+    handler: pasteInSelection,
   },
   {
     id: "apply",
@@ -342,4 +354,5 @@ export {
   formatShortcut,
   withShortcutHint,
   applyLinesToSelectedLayers,
+  pasteInSelection,
 };

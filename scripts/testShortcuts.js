@@ -44,12 +44,14 @@ assert(
   (previewSource.match(/withShortcutHint\(/g) || []).length >= 3,
   "Paste, align, and apply tooltips must use the configured shortcut"
 );
+assert(!previewSource.includes("multiPasteExistingButton"), "Fill layers must not have its own preview button");
 assert(
   /const requestId = \+\+hostQueryRef\.current;\s*if \(!hasMainKey\(localKeys\)\) return;/.test(shortcutEditorSource),
   "Modifier-only shortcut capture must not be overwritten by Photoshop's stale keyName"
 );
 
 const utilityCalls = [];
+let selectionSnapshot = { selection: null, layers: [{ id: 10 }, { id: 20 }] };
 const transformedCommands = babel.transformSync(commandSource, {
   presets: [["@babel/preset-env", { modules: "commonjs" }]],
 }).code;
@@ -65,6 +67,10 @@ const mockRequire = (request) => {
       getSelectedTextLayers: (callback) => {
         utilityCalls.push(["getSelectedTextLayers"]);
         callback([{ id: 10 }, { id: 20 }]);
+      },
+      getTypeRSelectionSnapshot: (callback) => {
+        utilityCalls.push(["getTypeRSelectionSnapshot"]);
+        callback(selectionSnapshot);
       },
       locale: {
         errorSelectMultipleTextLayers: "Select layers",
@@ -121,6 +127,38 @@ const baseContext = {
 
 getCommand("applyStyle").handler(baseContext);
 assert.deepStrictEqual(utilityCalls.shift(), ["setText", "", baseContext.state.currentStyle, "rtl"]);
+const pasteContext = {
+  ...baseContext,
+  state: {
+    ...baseContext.state,
+    multiBubbleMode: false,
+    storedSelections: [],
+    currentLine: { text: "line-0" },
+  },
+};
+getCommand("add").handler(pasteContext);
+assert.deepStrictEqual(utilityCalls.shift(), ["getTypeRSelectionSnapshot"]);
+assert.deepStrictEqual(utilityCalls.shift(), [
+  "setSelectedTextLayers",
+  [
+    { layerId: 10, text: "line-0" },
+    { layerId: 20, text: "line-1" },
+  ],
+  "rtl",
+  [10, 20],
+]);
+assert.deepStrictEqual(dispatches.shift(), {
+  type: "commitLineBatch",
+  entries: [
+    { lineIndex: 0, styleId: "style-1" },
+    { lineIndex: 1, styleId: "style-1" },
+  ],
+  nextLineIndex: 2,
+});
+selectionSnapshot = { selection: { width: 100, height: 80 }, layers: [{ id: 10 }, { id: 20 }] };
+getCommand("add").handler(pasteContext);
+assert.deepStrictEqual(utilityCalls.shift(), ["getTypeRSelectionSnapshot"]);
+assert.strictEqual(utilityCalls.shift()[0], "create", "Paste with an active selection must create a text layer");
 getCommand("applyMultiple").handler(baseContext);
 assert.deepStrictEqual(utilityCalls.shift(), ["getSelectedTextLayers"]);
 assert.deepStrictEqual(utilityCalls.shift(), [
