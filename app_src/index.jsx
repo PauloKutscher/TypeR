@@ -1,4 +1,3 @@
-import "babel-polyfill";
 import './index.scss';
 import './rtl.scss';
 import './lib/CSInterface';
