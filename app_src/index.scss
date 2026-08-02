@@ -292,9 +292,9 @@ body[data-editor-theme]:not([data-editor-theme="system"]) {
       background: var(--editor-codeCurrent) !important;
       color: var(--editor-codeCurrentText) !important;
 
-      &:before,
-      &:after {
-        border-color: var(--editor-accent) !important;
+      // Render the active-line marker as a filled gutter bar
+      &::before {
+        background-color: var(--editor-accent) !important;
       }
     }
   }

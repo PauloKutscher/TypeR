@@ -21,11 +21,19 @@
   .text-lines:before {
     left: auto;
     right: 0;
+    /* Gutter hairline follows the gutter to the other side */
+    box-shadow: inset 1px 0 0 rgba(127, 127, 127, 0.35);
   }
 
   .text-lines:after {
     right: auto;
     left: 0;
+    box-shadow: inset -1px 0 0 rgba(127, 127, 127, 0.35);
+  }
+
+  .text-line.m-current:before {
+    left: auto;
+    right: 0;
   }
 
   .text-area {

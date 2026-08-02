@@ -1,5 +1,27 @@
+// Script sheet: a "paper" column framed by two quiet gutters. The visible
+// glyphs are always drawn by .text-area / .text-area-overlay on top, so this
+// layer must stay a pure highlight layer (backgrounds only, metrics identical
+// to the textarea) or the highlights drift away from the text.
+
+// Shared metrics — must stay in sync across .text-line, .text-area and
+// .text-area-overlay, otherwise the highlight layer no longer wraps like the
+// textarea and every chip lands next to its word instead of on it.
+$code-font: Consolas, "SF Mono", Menlo, "DejaVu Sans Mono", monospace;
+$code-size: 14px;
+$code-leading: 17px;
+$code-pad-x: 6px;
+
+$sheet-bg: #eee;
+$sheet-paper: #fff;
+$sheet-gutter: #e8e8e8;
+// Neutral gray: readable over a light gutter and over the dark gutters that
+// custom editor themes paint underneath.
+$sheet-edge: rgba(127, 127, 127, 0.35);
+$sheet-rule: rgba(0, 0, 0, 0.07);
+$sheet-accent: #3d88cf;
+
 .text-block {
-  background: #eee;
+  background: $sheet-bg;
   position: relative;
   overflow-y: auto;
   display: flex;
@@ -14,7 +36,8 @@
   left: 0;
   top: 0;
   &:before {
-    background: #ccc;
+    background: $sheet-gutter;
+    box-shadow: inset -1px 0 0 $sheet-edge;
     position: absolute;
     display: block;
     height: 100%;
@@ -24,7 +47,8 @@
     top: 0;
   }
   &:after {
-    background: #ccc;
+    background: $sheet-gutter;
+    box-shadow: inset 1px 0 0 $sheet-edge;
     position: absolute;
     display: block;
     height: 100%;
@@ -38,13 +62,13 @@
   justify-content: space-between;
   position: relative;
   display: flex;
-  font-family: monospace;
-  line-height: 17px;
-  font-size: 14px;
+  font-family: $code-font;
+  line-height: $code-leading;
+  font-size: $code-size;
   color: #777;
   z-index: 1;
   & + &:before {
-    border-top: 1px dashed #a9a9a9;
+    border-top: 1px solid $sheet-rule;
     position: absolute;
     display: block;
     content: "";
@@ -55,28 +79,22 @@
     top: 0;
   }
   &.m-current {
-    background: rgba(#608fbf, 0.6);
-    color: #000;
+    background: #cfe1f2;
+    color: #16334f;
     z-index: 2;
+    // Active-line marker in the gutter instead of two hard rules across the
+    // whole row: reads as clearly, adds far less noise to a dense script.
     &:before {
-      border-top: 2px solid #608fbf;
+      background: $sheet-accent;
       position: absolute;
       display: block;
+      border-top: none;
       content: "";
-      width: 100%;
-      height: 0;
+      z-index: 3;
+      width: 3px;
+      height: 100%;
       left: 0;
       top: 0;
-    }
-    &:after {
-      border-bottom: 2px solid #608fbf;
-      position: absolute;
-      display: block;
-      content: "";
-      width: 100%;
-      bottom: -1px;
-      height: 0;
-      left: 0;
     }
   }
 }
@@ -86,7 +104,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 12px;
+  color: #9d9d9d;
   width: 32px;
+  .text-line.m-current & {
+    font-weight: 600;
+    color: inherit;
+  }
+  .text-line.m-page & {
+    color: #55803f;
+  }
 }
 .text-line-select {
   flex: 0 0 auto;
@@ -95,10 +122,17 @@
     margin-bottom: -5px;
     position: relative;
     cursor: pointer;
+    opacity: 0.45;
+    transition: opacity 0.12s ease, color 0.12s ease;
     top: -2px;
     &:hover {
       color: #000;
+      opacity: 1;
     }
+  }
+  .text-line:hover & > SVG,
+  .text-line.m-current & > SVG {
+    opacity: 1;
   }
   .text-line.m-current & > SVG {
     cursor: auto;
@@ -107,31 +141,40 @@
 .text-line-text {
   word-break: break-word;
   white-space: pre-wrap;
-  padding: 0 5px 0 7px;
+  // Symmetric and equal to the textarea padding so every chip below sits
+  // exactly under its own characters.
+  padding: 0 $code-pad-x;
   color: rgba(#fff, 0);
-  background: #fff;
+  background: $sheet-paper;
+  transition: background-color 0.12s ease, box-shadow 0.12s ease;
   flex-grow: 2;
-  &[dir="rtl"] {
-    padding: 0 7px 0 5px;
-  }
   .text-line.m-current & {
-    background: #bed6ef;
+    background: #dcebf8;
   }
   .text-line.m-empty & {
     background: rgba(#fff, 0);
   }
   .text-line.m-page & {
-    background: #3cff00;
+    background: #dcf1d1;
+  }
+  // Theme-agnostic hover wash: an inset shadow survives the background
+  // overrides custom editor themes apply to this element.
+  .text-line:not(.m-current):hover & {
+    box-shadow: inset 0 0 0 999px rgba(127, 127, 127, 0.1);
   }
   .text-line-ignore-prefix {
-    background: rgba(#000, 0.1);
+    background: rgba(127, 127, 127, 0.28);
+    border-radius: 2px;
   }
   .text-line-style-prefix {
-    opacity: 0.9;
+    border-radius: 2px;
+    opacity: 0.85;
   }
+  // Tinted band rather than colored text: the real glyphs are painted on top
+  // by the overlay, so a text color would only ever show as a fringe.
   .text-line-ignore-tag {
-    color: #c0392b;
-    font-weight: 600;
+    background: rgba(#c0392b, 0.22);
+    border-radius: 2px;
   }
 }
 .text-line-insert {
@@ -142,31 +185,39 @@
     margin-bottom: -5px;
     position: relative;
     cursor: pointer;
+    opacity: 0.45;
+    transition: opacity 0.12s ease, color 0.12s ease;
     top: -2px;
     &:hover {
       color: #000;
+      opacity: 1;
     }
     .text-line.m-current &:hover {
       color: #073357;
     }
   }
+  .text-line:hover & > SVG,
+  .text-line.m-current & > SVG {
+    opacity: 1;
+  }
 }
 .text-area {
   box-sizing: border-box;
-  font-family: monospace;
+  font-family: $code-font;
   word-break: break-word;
   white-space: pre-wrap;
   position: relative;
   overflow: hidden;
   background: none;
-  padding: 4px 6px;
+  padding: 4px $code-pad-x;
   margin-right: 20px;
   margin-left: 50px;
-  line-height: 17px;
-  font-size: 14px;
+  line-height: $code-leading;
+  font-size: $code-size;
   color: #000;
   -webkit-text-fill-color: transparent;
-  caret-color: #000;
+  -webkit-font-smoothing: antialiased;
+  caret-color: $sheet-accent;
   border: none;
   resize: none;
   width: 100%;
@@ -177,19 +228,23 @@
   &.m-focused {
     -webkit-text-fill-color: currentColor;
   }
+  &::selection {
+    background: rgba(#288edf, 0.28);
+  }
 }
 .text-area-overlay {
   box-sizing: border-box;
-  font-family: monospace;
+  font-family: $code-font;
   word-break: break-word;
   white-space: pre-wrap;
   position: absolute;
   overflow: hidden;
   background: none;
-  padding: 4px 6px;
-  line-height: 17px;
-  font-size: 14px;
+  padding: 4px $code-pad-x;
+  line-height: $code-leading;
+  font-size: $code-size;
   color: #000;
+  -webkit-font-smoothing: antialiased;
   border: none;
   left: 50px;
   right: 20px;
@@ -205,7 +260,7 @@
   align-items: center;
   justify-content: center;
   position: absolute;
-  background: #ddd;
+  background: #fafafa;
   pointer-events: none;
   z-index: 4;
   cursor: text;
@@ -214,7 +269,11 @@
   left: 50px;
   top: 0;
   & > DIV {
-    font-size: 18px;
-    color: #777;
+    font-size: 13px;
+    line-height: 1.5;
+    letter-spacing: 0.02em;
+    text-align: center;
+    padding: 0 18px;
+    color: #9d9d9d;
   }
 }
