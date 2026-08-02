@@ -5,11 +5,10 @@
 // a megabyte of base64 through JSON.stringify on each keystroke would be felt
 // immediately in the text block.
 
-import { csInterface } from "./utils";
+import { getActiveProfileAssetPath } from "./profileStorage";
 import { clamp, clamp01 } from "./themeColors";
 
-const extensionPath = csInterface.getSystemPath(window.SystemPath.EXTENSION);
-const assetPath = extensionPath + "/storage_background";
+const assetPath = getActiveProfileAssetPath("background");
 
 // Source pictures are re-encoded before being stored so a 12 MP photo does not
 // end up as a 15 MB base64 string that has to be parsed at every panel start.

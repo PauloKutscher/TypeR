@@ -7,6 +7,9 @@ import { locale, nativeAlert } from "../../utils";
 import { useContext } from "../../context";
 import { buildFolderTree, collectDescendantIds } from "../../folderUtils";
 import { collectFontRefs, exportZipWithFonts } from "../../fontFileExport";
+import { getProfileRegistry, readProfileStorage } from "../../profileStorage";
+
+const EMPTY_LIST = [];
 
 const ExportModal = React.memo(function ExportModal() {
   const context = useContext((state) => ({
@@ -19,19 +22,30 @@ const ExportModal = React.memo(function ExportModal() {
     autoClosePSD: state.autoClosePSD,
     autoScrollStyle: state.autoScrollStyle,
     currentFolderTagPriority: state.currentFolderTagPriority,
-    setTextItemKind: state.setTextItemKind,
+    pastePointText: state.pastePointText,
   }));
+  const profileRegistry = React.useMemo(getProfileRegistry, []);
+  const [selectedProfileId, setSelectedProfileId] = React.useState(profileRegistry.activeProfileId);
   const [selected, setSelected] = React.useState([]);
   const [selectedFonts, setSelectedFonts] = React.useState([]);
   const [withSettings, setWithSettings] = React.useState(false);
   const [withFontFiles, setWithFontFiles] = React.useState(false);
   const [allSelected, setAllSelected] = React.useState(false);
-  const folderTree = React.useMemo(() => buildFolderTree(context.state.folders), [context.state.folders]);
-  const allFolderIds = React.useMemo(() => context.state.folders.map((folder) => folder.id), [context.state.folders]);
+  const selectedProfile = profileRegistry.profiles.find((profile) => profile.id === selectedProfileId) || profileRegistry.profiles[0];
+  const exportSource = React.useMemo(
+    () => selectedProfileId === profileRegistry.activeProfileId
+      ? context.state
+      : readProfileStorage(selectedProfileId),
+    [context.state, profileRegistry.activeProfileId, selectedProfileId]
+  );
+  const sourceFolders = exportSource.folders || EMPTY_LIST;
+  const sourceStyles = exportSource.styles || EMPTY_LIST;
+  const folderTree = React.useMemo(() => buildFolderTree(sourceFolders), [sourceFolders]);
+  const allFolderIds = React.useMemo(() => sourceFolders.map((folder) => folder.id), [sourceFolders]);
   const previousFontKeys = React.useRef([]);
   const selectedStyles = React.useMemo(
-    () => context.state.styles.filter((style) => selected.includes(style.folder)),
-    [context.state.styles, selected]
+    () => sourceStyles.filter((style) => selected.includes(style.folder)),
+    [sourceStyles, selected]
   );
   const fontOptions = React.useMemo(() => buildFontOptions(selectedStyles), [selectedStyles]);
   const selectedFontSet = React.useMemo(() => new Set(selectedFonts), [selectedFonts]);
@@ -40,6 +54,13 @@ const ExportModal = React.memo(function ExportModal() {
     [selectedStyles, selectedFontSet]
   );
   const canExport = exportableStyles.length > 0 || withSettings;
+
+  React.useEffect(() => {
+    setSelected([]);
+    setSelectedFonts([]);
+    setAllSelected(false);
+    previousFontKeys.current = [];
+  }, [selectedProfileId]);
 
   React.useEffect(() => {
     setSelectedFonts((current) => {
@@ -66,7 +87,7 @@ const ExportModal = React.memo(function ExportModal() {
 
   const toggleFolder = (id, checked) => {
     const next = new Set(selected);
-    const descendants = collectDescendantIds(context.state.folders, id);
+    const descendants = collectDescendantIds(sourceFolders, id);
     if (checked) {
       next.add(id);
       descendants.forEach((desc) => next.add(desc));
@@ -108,31 +129,33 @@ const ExportModal = React.memo(function ExportModal() {
       false,
       false,
       [ext],
-      config.exportFileName + "." + ext
+      getProfileExportFileName(selectedProfile.name, ext)
     );
     if (!pathSelect?.data) return false;
-    const folders = context.state.folders.filter((f) => selected.includes(f.id));
+    const folders = sourceFolders.filter((f) => selected.includes(f.id));
     const styles = exportableStyles;
     const data = {
       folders,
       styles,
+      profileName: selectedProfile.name,
+      includesSettings: withSettings,
       version: config.appVersion,
       exported: new Date(),
     };
     if (withSettings) {
-      data.ignoreLinePrefixes = context.state.ignoreLinePrefixes;
-      data.ignoreTags = context.state.ignoreTags;
-      data.defaultStyleId = context.state.defaultStyleId;
-      data.language = context.state.language;
-      data.autoClosePSD = context.state.autoClosePSD;
-      data.autoScrollStyle = context.state.autoScrollStyle;
-      data.currentFolderTagPriority = context.state.currentFolderTagPriority;
-      data.textItemKind = context.state.setTextItemKind;
+      data.ignoreLinePrefixes = exportSource.ignoreLinePrefixes;
+      data.ignoreTags = exportSource.ignoreTags;
+      data.defaultStyleId = exportSource.defaultStyleId;
+      data.language = exportSource.language;
+      data.autoClosePSD = exportSource.autoClosePSD;
+      data.autoScrollStyle = exportSource.autoScrollStyle;
+      data.currentFolderTagPriority = exportSource.currentFolderTagPriority;
+      data.pastePointText = !!exportSource.pastePointText;
     }
     if (withFontFiles) {
       const result = exportZipWithFonts({
         zipPath: pathSelect.data,
-        jsonFileName: config.exportFileName + ".json",
+        jsonFileName: getProfileExportFileName(selectedProfile.name, "json"),
         jsonString: JSON.stringify(data),
         fontRefs: collectFontRefs(exportableStyles),
       });
@@ -165,6 +188,21 @@ const ExportModal = React.memo(function ExportModal() {
       </div>
       <div className="app-modal-body">
         <form className="app-modal-body-inner export-modal" onSubmit={exportData}>
+          <div className="export-section hostBrdContrast">
+            <div className="export-section-title">{locale.exportProfileTitle}</div>
+            <div className="export-section-hint">{locale.exportProfileHint}</div>
+            <select
+              value={selectedProfileId}
+              onChange={(event) => setSelectedProfileId(event.target.value)}
+              aria-label={locale.exportProfileTitle}
+              className="topcoat-textarea export-profile-select"
+            >
+              {profileRegistry.profiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>{profile.name}</option>
+              ))}
+            </select>
+          </div>
+
           <div className="export-summary hostBrdContrast">
             <div className="export-summary-item">
               <FiFolder size={15} />
@@ -311,6 +349,14 @@ const buildFontOptions = (styles) => {
     map.set(key, option);
   });
   return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+};
+
+const getProfileExportFileName = (profileName, extension) => {
+  const safeProfileName = String(profileName || "")
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+    .replace(/\s+/g, "_") || "Default";
+  return `${config.exportFileName}_${safeProfileName}.${extension}`;
 };
 
 const renderFolderNodes = (nodes, selected, toggleFolder, depth = 0) => {

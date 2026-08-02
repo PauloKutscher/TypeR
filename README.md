@@ -44,7 +44,7 @@ TypeR is based on [TyperTools](https://swirt.github.io/typertools/) by Swirt and
 | Need | What TypeR provides |
 | --- | --- |
 | Work through a translated script quickly | Line-by-line navigation, ignored notes and empty lines, page markers, automatic page switching, and configurable hotkeys |
-| Keep typography consistent | Reusable styles with prefix matching, nested folders, strokes, detailed Photoshop text properties, and current-folder priority |
+| Keep typography consistent | Separate project profiles with their own settings, scripts and style libraries, plus prefix matching and current-folder isolation |
 | Place dialogue with fewer repetitive actions | Create or update a text layer from the active script line, auto-advance, internal bubble padding, and selection-based centering |
 | Handle several bubbles at once | Multi-bubble capture and batch creation of consecutive text layers |
 | Fit dialogue more naturally | TextShapeR suggestions shaped from a selection or an automatically detected bubble |
@@ -130,6 +130,8 @@ This is especially useful when joining an existing project, recovering a style g
 ### Team handoff and backups
 
 The export panel lets you choose which folders, styles, and fonts to include, with an optional subset of application settings.
+
+Project profiles keep styles, folders, settings, tabs, saved work, and custom backgrounds isolated. For backward compatibility, the initial **Default** profile remains in the original `storage` file and cannot be deleted, though it can be renamed. Additional profiles use separate storage files and can be created, switched, renamed, or deleted from **Settings → Profiles**. The export panel can export any profile without switching the active workspace first.
 
 - Use JSON for a lightweight style/settings backup.
 - Export only selected folders when sharing a project-specific kit.

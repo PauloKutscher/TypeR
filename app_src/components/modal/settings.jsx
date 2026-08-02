@@ -1,5 +1,5 @@
 import React from "react";
-import { FiX, FiSettings, FiEye, FiEyeOff, FiToggleLeft, FiDatabase, FiAlertTriangle, FiChevronUp, FiChevronDown, FiRotateCcw, FiCheck, FiPlayCircle, FiType, FiEdit2, FiPlus, FiImage, FiTrash2 } from "react-icons/fi";
+import { FiX, FiSettings, FiEye, FiEyeOff, FiToggleLeft, FiDatabase, FiAlertTriangle, FiChevronUp, FiChevronDown, FiRotateCcw, FiCheck, FiPlayCircle, FiType, FiEdit2, FiPlus, FiImage, FiTrash2, FiUsers } from "react-icons/fi";
 import { MdSave } from "react-icons/md";
 import { FaKeyboard, FaFileExport, FaFileImport } from "react-icons/fa";
 
@@ -27,6 +27,7 @@ import ThemeEditor from "./themeEditor";
 import BackgroundEditor from "./backgroundEditor";
 import Shortcut from "./shortCut";
 import FontScanPromo from "./fontScanPromo";
+import ProfileSettings from "./profileSettings";
 import { shortcutCommands } from "../../shortcutCommands";
 import { isPerfDebugEnabled, setPerfDebugEnabled, reportPerfDebug, resetPerfDebug } from "../../perfDebug";
 import { clearTypeRCache, formatCacheBytes, getTypeRCacheInfo } from "../../cepCache";
@@ -779,6 +780,9 @@ const SettingsModal = React.memo(function SettingsModal() {
       } else {
         try {
           const data = JSON.parse(result.data);
+          if (data.pastePointText === undefined && data.textItemKind !== undefined) {
+            data.pastePointText = !!data.textItemKind;
+          }
           if (data.typerTextShapeRTuning) {
             // A shared TextShapeR learning file: route it to its own flow so
             // it never falls through to the full-settings import (which
@@ -807,12 +811,14 @@ const SettingsModal = React.memo(function SettingsModal() {
           } else if (
             data.folders &&
             data.styles &&
+            data.includesSettings !== true &&
             !data.ignoreLinePrefixes &&
             !data.ignoreTags &&
             !data.defaultStyleId &&
             !data.language &&
             !data.autoClosePSD &&
             !data.autoScrollStyle &&
+            !data.pastePointText &&
             !data.textItemKind
           ) {
             const idMap = {};
@@ -927,21 +933,21 @@ const SettingsModal = React.memo(function SettingsModal() {
 
   const resetStorage = () => {
     nativeConfirm(
-      locale.settingsResetStorageConfirm || "Delete the storage file and reset all settings?",
+      locale.settingsResetProfileConfirm,
       locale.confirmTitle || "Confirmation",
       (confirmed) => {
         if (!confirmed) return;
         const success = deleteStorageFile();
         if (success) {
           nativeAlert(
-            locale.settingsResetStorageSuccess || "Storage deleted. The panel will reload.",
+            locale.settingsResetProfileSuccess,
             locale.successTitle,
             false
           );
           setTimeout(() => window.location.reload(), 300);
         } else {
           nativeAlert(
-            locale.settingsResetStorageError || "Unable to delete the storage file.",
+            locale.settingsResetProfileError,
             locale.errorTitle,
             true
           );
@@ -1081,6 +1087,7 @@ const SettingsModal = React.memo(function SettingsModal() {
   };
 
   const tabs = [
+    { id: "profiles", label: locale.settingsTabProfiles, icon: FiUsers },
     { id: "general", label: locale.settingsTabGeneral || "General", icon: FiSettings },
     { id: "text", label: locale.settingsTabText || "Text", icon: FiType },
     { id: "appearance", label: locale.settingsTabAppearance || "Appearance", icon: FiEye },
@@ -1105,6 +1112,14 @@ const SettingsModal = React.memo(function SettingsModal() {
 
   const renderTabContent = () => {
     switch (activeTab) {
+      case "profiles":
+        return (
+          <ProfileSettings
+            currentLanguage={context.state.language}
+            hasUnsavedChanges={edited}
+          />
+        );
+
       case "general":
         return (
           <div className="fields">
@@ -1981,11 +1996,11 @@ const SettingsModal = React.memo(function SettingsModal() {
               <div className="settings-group-title">{locale.settingsGroupDanger || "Danger zone"}</div>
               <div className="field">
                 <button type="button" className="topcoat-button--large settings-danger-btn" onClick={resetStorage}>
-                  {locale.settingsResetStorage || "Reset settings"}
+                  {locale.settingsResetProfile}
                 </button>
               </div>
               <div className="field-descr">
-                {locale.settingsResetStorageHint || "Deletes the storage file and restores every setting to its default value."}
+                {locale.settingsResetProfileHint}
               </div>
             </div>
           </div>

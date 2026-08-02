@@ -149,10 +149,12 @@ killall -u "$(whoami)" csprefsd > /dev/null 2> /dev/null || true
 DESTDIR="${HOME}/Library/Application Support/Adobe/CEP/extensions/typertools"
 STORAGE_BACKUP="${TMPDIR:-/tmp}/typer_storage_backup"
 
-if [ -e "${DESTDIR}/storage" ]; then
-  rm -rf "${STORAGE_BACKUP}"
-  cp -Rf "${DESTDIR}/storage" "${STORAGE_BACKUP}"
-fi
+rm -rf "${STORAGE_BACKUP}"
+mkdir -p "${STORAGE_BACKUP}"
+for storage_item in "${DESTDIR}"/storage*; do
+  [ -e "${storage_item}" ] || continue
+  cp -Rf "${storage_item}" "${STORAGE_BACKUP}/"
+done
 
 rm -rf "${DESTDIR}"
 mkdir -p "${DESTDIR}"
@@ -167,10 +169,11 @@ if [ -e "${SRCDIR}/themes" ]; then
   cp -rf "${SRCDIR}/themes" "${DESTDIR}/app/"
 fi
 
-if [ -e "${STORAGE_BACKUP}" ]; then
-  cp -Rf "${STORAGE_BACKUP}" "${DESTDIR}/storage"
-  rm -rf "${STORAGE_BACKUP}"
-fi
+for storage_item in "${STORAGE_BACKUP}"/storage*; do
+  [ -e "${storage_item}" ] || continue
+  cp -Rf "${storage_item}" "${DESTDIR}/"
+done
+rm -rf "${STORAGE_BACKUP}"
 
 # —————————————————————————————————————————————————————————————
 # Fin et dernières info à l'utilisateur
