@@ -1,6 +1,8 @@
 # Local editor and agent configuration
 .vscode/
 AGENTS.md
+CLAUDE.md
+.claude/worktrees/
 
 # Dependencies and generated extension files
 node_modules/
