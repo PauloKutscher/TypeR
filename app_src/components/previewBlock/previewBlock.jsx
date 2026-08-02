@@ -1,15 +1,16 @@
 import "./previewBlock.scss";
 
 import React from "react";
-import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiChevronsRight, FiPlay, FiRefreshCw, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiRotateCcw, FiStar, FiX, FiLayers } from "react-icons/fi";
+import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiChevronsRight, FiPlay, FiRefreshCw, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiRotateCcw, FiStar, FiX } from "react-icons/fi";
 import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
 
-import { csInterface, locale, nativeConfirm, setActiveLayerText, setLayerTextFast, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, isPanelIdle, isPanelInteracting, notePanelActivity, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, getUserFonts, refreshUserFonts, scrollToLine, parseMarkdownRuns } from "../../utils";
+import { csInterface, locale, nativeConfirm, setActiveLayerText, setLayerTextFast, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isHostActionPending, isPanelIdle, isPanelInteracting, notePanelActivity, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, getUserFonts, refreshUserFonts, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
-import { buildStoredSelectionPayload, getScaledStyle } from "../../textLayerPayload";
-import { applyLinesToSelectedLayers, withShortcutHint } from "../../shortcutCommands";
+import { getScaledStyle } from "../../textLayerPayload";
+import { getBubbleCacheKey, haveSameLayerSize } from "../../textShapeRTracking";
+import { pasteInSelection, withShortcutHint } from "../../shortcutCommands";
 import { createFontPreviewRegistry, getFontPreviewFamily } from "../../fontPreview";
 import { notePerfRender } from "../../perfDebug";
 import TextShapeRFitPreview from "../textShapeRFitPreview";
@@ -76,15 +77,6 @@ const getLayerSourceKey = (source) => JSON.stringify({
 // a second wand scan. Bounded: a long session on a busy chapter must not grow
 // this map forever, and the oldest entries are the least likely to come back.
 const BUBBLE_CACHE_LIMIT = 120;
-
-// Bounds are rounded so sub-pixel jitter in Photoshop's reported layer bounds
-// does not invalidate a perfectly good scan, while a real move or resize does
-const getBubbleCacheKey = (layerId, bounds, fallbackKey) => {
-  if (layerId == null) return `bubble:${fallbackKey}`;
-  if (!bounds) return `bubble:${layerId}`;
-  const round = (value) => Math.round(Number(value) || 0);
-  return `bubble:${layerId}:${round(bounds.left)},${round(bounds.top)},${round(bounds.width)},${round(bounds.height)}`;
-};
 
 const rememberBubbleShape = (cache, key, shape) => {
   if (cache.size >= BUBBLE_CACHE_LIMIT) cache.delete(cache.keys().next().value);
@@ -188,7 +180,11 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const inlineSourceSignature = React.useRef("");
   const inlineLayerIdRef = React.useRef(null);
   const inlineSourcePending = React.useRef(false);
+  const inlineGeometryPending = React.useRef(false);
+  const inlineGeometryQueued = React.useRef(false);
+  const inlineContentEventVersion = React.useRef(0);
   const inlineEventDebounce = React.useRef(null);
+  const inlineMoveDebounce = React.useRef(null);
   const inlineLastRefreshAt = React.useRef(0);
   const inlineShapePending = React.useRef(false);
   const inlineShapeKey = React.useRef("");
@@ -343,7 +339,16 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       inlineSourceSignature.current = source.signature || "";
       inlineLayerBoundsRef.current = source.bounds || null;
       if (source.key === inlineSourceKey.current) {
-        setInlineLayerSource((current) => (current.loading || current.error ? { ...current, loading: false, error: "" } : current));
+        setInlineLayerSource((current) => {
+          const sizeChanged = source.bounds && !haveSameLayerSize(current.bounds, source.bounds);
+          if (!sizeChanged && !current.loading && !current.error) return current;
+          return {
+            ...current,
+            bounds: sizeChanged ? source.bounds : current.bounds,
+            loading: false,
+            error: "",
+          };
+        });
         return;
       }
       inlineSourceKey.current = source.key;
@@ -456,8 +461,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       // wand scan is one Photoshop history state, and on a full-resolution page
       // every state holds a snapshot: without this, walking back and forth
       // through the layers of a page churned the scratch file until the whole
-      // session crawled. Keyed on the layer bounds too, so a moved or resized
-      // layer is rescanned, and the refresh button clears the entry.
+      // session crawled. The key follows size, not position: translating text
+      // never changes the silhouette and an explicit refresh handles the rare
+      // case where the text is moved to another bubble.
       const memoized = bubbleShapeCache.current.get(bubbleKey);
       if (memoized !== undefined) {
         inlineShapePending.current = false;
@@ -489,6 +495,60 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       });
     });
   }, [bubbleAware, clearInlineShapeSettle]);
+
+  // A Photoshop 'move' action changes history but not the text or style. Read
+  // only the active layer's ID/bounds/history signature, then acknowledge that
+  // signature so the fallback poll does not rediscover the move as a content
+  // change. Repeated arrow nudges collapse into one lightweight host call.
+  const refreshInlineLayerGeometry = React.useCallback(() => {
+    // A text/style refresh always has priority: its full snapshot also carries
+    // the latest geometry, so acknowledging history separately would be both
+    // redundant and vulnerable to racing the content read.
+    if (inlineEventDebounce.current || inlineSourcePending.current) return;
+    if (inlineGeometryPending.current) {
+      inlineGeometryQueued.current = true;
+      return;
+    }
+    const contentEventVersion = inlineContentEventVersion.current;
+    inlineGeometryPending.current = true;
+    csInterface.evalScript("getActiveTextLayerGeometry()", (result) => {
+      inlineGeometryPending.current = false;
+      if (contentEventVersion !== inlineContentEventVersion.current || inlineSourcePending.current) {
+        inlineGeometryQueued.current = false;
+        return;
+      }
+      let geometry = null;
+      try {
+        geometry = JSON.parse(result || "{}");
+      } catch (error) {}
+
+      const currentLayerId = inlineLayerIdRef.current;
+      const sameLayer = geometry && geometry.layerId === currentLayerId;
+      if (!sameLayer || !geometry.bounds) {
+        inlineSourceSignature.current = "";
+        refreshInlineLayerSource();
+        refreshInlineSelectionShape();
+      } else if (haveSameLayerSize(inlineLayerBoundsRef.current, geometry.bounds)) {
+        inlineSourceSignature.current = geometry.signature || inlineSourceSignature.current;
+        inlineLayerBoundsRef.current = geometry.bounds;
+      } else {
+        // Defensive path for transforms reported as moves: size changes affect
+        // TextShapeR calibration and must keep the existing full refresh.
+        inlineSourceSignature.current = "";
+        inlineLayerBoundsRef.current = geometry.bounds;
+        setInlineLayerSource((current) => (
+          current.layerId === geometry.layerId ? { ...current, bounds: geometry.bounds } : current
+        ));
+        refreshInlineLayerSource();
+        refreshInlineSelectionShape(true);
+      }
+
+      if (inlineGeometryQueued.current) {
+        inlineGeometryQueued.current = false;
+        refreshInlineLayerGeometry();
+      }
+    });
+  }, [refreshInlineLayerSource, refreshInlineSelectionShape]);
 
   // Batch mode: the user multi-selects text layers, then chains shapes one
   // layer at a time. Photoshop only reports stacking order, so the click
@@ -600,7 +660,23 @@ const PreviewBlock = React.memo(function PreviewBlock() {
 
     // Primary signal: Photoshop notifies the panel when a layer is selected
     // or edited. Debounced because 'setd' events arrive in bursts.
-    const unsubscribePhotoshopEvents = addPhotoshopEventListener(() => {
+    const unsubscribePhotoshopEvents = addPhotoshopEventListener((event) => {
+      if (isPhotoshopMoveEvent(event)) {
+        inlineLastRefreshAt.current = Date.now();
+        if (inlineEventDebounce.current || inlineSourcePending.current) return;
+        if (inlineMoveDebounce.current) clearTimeout(inlineMoveDebounce.current);
+        inlineMoveDebounce.current = setTimeout(() => {
+          inlineMoveDebounce.current = null;
+          refreshInlineLayerGeometry();
+        }, 120);
+        return;
+      }
+      inlineContentEventVersion.current += 1;
+      inlineGeometryQueued.current = false;
+      if (inlineMoveDebounce.current) {
+        clearTimeout(inlineMoveDebounce.current);
+        inlineMoveDebounce.current = null;
+      }
       if (inlineEventDebounce.current) clearTimeout(inlineEventDebounce.current);
       inlineEventDebounce.current = setTimeout(() => {
         inlineEventDebounce.current = null;
@@ -638,11 +714,18 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         clearTimeout(inlineEventDebounce.current);
         inlineEventDebounce.current = null;
       }
+      if (inlineMoveDebounce.current) {
+        clearTimeout(inlineMoveDebounce.current);
+        inlineMoveDebounce.current = null;
+      }
       clearInlineShapeSettle();
       inlineSourcePending.current = false;
+      inlineGeometryPending.current = false;
+      inlineGeometryQueued.current = false;
+      inlineContentEventVersion.current += 1;
       inlineShapePending.current = false;
     };
-  }, [context.state.inlineTextShapeR, refreshInlineLayerSource, refreshInlineSelectionShape, clearInlineShapeSettle]);
+  }, [context.state.inlineTextShapeR, refreshInlineLayerSource, refreshInlineLayerGeometry, refreshInlineSelectionShape, clearInlineShapeSettle]);
 
   React.useEffect(() => {
     setInlineVariantPage(0);
@@ -813,7 +896,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       // Selection marquee changes emit Photoshop `setd` notifications. React
       // to those bursts and keep only a slow safety poll for old hosts whose
       // event bridge is unreliable, instead of hitting ExtendScript 5x/s.
-      unsubscribePhotoshopEvents = addPhotoshopEventListener(() => {
+      unsubscribePhotoshopEvents = addPhotoshopEventListener((event) => {
+        if (isPhotoshopMoveEvent(event)) return;
         if (selectionEventDebounce.current) clearTimeout(selectionEventDebounce.current);
         selectionEventDebounce.current = setTimeout(() => {
           selectionEventDebounce.current = null;
@@ -871,34 +955,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     }
   }, [context.state.multiBubbleMode, context.state.storedSelections, clearAllTipShown, showClearAllTipFunc]);
 
-  const createLayer = () => {
-    const storedSelections = context.state.storedSelections || [];
-    
-    if (context.state.multiBubbleMode && storedSelections.length > 0) {
-      const payload = buildStoredSelectionPayload({
-        storedSelections,
-        lines: context.state.lines,
-        currentLineIndex: context.state.currentLineIndex,
-        styles: context.state.styles,
-        currentStyle: context.state.currentStyle,
-        textScale: context.state.textScale,
-      });
-
-      const pointText = context.state.pastePointText;
-      const padding = context.state.internalPadding || 0;
-      const direction = context.state.direction;
-      createTextLayersInStoredSelections(payload.texts, payload.styles, storedSelections, pointText, padding, direction, (ok) => {
-        if (ok) {
-          resetStoredSelections(true);
-        }
-      });
-    } else {
-      const lineStyle = getScaledStyle(context.state.currentStyle, context.state.textScale);
-      createTextLayerInSelection(line.text, lineStyle, context.state.pastePointText, context.state.internalPadding || 0, context.state.direction, (ok) => {
-        if (ok) context.dispatch({ type: "nextLine", add: true });
-      });
-    }
-  };
+  const createLayer = React.useCallback(() => {
+    pasteInSelection(context, batchOrderRef.current);
+  }, [context]);
 
   const insertStyledText = () => {
     const storedSelections = context.state.storedSelections || [];
@@ -912,10 +971,6 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       });
     }
   };
-
-  const applyMultipleLines = React.useCallback(() => {
-    applyLinesToSelectedLayers(context, batchOrderRef.current);
-  }, [context]);
 
   const currentLineClick = React.useCallback(() => {
     if (line.rawIndex === void 0) return;
@@ -1023,6 +1078,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   // hand on the selected layer, so future suggestions drift toward that
   // style. Shift-click resets everything learned so far.
   const [shapeFeedbackFlash, setShapeFeedbackFlash] = React.useState("");
+  const [textShapeRLearning, setTextShapeRLearning] = React.useState(false);
   const shapeFeedbackTimer = React.useRef(null);
   React.useEffect(() => () => {
     if (shapeFeedbackTimer.current) clearTimeout(shapeFeedbackTimer.current);
@@ -1052,35 +1108,40 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       // also re-detects the bubble around each layer (same wand scan as
       // bubble-aware) so exemplars keep their outline context; Ctrl-click
       // skips the scans and stays fast.
+      setTextShapeRLearning(true);
       getAllLayersRenderedTexts(!!event.altKey, (entries) => {
-        if (!entries.length) {
-          flashShapeFeedback(locale.textShapeRLearnAllEmpty || "No text layers found to learn from");
-          return;
+        try {
+          if (!entries.length) {
+            flashShapeFeedback(locale.textShapeRLearnAllEmpty || "No text layers found to learn from");
+            return;
+          }
+          let tuningState = context.state.textShapeRTuning;
+          let learned = 0;
+          entries.forEach((entry) => {
+            const result = textShapeREngine && textShapeREngine.recordTextShapeRFeedback(entry.text, {
+              limit: 12,
+              allowHyphenation: true,
+              profile: "balanced",
+              shapeProfile: entry.bubble ? { rows: entry.bubble.rows } : null,
+              width: entry.bubble?.width,
+              height: entry.bubble?.height,
+            }, tuningState);
+            if (!result) return;
+            tuningState = result.tuning;
+            // Each sample generates against the tuning the previous one taught
+            textShapeREngine.setTextShapeRTuning(tuningState);
+            learned += 1;
+          });
+          if (!learned) {
+            flashShapeFeedback(locale.textShapeRLearnAllEmpty || "No text layers found to learn from");
+            return;
+          }
+          context.dispatch({ type: "setTextShapeRTuning", value: tuningState });
+          flashShapeFeedback((locale.textShapeRLearnAllSaved || "Learned from {count} layers — suggestions will follow this style")
+            .replace("{count}", learned));
+        } finally {
+          setTextShapeRLearning(false);
         }
-        let tuningState = context.state.textShapeRTuning;
-        let learned = 0;
-        entries.forEach((entry) => {
-          const result = textShapeREngine && textShapeREngine.recordTextShapeRFeedback(entry.text, {
-            limit: 12,
-            allowHyphenation: true,
-            profile: "balanced",
-            shapeProfile: entry.bubble ? { rows: entry.bubble.rows } : null,
-            width: entry.bubble?.width,
-            height: entry.bubble?.height,
-          }, tuningState);
-          if (!result) return;
-          tuningState = result.tuning;
-          // Each sample generates against the tuning the previous one taught
-          textShapeREngine.setTextShapeRTuning(tuningState);
-          learned += 1;
-        });
-        if (!learned) {
-          flashShapeFeedback(locale.textShapeRLearnAllEmpty || "No text layers found to learn from");
-          return;
-        }
-        context.dispatch({ type: "setTextShapeRTuning", value: tuningState });
-        flashShapeFeedback((locale.textShapeRLearnAllSaved || "Learned from {count} layers — suggestions will follow this style")
-          .replace("{count}", learned));
       });
       return;
     }
@@ -1188,16 +1249,6 @@ const PreviewBlock = React.memo(function PreviewBlock() {
               <MdCenterFocusWeak size={18} /> {locale.alignLayer}
             </button>
           )}
-          {batchSelection.length >= 2 && (
-            <button
-              type="button"
-              className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large"
-              title={withShortcutHint(locale.multiPasteExistingDescr, context.state.shortcut.applyMultiple)}
-              onClick={applyMultipleLines}
-            >
-              <FiLayers size={18} /> {locale.multiPasteExistingButton}
-            </button>
-          )}
           {uiVisible.previewSizeControls !== false && (
             <div className="preview-top_change-size-cont">
               <button className="topcoat-icon-button--large" title={locale.layerTextSizeMinus} onClick={handleDecrease}>
@@ -1226,7 +1277,16 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           </button>
         </div>
         )}
-        {uiVisible.previewWidget === false ? null : context.state.inlineTextShapeR ? (
+        {uiVisible.previewWidget === false ? null : context.state.inlineTextShapeR && textShapeRLearning ? (
+          <div className="preview-textshaper-learning hostBgdDark" role="status" aria-live="polite">
+            <span className="preview-textshaper-learning-label">
+              {locale.textShapeRLearning || "Learning text shape..."}
+            </span>
+            <span className="preview-textshaper-learning-track" aria-hidden="true">
+              <span className="preview-textshaper-learning-bar" />
+            </span>
+          </div>
+        ) : context.state.inlineTextShapeR ? (
           <div className="preview-textshaper hostBgdDark" onMouseEnter={handleTextShapeRMouseEnter}>
             <div className="preview-textshaper-head">
               <div className="preview-textshaper-title">

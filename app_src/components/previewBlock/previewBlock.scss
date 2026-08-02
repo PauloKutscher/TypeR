@@ -280,6 +280,66 @@
   overflow: hidden;
 }
 
+.preview-textshaper-learning {
+  -webkit-font-smoothing: antialiased;
+  align-items: center;
+  border: 1px solid rgba(#000, 0.3);
+  border-radius: 6px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  flex-grow: 2;
+  gap: 8px;
+  height: auto;
+  justify-content: center;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 10px 18px;
+}
+
+.preview-textshaper-learning-label {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.preview-textshaper-learning-track {
+  background: rgba(#000, 0.22);
+  border-radius: 999px;
+  display: block;
+  height: 4px;
+  max-width: 240px;
+  overflow: hidden;
+  position: relative;
+  width: 75%;
+
+  .light-theme & {
+    background: rgba(#000, 0.12);
+  }
+}
+
+.preview-textshaper-learning-bar {
+  animation: preview-textshaper-learning 1.15s ease-in-out infinite;
+  background: #288edf;
+  border-radius: inherit;
+  bottom: 0;
+  display: block;
+  left: 0;
+  position: absolute;
+  top: 0;
+  width: 38%;
+}
+
+@keyframes preview-textshaper-learning {
+  0% {
+    transform: translateX(-115%);
+  }
+
+  100% {
+    transform: translateX(305%);
+  }
+}
+
 .preview-textshaper-head {
   align-items: center;
   background: rgba(#fff, 0.06);

@@ -69,7 +69,8 @@ var _SAFE_PARAGRAPH_PROPS = [
 var _DEFAULT_SELECTION_SCALE = 0.9;
 var _MIN_TEXTBOX_WIDTH = 10;
 var _TEMP_SELECTION_CHANNEL = "__TyperSelectionTemp__";
-var _DEFAULT_ADJUST_SEQUENCE = [-5, -5, -5, -5, -5, -5, 5, 5, 5, 5, 5, 5];
+var _SELECTION_OPEN_RATIO = 0.1;
+var _MIN_SELECTION_OPEN_RADIUS = 4;
 
 var _hostState = {
   fallbackTextSize: 20,
@@ -550,8 +551,20 @@ function _clampAdjustAmount(bounds, amount) {
   return -Math.min(Math.abs(amount), maxContract);
 }
 
-function _getAdjustedSelectionBoundsSequence(bounds, adjustments, preExpandAmount) {
-  if (!bounds || !adjustments || !adjustments.length) return bounds;
+function _getAdaptiveSelectionOpenRadius(bounds) {
+  if (!bounds) return 0;
+  var shortestSide = Math.min(bounds.width, bounds.height);
+  var maxRadius = Math.floor(shortestSide / 2 - 1);
+  if (maxRadius <= 0) return 0;
+  var radius = Math.max(_MIN_SELECTION_OPEN_RADIUS, Math.round(shortestSide * _SELECTION_OPEN_RATIO));
+  return Math.min(radius, maxRadius);
+}
+
+function _getAdaptiveOpenedSelectionBounds(bounds) {
+  if (!bounds) return bounds;
+
+  var radius = _getAdaptiveSelectionOpenRadius(bounds);
+  if (radius <= 0) return bounds;
 
   var doc;
   try {
@@ -561,44 +574,44 @@ function _getAdjustedSelectionBoundsSequence(bounds, adjustments, preExpandAmoun
   }
 
   if (!doc || !doc.selection) {
-    return _getAdjustedSelectionBoundsSequenceFallback(bounds, adjustments);
+    return bounds;
   }
 
   var tempChannel = _createTempSelectionChannel(doc);
   if (!tempChannel) {
-    return _getAdjustedSelectionBoundsSequenceFallback(bounds, adjustments);
+    return bounds;
   }
 
-  var adjusted = bounds;
+  var opened = null;
+  var attemptRadius = radius;
   try {
-    // Expand then contract by text size (smooths the selection)
-    if (preExpandAmount && preExpandAmount > 0) {
-      // First expand
-      _modifySelectionBounds(preExpandAmount);
-      adjusted = _getCurrentSelectionBounds();
-      if (!adjusted) {
-        adjusted = bounds;
-      }
-      // Then contract back by the same amount
-      var contractAmount = _clampAdjustAmount(adjusted, -preExpandAmount);
-      if (contractAmount !== 0) {
-        _modifySelectionBounds(contractAmount);
-        adjusted = _getCurrentSelectionBounds();
-        if (!adjusted) {
-          adjusted = bounds;
+    while (attemptRadius >= 1 && !opened) {
+      if (attemptRadius !== radius) {
+        try {
+          doc.selection.load(tempChannel);
+        } catch (retryRestoreError) {
+          break;
         }
       }
+
+      var candidate = null;
+      try {
+        _modifySelectionBounds(-attemptRadius);
+        var contracted = _getCurrentSelectionBounds();
+        if (contracted && contracted.width > 1 && contracted.height > 1) {
+          _modifySelectionBounds(attemptRadius);
+          candidate = _getCurrentSelectionBounds();
+        }
+      } catch (openError) {
+        candidate = null;
+      }
+
+      if (candidate && candidate.width * candidate.height >= 200) {
+        opened = candidate;
+      } else {
+        attemptRadius = Math.floor(attemptRadius / 2);
+      }
     }
-    
-    for (var i = 0; i < adjustments.length; i++) {
-      var amount = _clampAdjustAmount(adjusted, adjustments[i]);
-      if (amount === 0) continue;
-      _modifySelectionBounds(amount);
-      adjusted = _getCurrentSelectionBounds();
-      if (!adjusted) break;
-    }
-  } catch (error2) {
-    adjusted = null;
   } finally {
     try {
       doc.selection.load(tempChannel);
@@ -608,21 +621,7 @@ function _getAdjustedSelectionBoundsSequence(bounds, adjustments, preExpandAmoun
     } catch (removeError) {}
   }
 
-  if (!adjusted) {
-    return _getAdjustedSelectionBoundsSequenceFallback(bounds, adjustments);
-  }
-  return adjusted;
-}
-
-function _getAdjustedSelectionBoundsSequenceFallback(bounds, adjustments) {
-  if (!bounds || !adjustments || !adjustments.length) return bounds;
-  var current = bounds;
-  for (var i = 0; i < adjustments.length; i++) {
-    var amount = _clampAdjustAmount(current, adjustments[i]);
-    current = _getAdjustedSelectionBoundsFallback(current, amount);
-    if (!current) break;
-  }
-  return current;
+  return opened || bounds;
 }
 
 function _selectionBoundsKey(bounds) {
@@ -1032,21 +1031,17 @@ function _checkSelection(options) {
   }
 
   var adjustAmount = 0;
-  var adjustSequence = null;
-  var preExpandAmount = 0;
+  var adaptiveOpen = false;
   if (options && options.adjustAmount !== undefined) {
     adjustAmount = options.adjustAmount;
   }
-  if (options && options.adjustSequence && options.adjustSequence.length) {
-    adjustSequence = options.adjustSequence;
-  }
-  if (options && options.preExpandAmount !== undefined) {
-    preExpandAmount = options.preExpandAmount;
+  if (options && options.adaptiveOpen) {
+    adaptiveOpen = true;
   }
 
   var adjustedSelection = selection;
-  if (adjustSequence) {
-    adjustedSelection = _getAdjustedSelectionBoundsSequence(selection, adjustSequence, preExpandAmount);
+  if (adaptiveOpen) {
+    adjustedSelection = _getAdaptiveOpenedSelectionBounds(selection);
   } else if (adjustAmount !== 0) {
     adjustedSelection = _getAdjustedSelectionBounds(selection, adjustAmount);
   }
@@ -1468,21 +1463,7 @@ function _createTextLayerInSelection() {
     return;
   }
   
-  // Get the text size from the style to pre-expand/dilate selection
-  var textSize = _hostState.fallbackTextSize || 20;
-  var style = _ensureStyle(state.data.style);
-  if (style && style.textProps && style.textProps.layerText && 
-      style.textProps.layerText.textStyleRange && 
-      style.textProps.layerText.textStyleRange[0] &&
-      style.textProps.layerText.textStyleRange[0].textStyle &&
-      style.textProps.layerText.textStyleRange[0].textStyle.size) {
-    textSize = style.textProps.layerText.textStyleRange[0].textStyle.size;
-  }
-  
-  var selection = _checkSelection({
-    adjustSequence: _DEFAULT_ADJUST_SEQUENCE,
-    preExpandAmount: textSize
-  });
+  var selection = _checkSelection({ adaptiveOpen: true });
   if (selection.error) {
     state.result = selection.error;
     return;
@@ -1506,20 +1487,11 @@ function _alignCurrentTextLayerToSelection() {
     return "layer";
   }
   
-  // Get the text size to pre-expand/dilate selection
-  var textSize = _getTextLayerSize();
-  
-  var selection = _checkSelection({ 
-    adjustSequence: _DEFAULT_ADJUST_SEQUENCE,
-    preExpandAmount: textSize
-  });
+  var selection = _checkSelection({ adaptiveOpen: true });
   if (selection.error) {
     if (selection.error === "noSelection") {
       _createMagicWandSelection(20);
-      selection = _checkSelection({ 
-        adjustSequence: _DEFAULT_ADJUST_SEQUENCE,
-        preExpandAmount: textSize
-      });
+      selection = _checkSelection({ adaptiveOpen: true });
     }
     if (selection.error) {
       return selection.error;
@@ -2691,6 +2663,35 @@ function getActiveLayerTextIfChanged(data) {
   return jamJSON.stringify(snapshot);
 }
 
+// Geometry-only acknowledgement for Photoshop 'move' events. This intentionally
+// avoids jamText.getLayerText(), stroke reads, selection reads and bubble scans:
+// arrow nudges should never put Photoshop's main thread behind heavy TypeR work.
+function getActiveTextLayerGeometry() {
+  if (!documents.length) {
+    return jamJSON.stringify({ error: "layer", signature: "" });
+  }
+  var layerId = null;
+  var historyIndex = null;
+  var bounds = null;
+  try {
+    layerId = _getActiveLayerId();
+  } catch (layerError) {}
+  try {
+    historyIndex = _getActiveHistoryIndex();
+  } catch (historyError) {}
+  try {
+    bounds = _getCurrentTextLayerBounds();
+  } catch (boundsError) {}
+  if (layerId === null || !bounds) {
+    return jamJSON.stringify({ error: "layer", signature: "" });
+  }
+  return jamJSON.stringify({
+    layerId: layerId,
+    bounds: bounds,
+    signature: String(layerId) + ":" + String(historyIndex),
+  });
+}
+
 // Shared lightweight snapshot for the panel's selection-driven widgets. A
 // single CEP bridge hop is much cheaper than queueing one call for the marquee
 // and another for the selected text-layer IDs after every Photoshop event.
@@ -2922,35 +2923,45 @@ function getSelectionChanged() {
       return jamJSON.stringify({ noChange: true, shiftKey: shiftPressed });
     }
 
+    // Stored multi-bubble selections only retain bounds, so clean a newly
+    // captured selection while its real outline is still available.
+    var payloadBounds = merged;
+    if (merged.length === 1) {
+      var openedBounds = _withSuspendedHistory("TypeR Selection Capture", function () {
+        return _getAdaptiveOpenedSelectionBounds(merged[0]);
+      });
+      payloadBounds = [openedBounds || merged[0]];
+    }
+
     monitor.lastBounds = merged[0];
     monitor.lastBoundsKey = _selectionBoundsKey(merged[0]);
 
     var multiResults = [];
-    for (var payloadIndex = 0; payloadIndex < merged.length; payloadIndex++) {
+    for (var payloadIndex = 0; payloadIndex < payloadBounds.length; payloadIndex++) {
       multiResults.push({
         shiftKey: shiftPressed,
-        top: merged[payloadIndex].top,
-        left: merged[payloadIndex].left,
-        right: merged[payloadIndex].right,
-        bottom: merged[payloadIndex].bottom,
-        width: merged[payloadIndex].width,
-        height: merged[payloadIndex].height,
-        xMid: merged[payloadIndex].xMid,
-        yMid: merged[payloadIndex].yMid,
+        top: payloadBounds[payloadIndex].top,
+        left: payloadBounds[payloadIndex].left,
+        right: payloadBounds[payloadIndex].right,
+        bottom: payloadBounds[payloadIndex].bottom,
+        width: payloadBounds[payloadIndex].width,
+        height: payloadBounds[payloadIndex].height,
+        xMid: payloadBounds[payloadIndex].xMid,
+        yMid: payloadBounds[payloadIndex].yMid,
       });
     }
 
     return jamJSON.stringify({
       multiSelection: multiResults,
       shiftKey: shiftPressed,
-      top: merged[0].top,
-      left: merged[0].left,
-      right: merged[0].right,
-      bottom: merged[0].bottom,
-      width: merged[0].width,
-      height: merged[0].height,
-      xMid: merged[0].xMid,
-      yMid: merged[0].yMid,
+      top: payloadBounds[0].top,
+      left: payloadBounds[0].left,
+      right: payloadBounds[0].right,
+      bottom: payloadBounds[0].bottom,
+      width: payloadBounds[0].width,
+      height: payloadBounds[0].height,
+      xMid: payloadBounds[0].xMid,
+      yMid: payloadBounds[0].yMid,
     });
   } catch (e) {
     return jamJSON.stringify({ error: true, message: "getSelectionChanged inner error: " + e.message + " on line " + e.line, shiftKey: false });

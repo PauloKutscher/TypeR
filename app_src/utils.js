@@ -1,5 +1,12 @@
 import "./lib/CSInterface";
 import { resolveStylePointText } from "./textLayerPayload";
+import {
+  PS_EVENT_SELECT,
+  PS_EVENT_SET,
+  PS_EVENT_MOVE,
+  isPhotoshopSelectEvent,
+  isPhotoshopMoveEvent,
+} from "./photoshopEvents";
 
 const csInterface = new window.CSInterface();
 const path = csInterface.getSystemPath(window.SystemPath.EXTENSION);
@@ -247,9 +254,9 @@ Write-Host "[*] Installing update..." -ForegroundColor Cyan
 if (Test-Path $TempBackupContainer) { Remove-Item $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -Path $TempBackupContainer -ItemType Directory -Force | Out-Null
 
-# Backup storage
-if (Test-Path "$TargetDir\\storage") {
-    Copy-Item "$TargetDir\\storage" -Destination $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue
+# Backup storage (settings file and its companions, e.g. the background image)
+Get-ChildItem -Path $TargetDir -Filter "storage*" -ErrorAction SilentlyContinue | ForEach-Object {
+    Copy-Item $_.FullName -Destination $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # Extract ZIP
@@ -288,8 +295,8 @@ foreach ($folder in $FoldersToCopy) {
 }
 
 # Restore storage
-if (Test-Path "$TempBackupContainer\\storage") {
-    Copy-Item "$TempBackupContainer\\storage" -Destination "$TargetDir" -Recurse -Force
+Get-ChildItem -Path $TempBackupContainer -Filter "storage*" -ErrorAction SilentlyContinue | ForEach-Object {
+    Copy-Item $_.FullName -Destination "$TargetDir" -Recurse -Force
 }
 
 # Cleanup
@@ -355,10 +362,11 @@ fi
 
 echo "[*] Installing update..."
 
-# Backup storage
-if [ -e "$DEST_DIR/storage" ]; then
-    rm -rf "$TEMP_STORAGE"
-    cp -Rf "$DEST_DIR/storage" "$TEMP_STORAGE"
+# Backup storage (settings file and its companions, e.g. the background image)
+rm -rf "$TEMP_STORAGE"
+if ls "$DEST_DIR"/storage* > /dev/null 2>&1; then
+    mkdir -p "$TEMP_STORAGE"
+    cp -Rf "$DEST_DIR"/storage* "$TEMP_STORAGE/"
 fi
 
 # Extract ZIP
@@ -390,8 +398,8 @@ for folder in app CSXS icons locale; do
 done
 
 # Restore storage
-if [ -e "$TEMP_STORAGE" ]; then
-    cp -Rf "$TEMP_STORAGE" "$DEST_DIR/storage"
+if [ -d "$TEMP_STORAGE" ]; then
+    cp -Rf "$TEMP_STORAGE"/storage* "$DEST_DIR/"
     rm -rf "$TEMP_STORAGE"
 fi
 
@@ -648,6 +656,16 @@ const getSelectedTextLayers = (callback = () => {}) => {
   csInterface.evalScript("getSelectedTextLayers()", (data) => {
     const dataObj = safeJsonParse(data);
     callback(Array.isArray(dataObj.layers) ? dataObj.layers : []);
+  });
+};
+
+const getTypeRSelectionSnapshot = (callback = () => {}) => {
+  csInterface.evalScript("getTypeRSelectionSnapshot()", (data) => {
+    const dataObj = safeJsonParse(data);
+    callback({
+      selection: dataObj.selection || null,
+      layers: Array.isArray(dataObj.layers) ? dataObj.layers : [],
+    });
   });
 };
 
@@ -974,12 +992,6 @@ const getCurrentSelection = (callback = () => {}) => {
   });
 };
 
-// Photoshop action event IDs (charIDToTypeID values): 'slct' fires on layer
-// selection, 'setd' on property/text edits — both mean the active text layer
-// may have changed and inline TextShapeR should refresh.
-const PS_EVENT_SELECT = 1936483188;
-const PS_EVENT_SET = 1936028772;
-
 const photoshopEventCallbacks = new Set();
 let photoshopEventsRegistered = false;
 let photoshopEventsReceived = false;
@@ -1002,7 +1014,9 @@ const registerPhotoshopEvents = () => {
   });
   const registerEvent = new window.CSEvent("com.adobe.PhotoshopRegisterEvent", "APPLICATION");
   registerEvent.extensionId = extensionId;
-  registerEvent.data = `${PS_EVENT_SELECT}, ${PS_EVENT_SET}`;
+  // 'move' is registered as well so TextShapeR can acknowledge geometry-only
+  // history states without discovering them later through the heavy poller.
+  registerEvent.data = `${PS_EVENT_SELECT}, ${PS_EVENT_SET}, ${PS_EVENT_MOVE}`;
   csInterface.dispatchEvent(registerEvent);
 };
 
@@ -1015,16 +1029,6 @@ const addPhotoshopEventListener = (callback) => {
 };
 
 const hasReceivedPhotoshopEvents = () => photoshopEventsReceived;
-
-// True when the CEP event payload is a layer-select ('slct') notification.
-// Selection marquee edits only fire 'setd', so callers can skip work that is
-// exclusively about which layers are targeted. Defaults to true when the
-// payload is missing or unreadable so no layer click is ever dropped.
-const isPhotoshopSelectEvent = (event) => {
-  const data = event && event.data;
-  if (typeof data !== "string" || !data) return true;
-  return data.indexOf(String(PS_EVENT_SELECT)) !== -1;
-};
 
 const getSelectionBoundsHash = (selection) => {
   if (!selection) return null;
@@ -1461,4 +1465,4 @@ const scanPsdFonts = (path, callback) => {
   );
 };
 
-export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isHostActionPending, notePanelActivity, isPanelIdle, notePanelInteraction, isPanelInteracting, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
+export { csInterface, locale, openUrl, readStorage, writeToStorage, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, getTypeRSelectionSnapshot, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isHostActionPending, notePanelActivity, isPanelIdle, notePanelInteraction, isPanelInteracting, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
