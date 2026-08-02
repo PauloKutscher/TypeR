@@ -26,6 +26,32 @@ $sheet-accent: #3d88cf;
   overflow-y: auto;
   display: flex;
 }
+
+// The sheet stays light even when Photoshop's UI is dark, so it cannot use the
+// global scrollbar skin: that one paints a translucent white thumb, which is
+// invisible over a light gutter. Custom editor themes keep their own skin
+// (higher specificity in index.scss) since their sheet follows the theme.
+body.dark-theme .text-block,
+body.light-theme .text-block {
+  &::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  &::-webkit-scrollbar-track,
+  &::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 0, 0, 0.28);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+    border-radius: 6px;
+    &:hover {
+      background-color: rgba(0, 0, 0, 0.42);
+      background-clip: padding-box;
+    }
+  }
+}
 .text-lines {
   box-sizing: border-box;
   position: absolute;
