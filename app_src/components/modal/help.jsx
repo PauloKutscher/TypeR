@@ -19,12 +19,13 @@ import {
 } from 'react-icons/fi';
 
 import config from '../../config';
-import {locale, openUrl} from '../../utils';
+import {locale, openUrl, readStorage, writeToStorage} from '../../utils';
 import {useContext} from '../../context';
 import {shortcutCommands} from '../../shortcutCommands';
 
 const VIDEO_URL = 'https://typer.hayasaku.fr/video-guide/';
 const VIDEO_CONFIG_URL = 'https://typer.hayasaku.fr/video-guide/config.json';
+const VIDEO_GUIDE_CURRENT_SEEN_KEY = 'videoGuideCurrentSeen';
 const MULTI_BUBBLE_VIDEO_URL = 'https://youtu.be/gmIh-eEj2HY';
 
 // Pretty names for the raw key tokens stored in the shortcut settings
@@ -81,6 +82,8 @@ const HelpModal = React.memo(function HelpModal() {
     const shortcut = context.state.shortcut || {};
 
     React.useEffect(() => {
+        if (readStorage(VIDEO_GUIDE_CURRENT_SEEN_KEY) === true) return undefined;
+
         let active = true;
         fetch(`${VIDEO_CONFIG_URL}?v=${Date.now()}`, {cache: 'no-store'})
             .then((response) => {
@@ -90,6 +93,9 @@ const HelpModal = React.memo(function HelpModal() {
             .then((remoteConfig) => {
                 if (active && typeof remoteConfig.isLegacy === 'boolean') {
                     setVideoIsLegacy(remoteConfig.isLegacy);
+                    if (!remoteConfig.isLegacy) {
+                        writeToStorage({[VIDEO_GUIDE_CURRENT_SEEN_KEY]: true});
+                    }
                 }
             })
             .catch(() => {});
