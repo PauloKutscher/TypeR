@@ -9,6 +9,7 @@ import {locale, nativeAlert, nativeConfirm, getStyleObject, rgbToHex} from '../.
 import {useContext} from '../../context';
 import {buildFolderTree, flattenFolderTree, collectDescendantIds} from '../../folderUtils';
 import FontScanPromo from './fontScanPromo';
+import UnsavedChangesDialog from './unsavedChangesDialog';
 
 const EditFolderModal = React.memo(function EditFolderModal() {
     const context = useContext((state) => ({
@@ -21,6 +22,7 @@ const EditFolderModal = React.memo(function EditFolderModal() {
     const [name, setName] = React.useState(currentData.name || '');
     const [styleIds, setStyleIds] = React.useState(folderStyleIds);
     const [edited, setEdited] = React.useState(false);
+    const [discardConfirmOpen, setDiscardConfirmOpen] = React.useState(false);
     const initialParentId = React.useMemo(() => {
         if (currentData.parentId === null) return '';
         if (currentData.hasOwnProperty('parentId')) return currentData.parentId || '';
@@ -42,8 +44,21 @@ const EditFolderModal = React.memo(function EditFolderModal() {
         }
     }, [currentData.create, currentData.parentId]);
 
-    const close = () => {
+    const closeModal = () => {
         context.dispatch({type: 'setModal'});
+    };
+
+    const close = () => {
+        if (edited) {
+            setDiscardConfirmOpen(true);
+            return;
+        }
+        closeModal();
+    };
+
+    const confirmClose = () => {
+        setDiscardConfirmOpen(false);
+        closeModal();
     };
 
     const changeFolderName = e => {
@@ -76,7 +91,7 @@ const EditFolderModal = React.memo(function EditFolderModal() {
             data.id = currentData.id;
         }
         context.dispatch({type: 'saveFolder', data});
-        close();
+        closeModal();
     };
 
     const deleteFolder = e => {
@@ -87,7 +102,7 @@ const EditFolderModal = React.memo(function EditFolderModal() {
         nativeConfirm(confirmText, locale.confirmTitle, ok => {
             if (!ok) return;
             context.dispatch({type: 'deleteFolder', id: currentData.id, permanent});
-            close();
+            closeModal();
         });
     };
 
@@ -233,6 +248,12 @@ const EditFolderModal = React.memo(function EditFolderModal() {
                     </div>
                 </form>
             </div>
+            {discardConfirmOpen && (
+                <UnsavedChangesDialog
+                    onConfirm={confirmClose}
+                    onCancel={() => setDiscardConfirmOpen(false)}
+                />
+            )}
         </React.Fragment>
     );
 });

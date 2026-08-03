@@ -4,7 +4,7 @@ import { MdSave } from "react-icons/md";
 import { FaKeyboard, FaFileExport, FaFileImport } from "react-icons/fa";
 
 import config from "../../config";
-import { locale, nativeAlert, nativeConfirm, checkUpdate, readStorage, writeToStorage, deleteStorageFile, openFile } from "../../utils";
+import { locale, nativeAlert, nativeConfirm, checkUpdate, readStorage, writeToStorage, deleteStorageFile } from "../../utils";
 import { useContext, defaultUiLayout, normalizeUiLayout } from "../../context";
 import { sanitizeTextShapeRTuning } from "../../textShapeR";
 import {
@@ -28,6 +28,7 @@ import BackgroundEditor from "./backgroundEditor";
 import Shortcut from "./shortCut";
 import FontScanPromo from "./fontScanPromo";
 import ProfileSettings from "./profileSettings";
+import UnsavedChangesDialog from "./unsavedChangesDialog";
 import { shortcutCommands } from "../../shortcutCommands";
 import { isPerfDebugEnabled, setPerfDebugEnabled, reportPerfDebug, resetPerfDebug } from "../../perfDebug";
 import { clearTypeRCache, formatCacheBytes, getTypeRCacheInfo } from "../../cepCache";
@@ -56,6 +57,7 @@ const SettingsModal = React.memo(function SettingsModal() {
     currentFolderTagPriority: state.currentFolderTagPriority,
     resizeTextBoxOnCenter: state.resizeTextBoxOnCenter,
     checkUpdates: state.checkUpdates,
+    autoUpdate: state.autoUpdate,
     multiBubbleMode: state.multiBubbleMode,
     showTips: state.showTips,
     showQuickStyleSize: state.showQuickStyleSize,
@@ -74,11 +76,6 @@ const SettingsModal = React.memo(function SettingsModal() {
     uiLayout: state.uiLayout,
     tabs: state.tabs,
     textShapeRTuning: state.textShapeRTuning,
-    text: state.text,
-    images: state.images,
-    currentLineIndex: state.currentLineIndex,
-    currentStyleId: state.currentStyleId,
-    lastOpenedImagePath: state.lastOpenedImagePath,
     styles: state.styles,
   }));
   const [activeTab, setActiveTab] = React.useState("general");
@@ -108,6 +105,9 @@ const SettingsModal = React.memo(function SettingsModal() {
   );
   const [checkUpdates, setCheckUpdates] = React.useState(
     context.state.checkUpdates !== false
+  );
+  const [autoUpdate, setAutoUpdate] = React.useState(
+    context.state.autoUpdate === true
   );
   const [multiBubbleMode, setMultiBubbleMode] = React.useState(
     !!context.state.multiBubbleMode
@@ -161,6 +161,7 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [shortcutDraft, setShortcutDraft] = React.useState(() => ({ ...context.state.shortcut }));
   const [multiTabConfirmOpen, setMultiTabConfirmOpen] = React.useState(false);
   const [edited, setEdited] = React.useState(false);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = React.useState(false);
 
   // Interface layout editor (appearance tab)
   const [uiLayout, setUiLayoutLocal] = React.useState(() => normalizeUiLayout(context.state.uiLayout));
@@ -182,12 +183,6 @@ const SettingsModal = React.memo(function SettingsModal() {
   const layoutCanvasRef = React.useRef(null);
   const layoutDragInfo = React.useRef(null);
 
-  // States manager
-  const [stateName, setStateName] = React.useState("");
-  const [savedStates, setSavedStates] = React.useState(() => readStorage("states") || {});
-  const [selectedState, setSelectedState] = React.useState("");
-  const [showDeleteStates, setShowDeleteStates] = React.useState(false);
-  const [statesToDelete, setStatesToDelete] = React.useState({});
   const [cacheInfo, setCacheInfo] = React.useState(getTypeRCacheInfo);
 
   React.useEffect(() => {
@@ -228,8 +223,21 @@ const SettingsModal = React.memo(function SettingsModal() {
     setEdited(true);
   }, []);
 
-  const close = () => {
+  const closeModal = () => {
     context.dispatch({ type: "setModal" });
+  };
+
+  const close = () => {
+    if (edited) {
+      setDiscardConfirmOpen(true);
+      return;
+    }
+    closeModal();
+  };
+
+  const confirmClose = () => {
+    setDiscardConfirmOpen(false);
+    closeModal();
   };
 
   const changePastePointText = (e) => {
@@ -316,6 +324,11 @@ const SettingsModal = React.memo(function SettingsModal() {
 
   const changeCheckUpdates = (e) => {
     setCheckUpdates(e.target.checked);
+    setEdited(true);
+  };
+
+  const changeAutoUpdate = (e) => {
+    setAutoUpdate(e.target.checked);
     setEdited(true);
   };
 
@@ -687,6 +700,12 @@ const SettingsModal = React.memo(function SettingsModal() {
         value: checkUpdates,
       });
     }
+    if (autoUpdate !== context.state.autoUpdate) {
+      context.dispatch({
+        type: "setAutoUpdate",
+        value: autoUpdate,
+      });
+    }
     if (multiBubbleMode !== context.state.multiBubbleMode) {
       context.dispatch({
         type: "setMultiBubbleMode",
@@ -766,7 +785,7 @@ const SettingsModal = React.memo(function SettingsModal() {
       shortcut: shortcutDraft,
     });
 
-    context.dispatch({ type: "setModal" });
+    closeModal();
   };
 
   const importSettings = () => {
@@ -850,7 +869,7 @@ const SettingsModal = React.memo(function SettingsModal() {
           } else {
             context.dispatch({ type: "import", data });
             setTimeout(() => window.location.reload(), 100);
-            close();
+            closeModal();
           }
         } catch (error) {
           nativeAlert(locale.errorImportStyles, locale.errorTitle, true);
@@ -1003,69 +1022,6 @@ const SettingsModal = React.memo(function SettingsModal() {
     );
   };
 
-  // Save current working snapshot as a named state
-  const saveCurrentState = (e) => {
-    e.preventDefault();
-    const name = (stateName || "").trim();
-    if (!name) {
-      nativeAlert(locale.settingsStateNameRequired, locale.errorTitle, true);
-      return;
-    }
-    // Build snapshot
-    const snapshot = {
-      text: context.state.text,
-      images: context.state.images,
-      currentLineIndex: context.state.currentLineIndex,
-      currentStyleId: context.state.currentStyleId,
-      lastOpenedImagePath: context.state.lastOpenedImagePath || null,
-      // Include a timestamp for info
-      savedAt: Date.now(),
-      version: 1,
-    };
-    const storageStates = readStorage("states") || {};
-    storageStates[name] = snapshot;
-    writeToStorage({ states: storageStates });
-    setSavedStates(storageStates);
-    setSelectedState(name);
-    setStateName("");
-  };
-
-  // Load selected state into the app
-  const loadSelectedState = () => {
-    const name = (selectedState || "").trim();
-    const storageStates = readStorage("states") || {};
-    if (!name || !storageStates[name]) {
-      return;
-    }
-    const data = storageStates[name] || {};
-    // Use reducer's import path to merge safely
-    context.dispatch({ type: "import", data });
-    if (data.lastOpenedImagePath) {
-      openFile(data.lastOpenedImagePath, context.state.autoClosePSD);
-    }
-  };
-
-  const toggleDeleteStates = () => {
-    setShowDeleteStates(!showDeleteStates);
-    setStatesToDelete({});
-  };
-
-  const toggleStateCheckbox = (name, checked) => {
-    setStatesToDelete((prev) => ({ ...prev, [name]: !!checked }));
-  };
-
-  const deleteSelectedStates = () => {
-    const storageStates = readStorage("states") || {};
-    const toDelete = Object.keys(statesToDelete).filter((k) => statesToDelete[k]);
-    if (!toDelete.length) return;
-    toDelete.forEach((k) => delete storageStates[k]);
-    writeToStorage({ states: storageStates });
-    setSavedStates(storageStates);
-    if (toDelete.includes(selectedState)) setSelectedState("");
-    setStatesToDelete({});
-    setShowDeleteStates(false);
-  };
-
   // Performance logger: writes its own flag, never goes through the panel
   // storage, so it can be switched on even to diagnose the storage itself
   const changePerfDebug = (e) => {
@@ -1164,6 +1120,12 @@ const SettingsModal = React.memo(function SettingsModal() {
                   changeCheckUpdates,
                   locale.settingsCheckUpdatesLabel,
                   locale.settingsCheckUpdatesHint || "Automatically checks for available updates"
+                )}
+                {renderToggle(
+                  autoUpdate,
+                  changeAutoUpdate,
+                  locale.settingsAutoUpdateLabel || "Install updates automatically",
+                  locale.settingsAutoUpdateHint || "New versions are downloaded and installed silently; they take effect the next time Photoshop restarts"
                 )}
               </div>
               <div className="field">
@@ -1420,7 +1382,9 @@ const SettingsModal = React.memo(function SettingsModal() {
                   const isImage = theme.id === CUSTOM_IMAGE_THEME_ID;
                   const label = isImage
                     ? locale.settingsThemeImage || "Custom image"
-                    : theme.label || (locale.settingsThemeUntitled || "Custom theme");
+                    : theme.labelKey
+                      ? locale[theme.labelKey]
+                      : theme.label || (locale.settingsThemeUntitled || "Custom theme");
                   const editable = isImage || theme.custom;
                   return (
                     <div className="settings-theme-cell" key={theme.id}>
@@ -1764,8 +1728,8 @@ const SettingsModal = React.memo(function SettingsModal() {
                 {renderToggle(
                   showQuickStyleSize,
                   changeShowQuickStyleSize,
-                  locale.settingsQuickStyleSizeLabel || "Quick style size editor",
-                  locale.settingsQuickStyleSizeHint || "Show the mini size editor when hovering the style edit button."
+                  locale.settingsQuickStyleSizeLabel || "Show style size presets",
+                  locale.settingsQuickStyleSizeHint || "Display the clickable size presets on each style."
                 )}
               </div>
               <div className="field">
@@ -1782,7 +1746,7 @@ const SettingsModal = React.memo(function SettingsModal() {
                   />
                 </div>
                 <div className="field-descr">
-                  {locale.settingsQuickStyleSizeStepHint || "Choose how much the quick size buttons increment the font size."}
+                  {locale.settingsQuickStyleSizeStepHint || "Sets the increment used when editing size presets."}
                 </div>
               </div>
             </div>
@@ -1838,89 +1802,6 @@ const SettingsModal = React.memo(function SettingsModal() {
         return (
           <div className="fields">
             <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsStatesTitle}</div>
-              <div className="field">
-                <div className="field-input">
-                  <input
-                    type="text"
-                    className="topcoat-text-input--large"
-                    placeholder={locale.settingsStateNamePlaceholder}
-                    value={stateName}
-                    onChange={(e) => setStateName(e.target.value)}
-                  />
-                </div>
-                <div className="field-descr">{locale.settingsStatesDescr}</div>
-              </div>
-              <div className="field">
-                <button className="topcoat-button--large" onClick={saveCurrentState}>
-                  {locale.settingsSaveCurrentState}
-                </button>
-              </div>
-              <div className="field">
-                <div className="field-label">{locale.settingsStatesListLabel}</div>
-                <div className="field-input">
-                  {Object.keys(savedStates).length ? (
-                    <select
-                      className="topcoat-textarea"
-                      value={selectedState}
-                      onChange={(e) => setSelectedState(e.target.value)}
-                    >
-                      <option value="">{locale.settingsSelectState}</option>
-                      {Object.keys(savedStates).map((name) => (
-                        <option key={name} value={name}>
-                          {name}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <div className="field-descr">{locale.settingsNoStates}</div>
-                  )}
-                </div>
-              </div>
-              <div className="field">
-                <button className="topcoat-button--large" onClick={loadSelectedState}>
-                  {locale.settingsLoadSelectedState}
-                </button>
-              </div>
-              <div className="field">
-                <button className="topcoat-button--large" onClick={toggleDeleteStates}>
-                  {locale.settingsDeleteStates}
-                </button>
-              </div>
-              {showDeleteStates && (
-                <div className="field">
-                  <div className="field-label">{locale.settingsDeleteStatesTitle}</div>
-                  <div className="field-input">
-                    {Object.keys(savedStates).length ? (
-                      <div className="hostBrdContrast" style={{ maxHeight: 180, overflowY: "auto", padding: 6 }}>
-                        {Object.keys(savedStates).map((name) => (
-                          <label key={name} className="topcoat-checkbox" style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
-                            <input
-                              type="checkbox"
-                              checked={!!statesToDelete[name]}
-                              onChange={(e) => toggleStateCheckbox(name, e.target.checked)}
-                            />
-                            <div className="topcoat-checkbox__checkmark" style={{ marginRight: 8 }}></div>
-                            <span>{name}</span>
-                          </label>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="field-descr">{locale.settingsNoStates}</div>
-                    )}
-                  </div>
-                  <div className="field-input" style={{ marginTop: 8, display: "flex", gap: 8 }}>
-                    <button className="topcoat-button--large--cta" onClick={deleteSelectedStates}>
-                      {locale.settingsDeleteSelected}
-                    </button>
-                    <button className="topcoat-button--large" onClick={toggleDeleteStates}>
-                      {locale.cancel}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupImportExport || "Import/Export"}</div>
               <FontScanPromo />
               <div className="field">
@@ -1947,7 +1828,7 @@ const SettingsModal = React.memo(function SettingsModal() {
                 </button>
               </div>
               <div className="field-descr">
-                {locale.settingsShapeTuningHint || "Share the line-break style TypeR learned from your feedback as a small .json file. Importing replaces your current learning."}
+                {locale.settingsShapeTuningHint || "Share your TextShapeR algorithm learned from your feedback as a small .json file. Importing replaces your current learning."}
               </div>
             </div>
             <div className="settings-group">
@@ -2103,6 +1984,12 @@ const SettingsModal = React.memo(function SettingsModal() {
               </div>
             </div>
           </div>
+        )}
+        {discardConfirmOpen && (
+          <UnsavedChangesDialog
+            onConfirm={confirmClose}
+            onCancel={() => setDiscardConfirmOpen(false)}
+          />
         )}
       </div>
     </React.Fragment>
