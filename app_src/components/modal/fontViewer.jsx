@@ -132,7 +132,7 @@ const pickRandomPreview = (rawPhrases) => {
     .split("|")
     .map((phrase) => phrase.trim())
     .filter(Boolean);
-  if (!phrases.length) return "TypeR Font Viewer";
+  if (!phrases.length) return "TypeR Font FindeR";
   let lastPhrase = "";
   try {
     if (window.localStorage) lastPhrase = window.localStorage.getItem(LAST_PREVIEW_STORAGE_KEY) || "";
