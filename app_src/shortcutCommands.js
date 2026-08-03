@@ -10,6 +10,7 @@ import {
   nativeAlert,
   setActiveLayerText,
   setSelectedTextLayers,
+  toggleCleaningLayers,
 } from "./utils";
 import { buildSelectedLayerPayload, buildStoredSelectionPayload, getScaledStyle } from "./textLayerPayload";
 
@@ -232,6 +233,13 @@ const shortcutCommands = [
     defaultKeys: ["CTRL", "SHIFT", "MINUS"],
     repeatDelay: 300,
     handler: (ctx) => changeActiveLayerTextSize(-(ctx.state.textSizeIncrement || 1)),
+  },
+  {
+    id: "toggleCleaningLayers",
+    label: "shortcut_toggleCleaningLayers",
+    defaultKeys: ["CTRL", "ALT", "H"],
+    repeatDelay: 300,
+    handler: () => toggleCleaningLayers(),
   },
   {
     id: "insertText",

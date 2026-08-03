@@ -1,6 +1,7 @@
-/* globals app, documents, activeDocument, ScriptUI, DialogModes, LayerKind, ActionReference, ActionDescriptor, executeAction, executeActionGet, stringIDToTypeID, jamEngine, jamJSON, jamText */
+/* globals app, documents, activeDocument, ScriptUI, DialogModes, LayerKind, ActionReference, ActionDescriptor, ActionList, executeAction, executeActionGet, stringIDToTypeID, jamEngine, jamJSON, jamText */
 
 var charID = {
+  AdjustmentLayer: 1097099891, // 'Adjs'
   Back: 1113678699, // 'Back'
   Background: 1113811815, // 'Bckg'
   Bottom: 1114926957, // 'Btom'
@@ -12,8 +13,10 @@ var charID = {
   Expand: 1165521006, // 'Expn'
   FrameSelect: 1718838636, // 'fsel'
   From: 1181904749, // 'From'
+  Hide: 1214521376, // 'Hd  '
   Horizontal: 1215461998, // 'Hrzn'
   Layer: 1283027488, // 'Lyr '
+  LayerID: 1283027529, // 'LyrI'
   Left: 1281713780, // 'Left'
   Make: 1298866208, // 'Mk  '
   Move: 1836021349, // 'move'
@@ -29,6 +32,7 @@ var charID = {
   Select: 1936483188, // 'slct'
   SelectionClass: 1668506988, // 'csel'
   Set: 1936028772, // 'setd'
+  Show: 1399355168, // 'Shw '
   Size: 1400512544, // 'Sz  '
   Target: 1416783732, // 'Trgt'
   Text: 1417180192, // 'Txt '
@@ -40,6 +44,7 @@ var charID = {
   Tolerance: 1416393326, // 'Tlrn'
   Top: 1416589344, // 'Top '
   Vertical: 1450341475, // 'Vrtc'
+  Visible: 1450402412, // 'Vsbl'
   WorkPath: 1467116368, // 'WrkP'
 };
 
@@ -120,6 +125,7 @@ var _hostState = {
     padding: 0,
     selections: [],
   },
+  hiddenCleaningLayerIdsByDocument: {},
   lastOpenedDocId: null,
   suspendedRun: null,
   pathScanFails: 0,
@@ -398,6 +404,110 @@ function _createCurrent(target, id) {
 
 function _getCurrent(target, id) {
   return executeActionGet(_createCurrent(target, id));
+}
+
+function _getCurrentDocumentId() {
+  var documentId = stringIDToTypeID("documentID");
+  return _getCurrent(charID.Document, documentId).getInteger(documentId);
+}
+
+function _documentHasBackgroundLayer() {
+  var reference = new ActionReference();
+  reference.putProperty(charID.Property, charID.Background);
+  reference.putEnumerated(charID.Layer, charID.Ordinal, charID.Back);
+  return executeActionGet(reference).getBoolean(charID.Background);
+}
+
+function _getLayerByIndex(index) {
+  var reference = new ActionReference();
+  reference.putIndex(charID.Layer, index);
+  return executeActionGet(reference);
+}
+
+function _layerExistsById(id) {
+  try {
+    var reference = new ActionReference();
+    reference.putIdentifier(charID.Layer, id);
+    executeActionGet(reference);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function _setLayerVisibilityByIds(ids, visible) {
+  if (!ids || !ids.length) return 0;
+  var references = new ActionList();
+  var added = 0;
+  for (var i = 0; i < ids.length; i++) {
+    // A cleaning layer may have been deleted while hidden. Typesetterer
+    // silently skipped those stale IDs when restoring them.
+    if (visible && !_layerExistsById(ids[i])) continue;
+    var reference = new ActionReference();
+    reference.putIdentifier(charID.Layer, ids[i]);
+    references.putReference(reference);
+    added++;
+  }
+  if (!added) return 0;
+  var descriptor = new ActionDescriptor();
+  descriptor.putList(charID.Null, references);
+  executeAction(visible ? charID.Show : charID.Hide, descriptor, DialogModes.NO);
+  return added;
+}
+
+function _collectVisibleCleaningLayerIds() {
+  var numberOfLayers = stringIDToTypeID("numberOfLayers");
+  var layerSection = stringIDToTypeID("layerSection");
+  var layerSectionStart = stringIDToTypeID("layerSectionStart");
+  var layerSectionEnd = stringIDToTypeID("layerSectionEnd");
+  var index = _getCurrent(charID.Document, numberOfLayers).getInteger(numberOfLayers);
+  // Preserve the real background, or the bottom-most layer when the document
+  // has no formal background layer, exactly as Typesetterer did.
+  var stopIndex = _documentHasBackgroundLayer() ? 0 : 1;
+  var parentVisibility = [];
+  var ids = [];
+
+  while (index > stopIndex) {
+    var layer = _getLayerByIndex(index);
+    var section = layer.getEnumerationValue(layerSection);
+    if (section === layerSectionStart) {
+      parentVisibility.push(layer.getBoolean(charID.Visible));
+    } else if (section === layerSectionEnd) {
+      parentVisibility.pop();
+    } else {
+      var parentsVisible = true;
+      for (var i = 0; i < parentVisibility.length; i++) {
+        parentsVisible = parentsVisible && parentVisibility[i];
+      }
+      if (
+        parentsVisible &&
+        !layer.hasKey(charID.Text) &&
+        !layer.getBoolean(charID.Background) &&
+        layer.getBoolean(charID.Visible) &&
+        !layer.hasKey(charID.AdjustmentLayer)
+      ) {
+        ids.push(layer.getInteger(charID.LayerID));
+      }
+    }
+    index--;
+  }
+  return ids;
+}
+
+function toggleCleaningLayers() {
+  if (!documents.length) return "doc";
+  var documentKey = String(_getCurrentDocumentId());
+  var hiddenByDocument = _hostState.hiddenCleaningLayerIdsByDocument;
+  if (hiddenByDocument.hasOwnProperty(documentKey)) {
+    var idsToRestore = hiddenByDocument[documentKey];
+    _setLayerVisibilityByIds(idsToRestore, true);
+    delete hiddenByDocument[documentKey];
+    return "shown:" + idsToRestore.length;
+  }
+  var idsToHide = _collectVisibleCleaningLayerIds();
+  _setLayerVisibilityByIds(idsToHide, false);
+  hiddenByDocument[documentKey] = idsToHide;
+  return "hidden:" + idsToHide.length;
 }
 
 function _deselect() {

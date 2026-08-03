@@ -1196,6 +1196,10 @@ const changeActiveLayerTextSize = (val, callback = () => {}) => {
   }));
 };
 
+const toggleCleaningLayers = (callback = () => {}) => {
+  csInterface.evalScript("toggleCleaningLayers()", trackHostAction(callback));
+};
+
 // On macOS host.jsx checks the frontmost app itself (via lsappinfo), but
 // ExtendScript has no such option on Windows. There we run a hidden
 // persistent PowerShell watcher that prints the foreground process name
@@ -1471,4 +1475,4 @@ const scanPsdFonts = (path, callback) => {
   );
 };
 
-export { csInterface, locale, openUrl, readStorage, writeToStorage, flushStorageWrite, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, getTypeRSelectionSnapshot, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isHostActionPending, notePanelActivity, isPanelIdle, notePanelInteraction, isPanelInteracting, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
+export { csInterface, locale, openUrl, readStorage, writeToStorage, flushStorageWrite, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, getTypeRSelectionSnapshot, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isHostActionPending, notePanelActivity, isPanelIdle, notePanelInteraction, isPanelInteracting, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, toggleCleaningLayers, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };

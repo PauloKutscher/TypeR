@@ -36,6 +36,13 @@ expectedNewCommands.forEach((id) => {
     `${id} must have its translated label and remain unassigned by default`
   );
 });
+const cleaningLayersBlock = commandBlockById.get("toggleCleaningLayers");
+assert(cleaningLayersBlock, "Missing shortcut command: toggleCleaningLayers");
+assert(
+  /label:\s*"shortcut_toggleCleaningLayers"/.test(cleaningLayersBlock) &&
+    /defaultKeys:\s*\["CTRL",\s*"ALT",\s*"H"\]/.test(cleaningLayersBlock),
+  "toggleCleaningLayers must use its translated label and temporary Ctrl+Alt+H shortcut"
+);
 assert(contextSource.includes("getDefaultShortcuts()"), "Context must read defaults from the shortcut registry");
 assert(!contextSource.includes('add: ["WIN", "CTRL"]'), "Shortcut defaults must not be duplicated in context");
 assert(hotkeySource.includes("shortcutCommands.forEach"), "Hotkey matching must use the shortcut registry");
@@ -84,6 +91,7 @@ const mockRequire = (request) => {
         utilityCalls.push(["setSelectedTextLayers", items, direction, restoreLayerIds]);
         callback(true);
       },
+      toggleCleaningLayers: (...args) => utilityCalls.push(["toggleCleaningLayers", ...args]),
     };
   }
   if (request === "./textLayerPayload") {
@@ -186,6 +194,8 @@ assert.deepStrictEqual(dispatches.shift(), { type: "clearSelections" });
 assert.deepStrictEqual(utilityCalls.shift(), ["deselect"]);
 getCommand("toggleTextShapeR").handler(baseContext);
 assert.deepStrictEqual(dispatches.shift(), { type: "setInlineTextShapeR", value: true });
+getCommand("toggleCleaningLayers").handler(baseContext);
+assert.deepStrictEqual(utilityCalls.shift(), ["toggleCleaningLayers"]);
 getCommand("previousTab").handler(baseContext);
 assert.deepStrictEqual(dispatches.shift(), { type: "switchTab", id: "tab-1" });
 getCommand("nextTab").handler(baseContext);
@@ -214,6 +224,10 @@ localeFiles.forEach((file) => {
       `Missing shortcut_${id} in ${path.relative(rootDir, file)}`
     );
   });
+  assert(
+    /^shortcut_toggleCleaningLayers=/m.test(source),
+    `Missing shortcut_toggleCleaningLayers in ${path.relative(rootDir, file)}`
+  );
   assert(/^shortcutConflict=.*\{actions\}/m.test(source), `Missing shortcutConflict placeholder in ${path.relative(rootDir, file)}`);
   ["createLayerDescr", "alignLayerDescr", "insertStyledText"].forEach((key) => {
     const line = source.match(new RegExp(`^${key}=(.*)$`, "m"));
