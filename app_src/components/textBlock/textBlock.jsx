@@ -2,12 +2,14 @@ import "./textBlock.scss";
 
 import React from "react";
 import PropTypes from "prop-types";
-import { FiArrowRightCircle, FiTarget } from "react-icons/fi";
+import { FiArrowRightCircle, FiBold, FiItalic, FiTarget } from "react-icons/fi";
 
 import config from "../../config";
 import { locale, setActiveLayerText, resizeTextArea, scrollToLine, openFile, convertHtmlToMarkdown, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { notePerfRender } from "../../perfDebug";
+import { formatMarkdownSelection } from "../../markdownFormatting";
+import { createPageImageLookup, getImageForPage } from "../../pageImageMapping";
 
 const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -83,12 +85,17 @@ const TextBlock = React.memo(function TextBlock() {
   const direction = context.state.direction || "ltr";
   const markdownEnabled = context.state.interpretMarkdown !== false;
   const [focused, setFocused] = React.useState(false);
+  const [selection, setSelection] = React.useState({ start: 0, end: 0 });
   const lastOpenedPath = React.useRef(null);
   const textAreaRef = React.useRef(null);
   const linesRef = React.useRef(null);
   const [rowLayout, setRowLayout] = React.useState(null);
   const [viewport, setViewport] = React.useState({ top: 0, height: 600 });
   const scrollFrameRef = React.useRef(null);
+  const pageImageLookup = React.useMemo(
+    () => createPageImageLookup(context.state.images),
+    [context.state.images]
+  );
 
   // Fix: only resize when text changes, not on every render
   React.useEffect(resizeTextArea, [context.state.text]);
@@ -200,39 +207,36 @@ const TextBlock = React.memo(function TextBlock() {
   );
 
   React.useEffect(() => {
-    let pageIndex = 0;
-    let currentPage = 0;
+    let image = context.state.images[0] || null;
     for (const line of context.state.lines) {
       if (line.ignore) {
         const page = line.rawText.match(/Page ([0-9]+)/i);
-        if (page && context.state.images[page[1] - 1]) {
-          const img = context.state.images[page[1] - 1];
-          currentPage = context.state.images.indexOf(img);
-        }
+        const pageImage = page
+          ? getImageForPage(context.state.images, Number(page[1]), pageImageLookup)
+          : null;
+        if (pageImage) image = pageImage;
       }
       if (line.rawIndex === context.state.currentLineIndex) {
-        pageIndex = currentPage;
         break;
       }
     }
-    const image = context.state.images[pageIndex];
     if (image && image.path !== lastOpenedPath.current) {
       openFile(image.path, context.state.autoClosePSD);
       lastOpenedPath.current = image.path;
       context.dispatch({ type: "setLastOpenedImagePath", path: image.path });
     }
-  }, [context.state.currentLineIndex, context.state.autoClosePSD, context.state.images, context.state.lines]);
+  }, [context.state.currentLineIndex, context.state.autoClosePSD, context.state.images, context.state.lines, pageImageLookup]);
 
   // Precompute line numbers (handles the cumulative page counter)
   const linesWithNums = React.useMemo(() => {
-    let currentPage = 0;
     return context.state.lines.map((line) => {
       let lineNum;
       if (line.ignore) {
         const page = line.rawText.match(/Page ([0-9]+)/i);
-        if (page && context.state.images[page[1] - 1]) {
-          const currentImage = context.state.images[page[1] - 1];
-          currentPage = context.state.images.indexOf(currentImage);
+        const currentImage = page
+          ? getImageForPage(context.state.images, Number(page[1]), pageImageLookup)
+          : null;
+        if (currentImage) {
           lineNum = currentImage.name;
         } else {
           lineNum = " ";
@@ -242,7 +246,7 @@ const TextBlock = React.memo(function TextBlock() {
       }
       return { line, lineNum };
     });
-  }, [context.state.lines, context.state.images]);
+  }, [context.state.lines, context.state.images, pageImageLookup]);
 
   // Measure the real wrapped height of each row once, then keep only the rows
   // near the viewport mounted. The textarea remains the source of the total
@@ -366,6 +370,46 @@ const TextBlock = React.memo(function TextBlock() {
     [context.dispatch]
   );
 
+  const updateSelection = React.useCallback(() => {
+    const textArea = textAreaRef.current;
+    if (!textArea) return;
+    setSelection({ start: textArea.selectionStart, end: textArea.selectionEnd });
+  }, []);
+
+  const applySelectionFormat = React.useCallback(
+    (format) => {
+      const textArea = textAreaRef.current;
+      if (!markdownEnabled || !textArea || textArea.selectionStart === textArea.selectionEnd) return;
+      const result = formatMarkdownSelection(
+        context.state.text || "",
+        textArea.selectionStart,
+        textArea.selectionEnd,
+        format
+      );
+      context.dispatch({ type: "setText", text: result.text });
+      setSelection({ start: result.selectionStart, end: result.selectionEnd });
+      requestAnimationFrame(() => {
+        if (!textAreaRef.current) return;
+        textAreaRef.current.focus();
+        textAreaRef.current.setSelectionRange(result.selectionStart, result.selectionEnd);
+      });
+    },
+    [context.dispatch, context.state.text, markdownEnabled]
+  );
+
+  const handleFormatMouseDown = React.useCallback((event) => event.preventDefault(), []);
+  const handleTextKeyDown = React.useCallback(
+    (event) => {
+      if (!markdownEnabled || !(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const key = String(event.key || "").toLowerCase();
+      if (key !== "b" && key !== "i") return;
+      if (!textAreaRef.current || textAreaRef.current.selectionStart === textAreaRef.current.selectionEnd) return;
+      event.preventDefault();
+      applySelectionFormat(key === "b" ? "bold" : "italic");
+    },
+    [applySelectionFormat, markdownEnabled]
+  );
+
   // Parsing the whole script for the overlay is costly; only redo it when the
   // text itself changes, not on every unrelated context update
   const overlayContent = React.useMemo(
@@ -373,7 +417,11 @@ const TextBlock = React.memo(function TextBlock() {
     [renderMarkdownOverlay, context.state.text]
   );
   const handleFocus = React.useCallback(() => setFocused(true), []);
-  const handleBlur = React.useCallback(() => setFocused(false), []);
+  const handleBlur = React.useCallback(() => {
+    setFocused(false);
+    setSelection({ start: 0, end: 0 });
+  }, []);
+  const hasSelection = markdownEnabled && focused && selection.end > selection.start;
 
   return (
     <React.Fragment>
@@ -402,9 +450,35 @@ const TextBlock = React.memo(function TextBlock() {
         value={context.state.text}
         onChange={handleTextChange}
         onPaste={handlePaste}
+        onSelect={updateSelection}
+        onKeyUp={updateSelection}
+        onMouseUp={updateSelection}
+        onKeyDown={handleTextKeyDown}
         onFocus={handleFocus}
         onBlur={handleBlur}
       />
+      {hasSelection && (
+        <div className="text-format-toolbar" role="toolbar">
+          <button
+            type="button"
+            onMouseDown={handleFormatMouseDown}
+            onClick={() => applySelectionFormat("bold")}
+            title={`${locale.textFormatBold || "Bold"} (Ctrl+B)`}
+            aria-label={locale.textFormatBold || "Bold"}
+          >
+            <FiBold size={13} />
+          </button>
+          <button
+            type="button"
+            onMouseDown={handleFormatMouseDown}
+            onClick={() => applySelectionFormat("italic")}
+            title={`${locale.textFormatItalic || "Italic"} (Ctrl+I)`}
+            aria-label={locale.textFormatItalic || "Italic"}
+          >
+            <FiItalic size={13} />
+          </button>
+        </div>
+      )}
       {!context.state.lines.length && !focused && (
         <div className="text-message" dir={direction}>
           <div>{locale.pasteTextHint}</div>
