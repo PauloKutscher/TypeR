@@ -189,6 +189,15 @@ chmod +x install_mac.sh
 
 On Apple Silicon, some Photoshop/CEP combinations may require Photoshop to be launched using Rosetta. If the panel is missing or disabled, check the [troubleshooting section](#troubleshooting).
 
+### Update without opening TypeR
+
+Keep the standalone updater from the downloaded archive and run it whenever you want to check for a stable update:
+
+- On Windows, double-click `update_typer_win.cmd`.
+- On macOS, run `chmod +x update_typer_mac.sh` once, then `./update_typer_mac.sh`.
+
+The updater downloads the latest `TypeR.zip` release directly from GitHub. It does nothing when the installed version is already current, preserves all `storage*` user data, and rolls back the application files if installation fails. Restart Photoshop after a successful update; TypeR itself does not need to be open.
+
 ## Your first typesetting session
 
 1. Open TypeR from **Window → Extensions → TypeR**.

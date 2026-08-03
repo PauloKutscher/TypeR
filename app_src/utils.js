@@ -2,6 +2,7 @@ import "./lib/CSInterface";
 import { resolveStylePointText } from "./textLayerPayload";
 import { findNewerReleases, pickUpdateDownloadUrl } from "./updateLogic";
 import { installUpdateInPlace, uint8ToBase64 } from "./updateInstaller";
+import { UPDATE_TEST_CONFIG_FILE, parseUpdateTestConfig } from "./updateTestMode";
 import {
   PS_EVENT_SELECT,
   PS_EVENT_SET,
@@ -23,19 +24,37 @@ let locale = {};
 
 const openUrl = window.cep.util.openURLInDefaultBrowser;
 
+const getUpdateTestConfig = () => {
+  const result = window.cep.fs.readFile(`${path}/${UPDATE_TEST_CONFIG_FILE}`);
+  if (!result || result.err) return null;
+  return parseUpdateTestConfig(result.data);
+};
+
+const clearUpdateTestConfig = () => {
+  const result = window.cep.fs.deleteFile(`${path}/${UPDATE_TEST_CONFIG_FILE}`);
+  if (typeof result === "number") return result === 0 || result === 2;
+  return !result || !result.err;
+};
+
 const checkUpdate = async (currentVersion) => {
   try {
+    const testConfig = getUpdateTestConfig();
+    const releasesUrl = testConfig
+      ? testConfig.releasesUrl
+      : "https://api.github.com/repos/ScanR/TypeR/releases";
+    const comparisonVersion = testConfig ? testConfig.currentVersion : currentVersion;
     const response = await fetch(
-      "https://api.github.com/repos/ScanR/TypeR/releases",
+      releasesUrl,
       { headers: { Accept: "application/vnd.github.v3.html+json" } }
     );
     if (!response.ok) return null;
     const releases = await response.json();
-    const newerReleases = findNewerReleases(releases, currentVersion);
+    const newerReleases = findNewerReleases(releases, comparisonVersion);
     if (newerReleases.length > 0) {
       return {
         version: newerReleases[0].tag_name,
         downloadUrl: pickUpdateDownloadUrl(newerReleases[0]),
+        testMode: !!testConfig,
         releases: newerReleases.map(release => ({
           version: release.tag_name,
           body: release.body_html || release.body,
@@ -1480,4 +1499,4 @@ const scanPsdFonts = (path, callback) => {
   );
 };
 
-export { csInterface, locale, openUrl, readStorage, writeToStorage, flushStorageWrite, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, getTypeRSelectionSnapshot, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isHostActionPending, notePanelActivity, isPanelIdle, notePanelInteraction, isPanelInteracting, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, toggleCleaningLayers, getHotkeyPressed, onMouseShortcut, startForegroundWatcher, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
+export { csInterface, locale, openUrl, readStorage, writeToStorage, flushStorageWrite, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, getTypeRSelectionSnapshot, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isHostActionPending, notePanelActivity, isPanelIdle, notePanelInteraction, isPanelInteracting, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, toggleCleaningLayers, getHotkeyPressed, onMouseShortcut, startForegroundWatcher, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, getUpdateTestConfig, clearUpdateTestConfig, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };

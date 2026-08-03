@@ -1,6 +1,6 @@
 import React from "react";
 import PropTypes from "prop-types";
-import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, nativeAlert } from "./utils";
+import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, getUpdateTestConfig, clearUpdateTestConfig, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, nativeAlert } from "./utils";
 import { shouldRunUpdateCheck } from "./updateLogic";
 import config from "./config";
 import { getNextLineNumberState } from "./lineNumbering";
@@ -1770,16 +1770,18 @@ const ContextProvider = React.memo(function ContextProvider(props) {
     if (!state.checkUpdates || updateCheckRan.current) return;
     updateCheckRan.current = true;
     const now = Date.now();
+    const updateTestConfig = getUpdateTestConfig();
     // The GitHub API allows 60 unauthenticated requests/hour per IP; one check
-    // per day is plenty. The manual button in the settings bypasses this.
-    if (!shouldRunUpdateCheck(readStorage("lastUpdateCheckAt"), now)) return;
+    // per day is plenty. The manual button and explicit local test mode bypass
+    // this so a test can always run on the next panel startup.
+    if (!updateTestConfig && !shouldRunUpdateCheck(readStorage("lastUpdateCheckAt"), now)) return;
     checkUpdate(config.appVersion).then((data) => {
-      writeToStorage({ lastUpdateCheckAt: now });
+      if (!updateTestConfig) writeToStorage({ lastUpdateCheckAt: now });
       if (!data) return;
       // Already installed on disk, only waiting for a Photoshop restart —
       // do not nag or reinstall in the meantime
-      if (readStorage("lastInstalledUpdateVersion") === data.version) return;
-      if (state.autoUpdate && data.downloadUrl) {
+      if (!data.testMode && readStorage("lastInstalledUpdateVersion") === data.version) return;
+      if ((state.autoUpdate || updateTestConfig?.autoInstall) && data.downloadUrl) {
         downloadAndInstallUpdate(
           data.downloadUrl,
           null,
@@ -1789,7 +1791,11 @@ const ContextProvider = React.memo(function ContextProvider(props) {
               dispatch({ type: "setModal", modal: "update", data });
               return;
             }
-            writeToStorage({ lastInstalledUpdateVersion: data.version });
+            if (data.testMode) {
+              clearUpdateTestConfig();
+            } else {
+              writeToStorage({ lastInstalledUpdateVersion: data.version });
+            }
             nativeAlert(
               (locale.updateAutoInstalled || "TypeR {version} has been installed. Restart Photoshop to apply it.").replace("{version}", data.version),
               locale.successTitle,

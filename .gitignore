@@ -13,6 +13,7 @@ storage/
 Releases/
 TypeR*.zip
 TypeR-*.zxp
+.update-test/
 
 # Logs
 *.log

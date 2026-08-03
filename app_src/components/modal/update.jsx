@@ -1,7 +1,7 @@
 import React from 'react';
 import { FiX, FiDownload, FiRefreshCw, FiCheckCircle } from 'react-icons/fi';
 
-import { locale, openUrl, downloadAndInstallUpdate, nativeAlert, writeToStorage } from '../../utils';
+import { locale, openUrl, downloadAndInstallUpdate, nativeAlert, writeToStorage, clearUpdateTestConfig } from '../../utils';
 import { useContext } from '../../context';
 
 const sanitizeReleaseHtml = (html) => {
@@ -29,7 +29,7 @@ const sanitizeReleaseHtml = (html) => {
 
 const UpdateModal = React.memo(function UpdateModal() {
   const context = useContext((state) => ({ modalData: state.modalData }));
-  const { version, releases, downloadUrl } = context.state.modalData;
+  const { version, releases, downloadUrl, testMode } = context.state.modalData;
   const [isUpdating, setIsUpdating] = React.useState(false);
   const [updateStatus, setUpdateStatus] = React.useState('');
   const [updateReady, setUpdateReady] = React.useState(false);
@@ -77,7 +77,11 @@ const UpdateModal = React.memo(function UpdateModal() {
           // close Photoshop whenever convenient
           setUpdateReady(true);
         } else {
-          writeToStorage({ lastInstalledUpdateVersion: version });
+          if (testMode) {
+            clearUpdateTestConfig();
+          } else {
+            writeToStorage({ lastInstalledUpdateVersion: version });
+          }
           nativeAlert(
             locale.updateSuccess || 'Update installed successfully! Please restart Photoshop to apply changes.',
             locale.successTitle,
