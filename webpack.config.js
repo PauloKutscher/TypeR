@@ -15,6 +15,7 @@ const hostFiles = [
     __dirname + '/app_src/lib/jam/jamText.jsxinc',
     __dirname + '/app_src/lib/jam/jamStyles.jsxinc',
     __dirname + '/app_src/lib/jam/jamUtils.jsxinc',
+    __dirname + '/app_src/fontVariantResolver.jsxinc',
     __dirname + '/app_src/host.js'
 ];
 

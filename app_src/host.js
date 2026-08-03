@@ -1,7 +1,7 @@
-/* globals app, documents, activeDocument, ScriptUI, DialogModes, LayerKind, ActionReference, ActionDescriptor, ActionList, executeAction, executeActionGet, stringIDToTypeID, jamEngine, jamJSON, jamText */
+/* globals app, documents, activeDocument, ScriptUI, DialogModes, LayerKind, ActionReference, ActionDescriptor, ActionList, executeAction, executeActionGet, charIDToTypeID, stringIDToTypeID, jamEngine, jamJSON, jamText */
 
 var charID = {
-  AdjustmentLayer: 1097099891, // 'Adjs'
+  AdjustmentLayer: 1097099891, // 'AdjL'
   Back: 1113678699, // 'Back'
   Background: 1113811815, // 'Bckg'
   Bottom: 1114926957, // 'Btom'
@@ -260,6 +260,47 @@ function _ensureStyle(style) {
     normalized.stroke = _getHostDefaultStroke();
   }
   return normalized;
+}
+
+function _resolveStyleSizeForDocument(style) {
+  if (!style || style.autoSizeByPageWidth !== true || !documents.length) return style;
+  var presets = style.sizePresets;
+  if (!presets || presets.length < 2) return style;
+
+  var pageWidth;
+  try {
+    pageWidth = activeDocument.width && activeDocument.width.as
+      ? activeDocument.width.as("px")
+      : parseFloat(activeDocument.width);
+  } catch (widthError) {
+    return style;
+  }
+  if (isNaN(pageWidth) || pageWidth <= 0) return style;
+
+  var defaultIndex = parseInt(style.sizePresetDefaultIndex, 10);
+  if (isNaN(defaultIndex) || defaultIndex < 0 || defaultIndex >= presets.length) defaultIndex = 0;
+  var selectedSize = parseFloat(presets[defaultIndex]);
+  var selectedThreshold = -1;
+  var minWidths = style.sizePresetMinWidths || [];
+  for (var i = 0; i < presets.length; i++) {
+    if (i === defaultIndex) continue;
+    var threshold = parseFloat(minWidths[i]);
+    var presetSize = parseFloat(presets[i]);
+    if (!isNaN(threshold) && threshold > 0 && !isNaN(presetSize) && presetSize > 0 &&
+        pageWidth >= threshold && threshold > selectedThreshold) {
+      selectedThreshold = threshold;
+      selectedSize = presetSize;
+    }
+  }
+  if (isNaN(selectedSize) || selectedSize <= 0) return style;
+
+  var ranges = style.textProps && style.textProps.layerText && style.textProps.layerText.textStyleRange;
+  if (!ranges || !ranges[0] || !ranges[0].textStyle) return style;
+  ranges[0].textStyle.size = selectedSize;
+  if (ranges[0].textStyle.impliedFontSize != null) {
+    ranges[0].textStyle.impliedFontSize = selectedSize;
+  }
+  return style;
 }
 
 function _changeToPointText() {
@@ -1017,8 +1058,7 @@ function _buildRichTextRanges(baseRange, textRuns, textLength) {
     var runLength = runText.length;
     if (!runLength) continue;
     var textStyle = _clone(baseRange.textStyle);
-    if (run.bold) textStyle.syntheticBold = true;
-    if (run.italic) textStyle.syntheticItalic = true;
+    resolveTypeRFontVariant(textStyle, run, app.fonts);
     ranges.push({
       from: offset,
       to: offset + runLength,
@@ -1046,7 +1086,7 @@ function _applyRichTextRanges(textParams, textRuns, textLength) {
 }
 
 function _createAndSetLayerText(data, width, height) {
-  var style = _ensureStyle(data.style);
+  var style = _resolveStyleSizeForDocument(_ensureStyle(data.style));
   style.textProps.layerText.textKey = _normalizeTextKey(data.text);
   style.textProps.layerText.textStyleRange[0].to = data.text.length;
   style.textProps.layerText.paragraphStyleRange[0].to = data.text.length;
@@ -1219,14 +1259,16 @@ function _setActiveLayerText() {
     return;
   }
   var dataText = payload.text;
-  var dataStyle = payload.style;
+  var dataStyle = payload.style
+    ? _resolveStyleSizeForDocument(_clone(payload.style))
+    : payload.style;
   var dataRuns = payload.richTextRuns;
   var targetTextLength = 0;
 
   // "Paste text to the current layer" is deliberately content-only. Assigning
   // contents directly avoids writing any font, size, paragraph, direction,
   // text-box or position property.
-  if (payload.contentOnly) {
+  if (payload.contentOnly && (!dataRuns || !dataRuns.length)) {
     _forEachSelectedLayer(function () {
       app.activeDocument.activeLayer.textItem.contents = _normalizeTextKey(dataText);
     });
@@ -1324,7 +1366,12 @@ function _setActiveLayerText() {
       bounds.right = bounds.left + targetWidth;
       bounds.bottom = bounds.top + targetHeight;
     }
-    newTextParams.layerText.antiAlias = oldTextParams.layerText.antiAlias || "antiAliasSmooth";
+    // Applying a style must carry its configured anti-aliasing mode to the
+    // layer. Keep the current value only for legacy styles that do not store
+    // an antiAlias setting.
+    var styleAntiAlias = dataStyle && dataStyle.textProps && dataStyle.textProps.layerText &&
+      dataStyle.textProps.layerText.antiAlias;
+    newTextParams.layerText.antiAlias = styleAntiAlias || oldTextParams.layerText.antiAlias || "antiAliasSmooth";
     if (retainedShape) {
       newTextParams.layerText.textShape = [retainedShape];
     }
@@ -1460,7 +1507,8 @@ function _setTextShapeRText() {
   }
   var convertedToPoint = false;
   try {
-    var snapshot = payload.style.textProps;
+    var resolvedStyle = _resolveStyleSizeForDocument(_clone(payload.style));
+    var snapshot = resolvedStyle.textProps;
     var dataText = payload.text;
     var oldBounds = _getCurrentTextLayerBounds();
     var isPoint = _textLayerIsPointText();
@@ -3380,6 +3428,27 @@ function makeExecutable(filePath) {
       app.system('chmod +x "' + filePath + '"');
     }
     return 'OK';
+  } catch (e) {
+    return 'ERROR: ' + e.message;
+  }
+}
+
+function launchInstaller(filePath) {
+  try {
+    var file = new File(filePath);
+    if (!file.exists) {
+      return 'ERROR: file not found';
+    }
+    // execute() opens the file with its default handler: a console window for
+    // .cmd on Windows, Terminal for an executable .command on macOS
+    var launched = file.execute();
+    if (launched) return 'OK';
+    var os = $.os.toLowerCase();
+    if (os.indexOf('mac') !== -1) {
+      app.system('open "' + file.fsName + '"');
+      return 'OK';
+    }
+    return 'ERROR: execute failed';
   } catch (e) {
     return 'ERROR: ' + e.message;
   }

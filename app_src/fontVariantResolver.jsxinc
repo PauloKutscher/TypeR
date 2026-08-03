@@ -1,0 +1,95 @@
+(function (root) {
+  function normalize(value) {
+    return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  }
+
+  function getTraits(styleName) {
+    var value = String(styleName || "").toLowerCase();
+    return {
+      bold: /(bold|demi|semi|black|heavy)/.test(value),
+      italic: /(italic|oblique|slanted)/.test(value),
+    };
+  }
+
+  var cachedCollection = null;
+  var cachedLength = -1;
+  var cachedFonts = [];
+
+  function getFontRecords(fonts) {
+    var length = fonts && typeof fonts.length === "number" ? fonts.length : 0;
+    if (fonts === cachedCollection && length === cachedLength) return cachedFonts;
+    var records = [];
+    for (var i = 0; i < length; i++) {
+      var font = fonts[i] || {};
+      records.push({
+        font: font,
+        name: normalize(font.name),
+        postScriptName: normalize(font.postScriptName),
+        family: normalize(font.family),
+        traits: getTraits(font.style),
+      });
+    }
+    cachedCollection = fonts;
+    cachedLength = length;
+    cachedFonts = records;
+    return records;
+  }
+
+  function findBaseFont(records, textStyle) {
+    var postScriptName = normalize(textStyle.fontPostScriptName);
+    var fontName = normalize(textStyle.fontName);
+    var i;
+    if (postScriptName) {
+      for (i = 0; i < records.length; i++) {
+        if (records[i].postScriptName === postScriptName || records[i].name === postScriptName) return records[i];
+      }
+    }
+    if (fontName) {
+      for (i = 0; i < records.length; i++) {
+        if (records[i].name === fontName || records[i].family === fontName) return records[i];
+      }
+    }
+    return null;
+  }
+
+  function resolveTypeRFontVariant(textStyle, run, fonts) {
+    if (!textStyle || !run || (!run.bold && !run.italic)) return textStyle;
+    var records = getFontRecords(fonts);
+    var base = findBaseFont(records, textStyle);
+    var styleTraits = getTraits(textStyle.fontStyleName);
+    var baseTraits = base ? base.traits : styleTraits;
+    var wantsBold = !!(run.bold || textStyle.syntheticBold || baseTraits.bold || styleTraits.bold);
+    var wantsItalic = !!(run.italic || textStyle.syntheticItalic || baseTraits.italic || styleTraits.italic);
+    var family = base ? base.family : normalize(textStyle.fontName);
+    var best = base;
+    var bestScore = -1;
+
+    for (var i = 0; i < records.length; i++) {
+      var candidate = records[i];
+      if (!family || candidate.family !== family) continue;
+      if (candidate.traits.bold && !wantsBold) continue;
+      if (candidate.traits.italic && !wantsItalic) continue;
+      var score = 0;
+      if (wantsBold && candidate.traits.bold) score += run.bold ? 200 : 100;
+      if (wantsItalic && candidate.traits.italic) score += run.italic ? 200 : 100;
+      if (candidate === base) score += 5;
+      if (score > bestScore) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+
+    var resolvedTraits = best ? best.traits : baseTraits;
+    if (best) {
+      textStyle.fontPostScriptName = best.font.postScriptName || best.font.name || textStyle.fontPostScriptName;
+      textStyle.fontName = best.font.family || best.font.name || textStyle.fontName;
+      textStyle.fontStyleName = best.font.style || textStyle.fontStyleName;
+    }
+    textStyle.syntheticBold = !!(wantsBold && !resolvedTraits.bold);
+    textStyle.syntheticItalic = !!(wantsItalic && !resolvedTraits.italic);
+    return textStyle;
+  }
+
+  root.resolveTypeRFontVariant = resolveTypeRFontVariant;
+  if (typeof module !== "undefined" && module.exports) module.exports = { resolveTypeRFontVariant: resolveTypeRFontVariant };
+})(this);
