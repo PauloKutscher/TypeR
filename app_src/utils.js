@@ -1012,7 +1012,13 @@ const getAllLayersRenderedTexts = (scanBubbles, callback = () => {}) => {
 const getSelectionChanged = (callback = () => {}) => {
   csInterface.evalScript("getSelectionChanged()", (result) => {
     const data = safeJsonParse(result);
-    if (Date.now() < selectionResultsSuppressedUntil || data.noChange || data.error || typeof data.width !== "number") {
+    if (Date.now() < selectionResultsSuppressedUntil || data.noChange || data.error) {
+      callback(null);
+    } else if (data.multipleSelections) {
+      // The host saw one selection grow around the previous one (Shift-add):
+      // no bounds are usable, the panel should only warn the user
+      callback({ multipleSelections: true });
+    } else if (typeof data.width !== "number") {
       callback(null);
     } else {
       callback(data);

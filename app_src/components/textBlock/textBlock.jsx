@@ -13,6 +13,59 @@ import { createPageImageLookup, getImageForPage } from "../../pageImageMapping";
 
 const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const textSelectionMirrorProperties = [
+  "boxSizing", "fontFamily", "fontSize", "fontWeight", "fontStyle", "fontVariant",
+  "lineHeight", "letterSpacing", "wordSpacing", "textIndent", "textAlign", "textTransform",
+  "direction", "tabSize", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+  "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth",
+  "whiteSpace", "wordBreak", "overflowWrap",
+];
+
+const getTextAreaSelectionRects = (textArea) => {
+  if (!textArea || typeof document === "undefined" || typeof window === "undefined") return [];
+  const start = textArea.selectionStart;
+  const end = textArea.selectionEnd;
+  if (start === end) return [];
+
+  const computed = window.getComputedStyle(textArea);
+  const mirrorParent = textArea.offsetParent || textArea.parentElement;
+  if (!mirrorParent) return [];
+  const mirror = document.createElement("div");
+  mirror.setAttribute("aria-hidden", "true");
+  mirror.style.position = "absolute";
+  mirror.style.visibility = "hidden";
+  mirror.style.pointerEvents = "none";
+  mirror.style.overflow = "hidden";
+  mirror.style.left = `${textArea.offsetLeft}px`;
+  mirror.style.top = `${textArea.offsetTop}px`;
+  mirror.style.width = `${textArea.offsetWidth}px`;
+  mirror.style.minHeight = `${textArea.offsetHeight}px`;
+  textSelectionMirrorProperties.forEach((property) => {
+    mirror.style[property] = computed[property];
+  });
+
+  mirror.appendChild(document.createTextNode(textArea.value.slice(0, start)));
+  const selected = document.createElement("span");
+  selected.textContent = textArea.value.slice(start, end);
+  mirror.appendChild(selected);
+  mirror.appendChild(document.createTextNode(textArea.value.slice(end) || "\u200b"));
+  mirrorParent.appendChild(mirror);
+
+  let rects = [];
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(selected);
+    rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+    if (!rects.length) {
+      const rect = selected.getBoundingClientRect();
+      if (rect.height > 0) rects = [rect];
+    }
+  } finally {
+    mirror.remove();
+  }
+  return rects;
+};
+
 // Extracted memoized line component to avoid re-rendering every line on each render
 const LineItem = React.memo(function LineItem({ line, direction, isCurrent, dispatch, renderHighlightedText, lineNum }) {
   const className = "text-line" +
@@ -86,8 +139,10 @@ const TextBlock = React.memo(function TextBlock() {
   const markdownEnabled = context.state.interpretMarkdown !== false;
   const [focused, setFocused] = React.useState(false);
   const [selection, setSelection] = React.useState({ start: 0, end: 0 });
+  const [formatToolbarPosition, setFormatToolbarPosition] = React.useState(null);
   const lastOpenedPath = React.useRef(null);
   const textAreaRef = React.useRef(null);
+  const formatToolbarRef = React.useRef(null);
   const linesRef = React.useRef(null);
   const [rowLayout, setRowLayout] = React.useState(null);
   const [viewport, setViewport] = React.useState({ top: 0, height: 600 });
@@ -423,6 +478,60 @@ const TextBlock = React.memo(function TextBlock() {
   }, []);
   const hasSelection = markdownEnabled && focused && selection.end > selection.start;
 
+  const updateFormatToolbarPosition = React.useCallback(() => {
+    const textArea = textAreaRef.current;
+    if (!textArea || textArea.selectionStart === textArea.selectionEnd) {
+      setFormatToolbarPosition(null);
+      return;
+    }
+    const blockRect = textArea.parentElement.getBoundingClientRect();
+    const selectionRect = getTextAreaSelectionRects(textArea).find((rect) => (
+      rect.bottom >= blockRect.top && rect.top <= blockRect.bottom
+    ));
+    if (!selectionRect) {
+      setFormatToolbarPosition(null);
+      return;
+    }
+
+    const toolbarWidth = formatToolbarRef.current?.offsetWidth || 58;
+    const toolbarHeight = formatToolbarRef.current?.offsetHeight || 28;
+    const selectionCenter = selectionRect.left + selectionRect.width / 2;
+    const left = Math.max(
+      toolbarWidth / 2 + 4,
+      Math.min(window.innerWidth - toolbarWidth / 2 - 4, selectionCenter)
+    );
+    const aboveTop = selectionRect.top - 6;
+    const below = aboveTop - toolbarHeight < 4;
+    setFormatToolbarPosition({
+      left,
+      top: below ? selectionRect.bottom + 6 : aboveTop,
+      below,
+    });
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (!hasSelection) {
+      setFormatToolbarPosition(null);
+      return undefined;
+    }
+    const textArea = textAreaRef.current;
+    const scrollContainer = textArea?.parentElement;
+    let frame = null;
+    const update = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(updateFormatToolbarPosition);
+    };
+    updateFormatToolbarPosition();
+    update();
+    scrollContainer?.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    return () => {
+      scrollContainer?.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [context.state.text, hasSelection, selection.end, selection.start, updateFormatToolbarPosition]);
+
   return (
     <React.Fragment>
       <div className="text-lines" ref={linesRef}>
@@ -457,8 +566,13 @@ const TextBlock = React.memo(function TextBlock() {
         onFocus={handleFocus}
         onBlur={handleBlur}
       />
-      {hasSelection && (
-        <div className="text-format-toolbar" role="toolbar">
+      {hasSelection && formatToolbarPosition && (
+        <div
+          ref={formatToolbarRef}
+          className={"text-format-toolbar" + (formatToolbarPosition.below ? " m-below" : "")}
+          role="toolbar"
+          style={{ left: formatToolbarPosition.left, top: formatToolbarPosition.top }}
+        >
           <button
             type="button"
             onMouseDown={handleFormatMouseDown}

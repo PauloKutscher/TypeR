@@ -116,6 +116,7 @@ var _hostState = {
   selectionMonitor: {
     lastBoundsKey: null,
     lastBounds: null,
+    multiWarnBounds: null,
     callback: null,
   },
   createTextLayersInStoredSelections: {
@@ -2926,6 +2927,7 @@ function stopSelectionMonitoring() {
   }
   monitor.lastBoundsKey = null;
   monitor.lastBounds = null;
+  monitor.multiWarnBounds = null;
 }
 
 function deselectDocumentSelection() {
@@ -2937,6 +2939,7 @@ function deselectDocumentSelection() {
     var monitor = _hostState.selectionMonitor;
     monitor.lastBounds = null;
     monitor.lastBoundsKey = null;
+    monitor.multiWarnBounds = null;
     return "";
   } catch (e) {
     return "error";
@@ -2988,6 +2991,7 @@ function getSelectionChanged() {
 
     var rawSelection = _getCurrentSelectionBounds();
     if (!rawSelection) {
+      monitor.multiWarnBounds = null;
       return jamJSON.stringify({ noChange: true, shiftKey: shiftPressed });
     }
 
@@ -3080,6 +3084,32 @@ function getSelectionChanged() {
     if (isSame && !shiftPressed) {
       return jamJSON.stringify({ noChange: true, shiftKey: shiftPressed });
     }
+
+    // The union of a flagged Shift-add stays suppressed until the user makes
+    // a fresh selection: capturing it once Shift is released would silently
+    // create one bubble spanning several selections right after the panel
+    // warned that this is not supported.
+    if (monitor.multiWarnBounds && merged.length === 1 &&
+      Math.abs(merged[0].top - monitor.multiWarnBounds.top) <= 5 &&
+      Math.abs(merged[0].left - monitor.multiWarnBounds.left) <= 5 &&
+      Math.abs(merged[0].right - monitor.multiWarnBounds.right) <= 5 &&
+      Math.abs(merged[0].bottom - monitor.multiWarnBounds.bottom) <= 5) {
+      return jamJSON.stringify({ noChange: true, shiftKey: shiftPressed });
+    }
+
+    // Shift-adding a second outline never shrinks the selection: Photoshop
+    // reports a single union rectangle that still contains the previously
+    // seen bounds. Warn the panel instead of capturing that union as one
+    // giant bubble, and remember it so it is not captured later either.
+    if (shiftPressed && !isSame && monitor.lastBounds && merged.length === 1 &&
+      merged[0].top <= monitor.lastBounds.top + 5 &&
+      merged[0].left <= monitor.lastBounds.left + 5 &&
+      merged[0].right >= monitor.lastBounds.right - 5 &&
+      merged[0].bottom >= monitor.lastBounds.bottom - 5) {
+      monitor.multiWarnBounds = merged[0];
+      return jamJSON.stringify({ multipleSelections: true, shiftKey: shiftPressed });
+    }
+    monitor.multiWarnBounds = null;
 
     // Stored multi-bubble selections only retain bounds, so clean a newly
     // captured selection while its real outline is still available.

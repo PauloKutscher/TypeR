@@ -859,6 +859,13 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       selectionCheckPending.current = false;
       if (selection) {
         notePanelActivity();
+        // The host detected a Shift-add growing the previous selection:
+        // multi-bubble needs one selection at a time, so warn instead of
+        // storing a selection spanning several outlines
+        if (selection.multipleSelections) {
+          showShiftTip();
+          return;
+        }
         if (selection.multiSelection && selection.multiSelection.length > 0) {
           const storedHashSet = new Set((context.state.storedSelections || []).map((storedSelection) => getSelectionBoundsHash(storedSelection)));
           let nextLineIndex = context.state.currentLineIndex;
