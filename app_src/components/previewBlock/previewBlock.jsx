@@ -1,7 +1,7 @@
 import "./previewBlock.scss";
 
 import React from "react";
-import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiChevronsRight, FiPlay, FiRefreshCw, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiRotateCcw, FiStar, FiX } from "react-icons/fi";
+import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiChevronsRight, FiPlay, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiInfo, FiRotateCcw, FiStar, FiX } from "react-icons/fi";
 import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
@@ -139,6 +139,10 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     textSizeIncrement: state.textSizeIncrement,
     showTips: state.showTips,
     textShapeRPerformanceTipVisible: state.textShapeRPerformanceTipVisible,
+    textShapeRUsageCount: state.textShapeRUsageCount,
+    textShapeRLearnUsed: state.textShapeRLearnUsed,
+    textShapeRLearnTipShown: state.textShapeRLearnTipShown,
+    textShapeRLearnTipVisible: state.textShapeRLearnTipVisible,
     shortcut: state.shortcut,
   }));
   const uiVisible = context.state.uiLayout?.visible || {};
@@ -164,6 +168,19 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   React.useEffect(() => {
     context.dispatch({ type: "showTextShapeRPerformanceTip" });
   }, [context.dispatch]);
+  React.useEffect(() => {
+    context.dispatch({ type: "showTextShapeRLearnTip" });
+  }, [
+    context.dispatch,
+    context.state.inlineTextShapeR,
+    context.state.showTips,
+    context.state.textShapeRUsageCount,
+    context.state.textShapeRLearnUsed,
+    context.state.textShapeRLearnTipShown,
+    context.state.textShapeRTuning,
+    uiVisible.preview,
+    uiVisible.previewWidget,
+  ]);
   const style = context.state.currentStyle || {};
   const line = context.state.currentLine || { text: "" };
   const textStyle = style.textProps?.layerText?.textStyleRange?.[0]?.textStyle || emptyTextStyle;
@@ -1035,6 +1052,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     setLayerTextFast(variant.text, inlineLayerSource.style, context.state.direction, (ok) => {
       setApplyingTextShapeRId(null);
       if (!ok) return;
+      context.dispatch({ type: "recordTextShapeRUse" });
       // In batch mode a picked shape moves on to the next queued layer
       if (batchRunRef.current) {
         advanceTextShapeRBatch();
@@ -1136,7 +1154,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
             flashShapeFeedback(locale.textShapeRLearnAllEmpty || "No text layers found to learn from");
             return;
           }
-          context.dispatch({ type: "setTextShapeRTuning", value: tuningState });
+          context.dispatch({ type: "setTextShapeRTuning", value: tuningState, learned: true });
           flashShapeFeedback((locale.textShapeRLearnAllSaved || "Learned from {count} layers — suggestions will follow this style")
             .replace("{count}", learned));
         } finally {
@@ -1163,7 +1181,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       // Apply to the generator before dispatching so the re-render (whose memo
       // depends on the stored tuning) already sees the new knobs
       textShapeREngine.setTextShapeRTuning(result.tuning);
-      context.dispatch({ type: "setTextShapeRTuning", value: result.tuning });
+      context.dispatch({ type: "setTextShapeRTuning", value: result.tuning, learned: true });
       flashShapeFeedback((locale.textShapeRMarkBestSaved || "Preference saved ({count} lines) — suggestions will follow this style")
         .replace("{count}", result.chosenLineCount));
     });
@@ -1178,6 +1196,12 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       context.dispatch({ type: "setTextSizeIncrement", increment: 1 });
     }
   }, [context.state.textSizeIncrement, context.dispatch]);
+
+  const showTextShapeRLearnTip = context.state.textShapeRLearnTipVisible &&
+    !context.state.textShapeRLearnUsed &&
+    !!inlineLayerSource.text &&
+    !inlineLayerSource.loading &&
+    !batchRun;
 
   return (
     <React.Fragment>
@@ -1287,7 +1311,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
             </span>
           </div>
         ) : context.state.inlineTextShapeR ? (
-          <div className="preview-textshaper hostBgdDark" onMouseEnter={handleTextShapeRMouseEnter}>
+          <div className={"preview-textshaper hostBgdDark" + (showTextShapeRLearnTip ? " has-learn-tip" : "")} onMouseEnter={handleTextShapeRMouseEnter}>
             <div className="preview-textshaper-head">
               <div className="preview-textshaper-title">
                 <span>{locale.textShapeRTitle || "TextShapeR"}</span>
@@ -1346,15 +1370,34 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                 >
                   <FaMagic size={10} />
                 </button>
-                <button
-                  type="button"
-                  className={"preview-textshaper-markbest" + (context.state.textShapeRTuning?.samples ? " is-active" : "")}
-                  onClick={markLayerShapeAsBest}
-                  disabled={!inlineLayerSource.text || inlineLayerSource.loading || !!batchRun}
-                  title={locale.textShapeRMarkBest || "Learn text shape. Alt-click: all layers + bubble outlines. Ctrl-click: all layers (fast). Shift-click: reset."}
-                >
-                  <FiStar size={11} />
-                </button>
+                <span className="preview-textshaper-learn-anchor">
+                  {showTextShapeRLearnTip ? (
+                    <span className="preview-textshaper-learn-tip" role="status">
+                      <FiInfo size={12} />
+                      <span className="preview-textshaper-learn-tip-text">
+                        {locale.textShapeRLearnTip || "Improve TextShapeR with your own typesets: click the star to teach it your style."}
+                      </span>
+                      <button
+                        type="button"
+                        className="preview-textshaper-learn-tip-close"
+                        onClick={() => context.dispatch({ type: "hideTextShapeRLearnTip" })}
+                        title={locale.close || "Close"}
+                        aria-label={locale.close || "Close"}
+                      >
+                        <FiX size={11} />
+                      </button>
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    className={"preview-textshaper-markbest" + (context.state.textShapeRTuning?.samples ? " is-active" : "")}
+                    onClick={markLayerShapeAsBest}
+                    disabled={!inlineLayerSource.text || inlineLayerSource.loading || !!batchRun}
+                    title={locale.textShapeRMarkBest || "Learn text shape. Alt-click: all layers + bubble outlines. Ctrl-click: all layers (fast). Shift-click: reset."}
+                  >
+                    <FiStar size={11} />
+                  </button>
+                </span>
                 <button
                   type="button"
                   onClick={undoTextShapeRApply}
@@ -1362,14 +1405,6 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                   title={locale.textShapeRUndo || "Undo the last applied shape (steps Photoshop history back)"}
                 >
                   <FiRotateCcw size={11} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { refreshInlineLayerSource(true); refreshInlineSelectionShape(true); }}
-                  disabled={inlineLayerSource.loading}
-                  title={locale.textShapeRLayerRefreshHint || "Refresh the selected Photoshop text layer, its style, and the bubble/selection shape"}
-                >
-                  <FiRefreshCw size={11} />
                 </button>
                 <button
                   type="button"

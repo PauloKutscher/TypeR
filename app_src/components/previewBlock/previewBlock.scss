@@ -278,6 +278,10 @@
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+
+  &.has-learn-tip {
+    overflow: visible;
+  }
 }
 
 .preview-textshaper-learning {
@@ -408,6 +412,108 @@
     min-width: 22px;
     opacity: 0.5;
     text-align: center;
+  }
+}
+
+.preview-textshaper-learn-anchor {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 0 !important;
+  opacity: 1 !important;
+  position: relative;
+  text-align: left !important;
+}
+
+.preview-textshaper-learn-tip {
+  align-items: flex-start;
+  background: rgba(#17334a, 0.98);
+  border: 1px solid rgba(#288edf, 0.8);
+  border-radius: 5px;
+  box-shadow: 0 4px 14px rgba(#000, 0.35);
+  box-sizing: border-box;
+  color: #e8f5ff;
+  display: flex;
+  font-size: 11px !important;
+  gap: 5px;
+  line-height: 1.3 !important;
+  min-width: 0 !important;
+  opacity: 1 !important;
+  padding: 7px 6px 7px 7px;
+  position: absolute;
+  right: -8px;
+  text-align: left !important;
+  bottom: calc(100% + 8px);
+  width: 224px;
+  z-index: 20;
+
+  &::after {
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 6px solid rgba(#288edf, 0.8);
+    bottom: -7px;
+    content: "";
+    position: absolute;
+    right: 8px;
+  }
+
+  &::before {
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 5px solid rgba(#17334a, 0.98);
+    bottom: -5px;
+    content: "";
+    position: absolute;
+    right: 9px;
+    z-index: 1;
+  }
+
+  svg {
+    color: #64b5f6;
+    flex: 0 0 auto;
+    margin-top: 1px;
+  }
+}
+
+.preview-textshaper-learn-tip-text {
+  flex: 1 1 auto;
+  font-size: 11px !important;
+  line-height: 1.3 !important;
+  min-width: 0 !important;
+  opacity: 1 !important;
+  text-align: left !important;
+}
+
+.preview-textshaper-learn-tip-close {
+  align-items: center !important;
+  color: inherit !important;
+  flex: 0 0 auto !important;
+  height: 14px !important;
+  opacity: 0.65 !important;
+  padding: 0 !important;
+  width: 14px !important;
+
+  &:hover:not(:disabled) {
+    color: #fff !important;
+    opacity: 1 !important;
+  }
+}
+
+.light-theme .preview-textshaper-learn-tip {
+  background: #eef7ff;
+  border-color: rgba(#1976d2, 0.55);
+  box-shadow: 0 4px 14px rgba(#000, 0.2);
+  color: #17476b;
+
+  &::after {
+    border-top-color: rgba(#1976d2, 0.55);
+  }
+
+  &::before {
+    border-top-color: #eef7ff;
+  }
+
+  svg {
+    color: #1976d2;
   }
 }
 
