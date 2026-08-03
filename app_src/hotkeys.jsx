@@ -1,6 +1,6 @@
 import React from "react";
 
-import { csInterface, getHotkeyPressed, isHostActionPending, isPanelIdle, isPanelInteracting, notePanelActivity } from "./utils";
+import { csInterface, getHotkeyPressed, isHostActionPending, isPanelIdle, isPanelInteracting, notePanelActivity, onMouseShortcut, startForegroundWatcher } from "./utils";
 import { useContext } from "./context";
 import { shortcutCommands } from "./shortcutCommands";
 
@@ -23,6 +23,25 @@ const matchBinding = (state, shortcut) => {
   shortcutCommands.forEach((command) => {
     const ref = shortcut[command.id];
     if (checkShortcut(state, ref) && ref.length > bestLength) {
+      best = command;
+      bestLength = ref.length;
+    }
+  });
+  return best;
+};
+
+// Mouse bindings are matched on their own so the mouse path can only ever add
+// behavior: a keyboard-only binding whose modifiers happen to be held during a
+// click (e.g. WIN+CTRL) must not fire a second time through here.
+const MOUSE_KEYS = ["MOUSE4", "MOUSE5"];
+const hasMouseKey = (ref) => Array.isArray(ref) && ref.some((key) => MOUSE_KEYS.includes(key));
+
+const matchMouseBinding = (state, shortcut) => {
+  let best = null;
+  let bestLength = 0;
+  shortcutCommands.forEach((command) => {
+    const ref = shortcut[command.id];
+    if (hasMouseKey(ref) && checkShortcut(state, ref) && ref.length > bestLength) {
       best = command;
       bestLength = ref.length;
     }
@@ -99,6 +118,42 @@ const HotkeysListner = React.memo(function HotkeysListner() {
     return () => {
       clearInterval(interval);
       document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    // The watcher normally starts from the first hotkey poll, but mouse
+    // bindings must work even while that poll is backing off
+    startForegroundWatcher();
+
+    const unsubscribe = onMouseShortcut((state) => {
+      const ctxState = context.getState();
+      // No isFormFieldActive() guard: a side button never types a character,
+      // and the panel's textarea usually holds focus while the user works
+      if (ctxState.modalType) return;
+      const command = matchMouseBinding(state, ctxState.shortcut);
+      if (!command) return;
+      const now = Date.now();
+      if (now - lastActionRef.current < (command.repeatDelay || 0)) return;
+      lastActionRef.current = now;
+      command.handler({ state: ctxState, dispatch: context.dispatch, getState: context.getState });
+    });
+
+    // CEF maps these buttons to history back/forward, which blanks the panel.
+    // Only needed while the cursor is over the panel; the shortcut itself is
+    // delivered by the watcher, not by these events.
+    const swallowMouseNav = (e) => {
+      if (e.button === 3 || e.button === 4) e.preventDefault();
+    };
+    document.addEventListener("mousedown", swallowMouseNav, true);
+    document.addEventListener("mouseup", swallowMouseNav, true);
+    document.addEventListener("auxclick", swallowMouseNav, true);
+
+    return () => {
+      unsubscribe();
+      document.removeEventListener("mousedown", swallowMouseNav, true);
+      document.removeEventListener("mouseup", swallowMouseNav, true);
+      document.removeEventListener("auxclick", swallowMouseNav, true);
     };
   }, []);
 

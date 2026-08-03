@@ -42,6 +42,8 @@ const KEY_LABELS = {
     EQUAL: '=',
     DIVIDE: '/',
     MULTIPLY: '*',
+    MOUSE4: 'Mouse 4',
+    MOUSE5: 'Mouse 5',
 };
 
 const keyLabel = (key) => KEY_LABELS[key] || key;

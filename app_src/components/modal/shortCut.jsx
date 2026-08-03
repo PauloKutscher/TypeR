@@ -32,7 +32,12 @@ const KEY_LABELS = {
   ARROWDOWN: "↓",
   ARROWLEFT: "←",
   ARROWRIGHT: "→",
+  MOUSE4: "Mouse 4",
+  MOUSE5: "Mouse 5",
 };
+
+// e.button 3/4 are the side buttons, reported by the watcher as XBUTTON1/2
+const MOUSE_BUTTON_KEYS = { 3: "MOUSE4", 4: "MOUSE5" };
 
 const keyLabel = (key) => KEY_LABELS[String(key).toUpperCase()] || key;
 
@@ -112,6 +117,27 @@ const Shortcut = (props) => {
     });
   };
 
+  // Recording happens with the cursor over the panel, so the DOM event is
+  // available here even though matching at runtime goes through the watcher.
+  // The host is never queried: ScriptUI cannot see mouse buttons at all.
+  const changeShortCutFromMouse = (e) => {
+    const mouseKey = MOUSE_BUTTON_KEYS[e.button];
+    if (!mouseKey || !recording) return;
+    e.preventDefault();
+    e.stopPropagation();
+    hostQueryRef.current++;
+    const keys = [];
+    if (e.metaKey) keys.push("WIN");
+    if (e.ctrlKey) keys.push("CTRL");
+    if (e.altKey) keys.push("ALT");
+    if (e.shiftKey) keys.push("SHIFT");
+    keys.push(mouseKey);
+    const input = inputRef.current;
+    if (input) input.value = keys.join(" + ");
+    setDisplayKeys(keys);
+    props.onChange(props.index, keys);
+  };
+
   const focusShortcut = () => {
     if (inputRef.current) inputRef.current.focus();
   };
@@ -127,7 +153,7 @@ const Shortcut = (props) => {
 
   const label = locale[`shortcut_${props.index}`];
   return (
-    <div className={"shortcut-row" + (props.conflict ? " m-conflict" : "")} key={props.index} onClick={focusShortcut}>
+    <div className={"shortcut-row" + (props.conflict ? " m-conflict" : "")} key={props.index} onClick={focusShortcut} onMouseDown={changeShortCutFromMouse}>
       <div className="shortcut-row-label" title={label}>{label}</div>
       <div className={"shortcut-capture" + (recording ? " m-recording" : "")}>
         <input
