@@ -1,7 +1,7 @@
 import React from 'react';
 import { FiX, FiDownload, FiRefreshCw, FiCheckCircle } from 'react-icons/fi';
 
-import { locale, openUrl, downloadAndInstallUpdate, nativeAlert } from '../../utils';
+import { locale, openUrl, downloadAndInstallUpdate, nativeAlert, writeToStorage } from '../../utils';
 import { useContext } from '../../context';
 
 const sanitizeReleaseHtml = (html) => {
@@ -47,7 +47,12 @@ const UpdateModal = React.memo(function UpdateModal() {
     openUrl('https://github.com/ScanR/TypeR/releases/latest');
     close();
   };
-  
+
+  const skipVersion = () => {
+    writeToStorage({ skippedUpdateVersion: version });
+    close();
+  };
+
   const autoUpdate = () => {
     if (!downloadUrl) {
       nativeAlert(locale.updateNoDownloadUrl || 'No download URL available', locale.errorTitle, true);
@@ -68,9 +73,11 @@ const UpdateModal = React.memo(function UpdateModal() {
         setIsUpdating(false);
         setUpdateStatus('');
         if (needsManualStep) {
-          // Update downloaded, user needs to run install script
+          // The unattended installer has been launched; the user only has to
+          // close Photoshop whenever convenient
           setUpdateReady(true);
         } else {
+          writeToStorage({ lastInstalledUpdateVersion: version });
           nativeAlert(
             locale.updateSuccess || 'Update installed successfully! Please restart Photoshop to apply changes.',
             locale.successTitle,
@@ -110,10 +117,10 @@ const UpdateModal = React.memo(function UpdateModal() {
           <div className="app-modal-body-inner article-format" style={{ textAlign: 'center' }}>
             <FiCheckCircle size={48} style={{ color: '#4CAF50', marginBottom: '1rem' }} />
             <h3 style={{ marginTop: 0 }}>{locale.updateDownloadComplete || 'Download Complete!'}</h3>
-            <p>{locale.updateInstructions || 'The update has been downloaded to your Downloads folder.'}</p>
-            <div style={{ 
-              backgroundColor: 'rgba(0,0,0,0.2)', 
-              padding: '1rem', 
+            <p>{locale.updateInstallerLaunched || 'The installer has been launched in a separate window.'}</p>
+            <div style={{
+              backgroundColor: 'rgba(0,0,0,0.2)',
+              padding: '1rem',
               borderRadius: '4px',
               marginTop: '1rem',
               textAlign: 'left'
@@ -123,12 +130,11 @@ const UpdateModal = React.memo(function UpdateModal() {
               </p>
               <ol style={{ margin: 0, paddingLeft: '1.2rem' }}>
                 <li>{locale.updateStep1 || 'Close Photoshop'}</li>
-                <li>{locale.updateStep2 || 'Double-click on install_update.cmd (Windows) or install_update.command (Mac)'}</li>
-                <li>{locale.updateStep3 || 'Reopen Photoshop'}</li>
+                <li>{locale.updateAutoStep2 || 'The update installs itself and Photoshop reopens automatically'}</li>
               </ol>
             </div>
             <p style={{ marginTop: '1rem', fontSize: '0.9em', opacity: 0.7 }}>
-              {locale.updateFolderOpened || 'The folder has been opened for you.'}
+              {(locale.updateFallbackHint || 'If nothing happens, run {file} from the TypeR_Update folder in your Downloads.').replace('{file}', 'install_update.cmd (Windows) / install_update.command (Mac)')}
             </p>
           </div>
         </div>
@@ -182,8 +188,17 @@ const UpdateModal = React.memo(function UpdateModal() {
         </div>
       </div>
       <div className="app-modal-footer hostBrdTopContrast" style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-        <button 
-          className="topcoat-button--large" 
+        <button
+          className="topcoat-button--large--quiet"
+          onClick={skipVersion}
+          disabled={isUpdating}
+          style={{ marginRight: 'auto' }}
+          title={locale.updateSkipVersionHint || 'Do not show this version again at startup'}
+        >
+          {locale.updateSkipVersion || 'Skip this version'}
+        </button>
+        <button
+          className="topcoat-button--large"
           onClick={download}
           disabled={isUpdating}
           title={locale.updateDownloadManual || 'Open GitHub to download manually'}

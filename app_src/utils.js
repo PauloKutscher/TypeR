@@ -1,5 +1,7 @@
 import "./lib/CSInterface";
 import { resolveStylePointText } from "./textLayerPayload";
+import { findNewerReleases, pickUpdateDownloadUrl } from "./updateLogic";
+import { installUpdateInPlace, uint8ToBase64 } from "./updateInstaller";
 import {
   PS_EVENT_SELECT,
   PS_EVENT_SET,
@@ -29,57 +31,11 @@ const checkUpdate = async (currentVersion) => {
     );
     if (!response.ok) return null;
     const releases = await response.json();
-    
-    const parseVersion = (version) => {
-      const cleanVersion = version.replace(/^v/, '');
-      return cleanVersion.split('.').map(num => parseInt(num, 10));
-    };
-    
-    const compareVersions = (v1, v2) => {
-      const version1 = parseVersion(v1);
-      const version2 = parseVersion(v2);
-      
-      for (let i = 0; i < Math.max(version1.length, version2.length); i++) {
-        const num1 = version1[i] || 0;
-        const num2 = version2[i] || 0;
-        
-        if (num1 > num2) return 1;
-        if (num1 < num2) return -1;
-      }
-      return 0;
-    };
-    
-    const currentVersionClean = currentVersion.replace(/^v/, '');
-    const newerReleases = releases.filter(release => {
-      const releaseVersion = release.tag_name.replace(/^v/, '');
-      return compareVersions(releaseVersion, currentVersionClean) > 0;
-    });
-    
+    const newerReleases = findNewerReleases(releases, currentVersion);
     if (newerReleases.length > 0) {
-      newerReleases.sort((a, b) => compareVersions(b.tag_name, a.tag_name));
-      
-      // Get the download URL for the latest release ZIP
-      const latestRelease = newerReleases[0];
-      let downloadUrl = null;
-      
-      // Try to find TypeR.zip in assets first
-      if (latestRelease.assets && latestRelease.assets.length > 0) {
-        const zipAsset = latestRelease.assets.find(a => 
-          a.name.toLowerCase().endsWith('.zip') && 
-          a.name.toLowerCase().includes('typer')
-        );
-        if (zipAsset) {
-          downloadUrl = zipAsset.browser_download_url;
-        }
-      }
-      // Fallback to zipball_url (source code zip)
-      if (!downloadUrl) {
-        downloadUrl = latestRelease.zipball_url;
-      }
-      
       return {
         version: newerReleases[0].tag_name,
-        downloadUrl: downloadUrl,
+        downloadUrl: pickUpdateDownloadUrl(newerReleases[0]),
         releases: newerReleases.map(release => ({
           version: release.tag_name,
           body: release.body_html || release.body,
@@ -91,6 +47,31 @@ const checkUpdate = async (currentVersion) => {
     console.error("Update check failed", e);
   }
   return null;
+};
+
+// One in-flight/completed download per URL, so the zip fetched in the
+// background when the update is detected is reused by the Install click
+let cachedUpdateZip = { url: null, promise: null };
+const fetchUpdateZip = (downloadUrl) => {
+  if (cachedUpdateZip.url === downloadUrl && cachedUpdateZip.promise) {
+    return cachedUpdateZip.promise;
+  }
+  const promise = fetch(downloadUrl, { headers: { Accept: "application/octet-stream" } })
+    .then((response) => {
+      if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+      return response.arrayBuffer();
+    })
+    .then((arrayBuffer) => new Uint8Array(arrayBuffer));
+  cachedUpdateZip = { url: downloadUrl, promise };
+  promise.catch(() => {
+    if (cachedUpdateZip.promise === promise) {
+      cachedUpdateZip = { url: null, promise: null };
+    }
+  });
+  return promise;
+};
+const prefetchUpdateZip = (downloadUrl) => {
+  if (downloadUrl) fetchUpdateZip(downloadUrl).catch(() => {});
 };
 
 const getOSType = () => {
@@ -170,242 +151,129 @@ const trackHostAction = (callback) => {
   };
 };
 
-const downloadAndInstallUpdate = async (downloadUrl, onProgress, onComplete, onError) => {
-  try {
-    const osType = getOSType();
-    
-    // Get user's Downloads folder
-    const userHome = osType === 'win' 
-      ? csInterface.getSystemPath(window.SystemPath.USER_DATA).split('/AppData/')[0]
-      : csInterface.getSystemPath(window.SystemPath.USER_DATA).replace('/Library/Application Support', '');
-    
-    const downloadsPath = osType === 'win'
-      ? `${userHome}/Downloads/TypeR_Update`
-      : `${userHome}/Downloads/TypeR_Update`;
-    
-    const zipPath = `${downloadsPath}/TypeR.zip`;
-    
-    onProgress && onProgress(locale.updateDownloading || 'Downloading update...');
-    
-    // Clean and create download directory
-    csInterface.evalScript(`deleteFolder(${getExtendScriptString(downloadsPath)})`, () => {
-      // Use cep.fs to create directory
-      const mkdirResult = window.cep.fs.makedir(downloadsPath);
-      if (mkdirResult.err && mkdirResult.err !== 0 && mkdirResult.err !== 17) { // 17 = already exists
-        onError && onError('Failed to create download directory');
-        return;
-      }
-      
-      // Download the ZIP file
-      fetch(downloadUrl, {
-        headers: { Accept: 'application/octet-stream' }
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`Download failed: ${response.status}`);
-        }
-        return response.arrayBuffer();
-      })
-      .then(arrayBuffer => {
-        const uint8Array = new Uint8Array(arrayBuffer);
-        
-        // Convert to base64 for file writing
-        let binary = '';
-        const len = uint8Array.byteLength;
-        for (let i = 0; i < len; i++) {
-          binary += String.fromCharCode(uint8Array[i]);
-        }
-        const base64Data = window.btoa(binary);
-        
-        onProgress && onProgress(locale.updateExtracting || 'Extracting files...');
-        
-        // Write ZIP file using base64 encoding
-        const writeResult = window.cep.fs.writeFile(zipPath, base64Data, window.cep.encoding.Base64);
-        if (writeResult.err) {
-          throw new Error('Failed to write ZIP file');
-        }
-        
-        // Create the auto-install script
-        if (osType === 'win') {
-          // Windows: Create PowerShell install script
-          const installScript = `# TypeR Auto-Update Script
-# This script will install the update after Photoshop is closed
+const evalScriptAsync = (script) =>
+  new Promise((resolve) => csInterface.evalScript(script, resolve));
+
+// Windows fallback installer: fully unattended. Waits for Photoshop to close,
+// installs, relaunches Photoshop, cleans itself up. No Read-Host anywhere.
+const buildWindowsInstallScript = () => `# TypeR Auto-Update Script
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = $PSScriptRoot
 $zipPath = Join-Path $ScriptDir "TypeR.zip"
 $extractPath = Join-Path $ScriptDir "extracted"
-$AppData = $env:APPDATA
-$TargetDir = Join-Path $AppData "Adobe\\CEP\\extensions\\typertools"
-$TempBackupContainer = Join-Path $env:TEMP "typer_backup_container"
+$TargetDir = Join-Path $env:APPDATA "Adobe\\CEP\\extensions\\typertools"
 
 Write-Host "+------------------------------------------------------------------+" -ForegroundColor Cyan
 Write-Host "|                      TypeR Auto-Updater                          |" -ForegroundColor Cyan
 Write-Host "+------------------------------------------------------------------+" -ForegroundColor Cyan
 Write-Host ""
 
-# Check if Photoshop is running
-$psProcess = Get-Process -Name "Photoshop" -ErrorAction SilentlyContinue
-if ($psProcess) {
-    Write-Host "[!] Photoshop is running. Please close it first." -ForegroundColor Yellow
-    Write-Host ""
-    Read-Host "Press Enter after closing Photoshop..."
+$psProc = Get-Process -Name "Photoshop" -ErrorAction SilentlyContinue | Select-Object -First 1
+$psExe = $null
+if ($psProc) {
+    $psExe = $psProc.Path
+    Write-Host "[*] Waiting for Photoshop to close..." -ForegroundColor Yellow
+    Write-Host "    Close Photoshop - the update will then install itself automatically."
+    while (Get-Process -Name "Photoshop" -ErrorAction SilentlyContinue) { Start-Sleep -Seconds 2 }
 }
 
 Write-Host "[*] Installing update..." -ForegroundColor Cyan
 
-# Cleanup temp backup
-if (Test-Path $TempBackupContainer) { Remove-Item $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue }
-New-Item -Path $TempBackupContainer -ItemType Directory -Force | Out-Null
-
-# Backup storage (settings file and its companions, e.g. the background image)
-Get-ChildItem -Path $TargetDir -Filter "storage*" -ErrorAction SilentlyContinue | ForEach-Object {
-    Copy-Item $_.FullName -Destination $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-# Extract ZIP
 if (Test-Path $extractPath) { Remove-Item $extractPath -Recurse -Force }
 New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
 Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
 
-# Find content folder - check if files are at root or in a subfolder
-# If CSXS folder exists at root, files are directly there
-# Otherwise, look for a subfolder containing CSXS
+# Locate the folder that contains CSXS (zip may nest content one level down)
 if (Test-Path "$extractPath\\CSXS") {
     $sourcePath = $extractPath
 } else {
     $contentFolder = Get-ChildItem -Path $extractPath -Directory | Where-Object { Test-Path "$($_.FullName)\\CSXS" } | Select-Object -First 1
-    if ($contentFolder) {
-        $sourcePath = $contentFolder.FullName
-    } else {
-        $sourcePath = $extractPath
-    }
+    if ($contentFolder) { $sourcePath = $contentFolder.FullName } else { $sourcePath = $extractPath }
 }
 
-# Clean target directory
-if (Test-Path $TargetDir) {
-    Remove-Item $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
-}
+# Replace only the application folders; user settings (storage*) are never touched
 New-Item -Path $TargetDir -ItemType Directory -Force | Out-Null
-
-# Copy files
-$FoldersToCopy = @("app", "CSXS", "icons", "locale")
-foreach ($folder in $FoldersToCopy) {
+foreach ($folder in @("app", "CSXS", "icons", "locale")) {
     $src = Join-Path $sourcePath $folder
     $dst = Join-Path $TargetDir $folder
     if (Test-Path $src) {
+        if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
         Copy-Item $src -Destination $dst -Recurse -Force
     }
 }
-
-# Restore storage
-Get-ChildItem -Path $TempBackupContainer -Filter "storage*" -ErrorAction SilentlyContinue | ForEach-Object {
-    Copy-Item $_.FullName -Destination "$TargetDir" -Recurse -Force
+if (Test-Path "$sourcePath\\themes") {
+    $themeDest = Join-Path $TargetDir "app\\themes"
+    New-Item -Path $themeDest -ItemType Directory -Force | Out-Null
+    Copy-Item "$sourcePath\\themes\\*" -Destination $themeDest -Recurse -Force
 }
-
-# Cleanup
-if (Test-Path $TempBackupContainer) { Remove-Item $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue }
 
 Write-Host ""
 Write-Host "+------------------------------------------------------------------+" -ForegroundColor Green
 Write-Host "|                      Update Complete!                            |" -ForegroundColor Green
 Write-Host "+------------------------------------------------------------------+" -ForegroundColor Green
 Write-Host ""
-Write-Host "You can now open Photoshop and use TypeR." -ForegroundColor Cyan
-Write-Host ""
-Write-Host "This folder will be deleted automatically." -ForegroundColor DarkGray
-Read-Host "Press Enter to exit..."
 
-# Cleanup update folder - delete the entire TypeR_Update folder
-$parentDir = Split-Path $ScriptDir -Parent
-$folderName = Split-Path $ScriptDir -Leaf
-Set-Location $parentDir
+if ($psExe) {
+    Write-Host "[*] Relaunching Photoshop..." -ForegroundColor Cyan
+    Start-Process $psExe
+}
+Start-Sleep -Seconds 3
+
+Set-Location (Split-Path $ScriptDir -Parent)
 Remove-Item $ScriptDir -Recurse -Force -ErrorAction SilentlyContinue
 `;
-          
-          const cmdScript = `@echo off
-cd /d "%~dp0"
-PowerShell -NoProfile -ExecutionPolicy Bypass -File "install_update.ps1"
-`;
-          
-          const psScriptPath = `${downloadsPath}/install_update.ps1`;
-          const cmdScriptPath = `${downloadsPath}/install_update.cmd`;
-          
-          window.cep.fs.writeFile(psScriptPath, installScript);
-          window.cep.fs.writeFile(cmdScriptPath, cmdScript);
-          
-          onProgress && onProgress(locale.updateReady || 'Update ready to install...');
-          
-          // Open the folder in Explorer
-          csInterface.evalScript(`openFolder(${getExtendScriptString(downloadsPath)})`, () => {
-            onComplete && onComplete(true); // true = needs manual step
-          });
-          
-        } else {
-          // macOS: Create shell install script
-          const installScript = `#!/bin/bash
+
+// macOS fallback installer: same unattended behavior as the Windows script
+const buildMacInstallScript = () => `#!/bin/bash
 # TypeR Auto-Update Script
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ZIP_PATH="$SCRIPT_DIR/TypeR.zip"
 EXTRACT_PATH="$SCRIPT_DIR/extracted"
 DEST_DIR="$HOME/Library/Application Support/Adobe/CEP/extensions/typertools"
-TEMP_STORAGE="$SCRIPT_DIR/__storage_backup"
 
 echo "+------------------------------------------------------------------+"
 echo "|                      TypeR Auto-Updater                          |"
 echo "+------------------------------------------------------------------+"
 echo ""
 
-# Check if Photoshop is running
-if pgrep -x "Adobe Photoshop" > /dev/null; then
-    echo "[!] Photoshop is running. Please close it first."
-    echo ""
-    read -p "Press Enter after closing Photoshop..."
+PS_PID=$(pgrep -f "Adobe Photoshop.app/Contents/MacOS" | head -1)
+PS_APP=""
+if [ -n "$PS_PID" ]; then
+    PS_BIN=$(ps -o comm= -p "$PS_PID")
+    PS_APP="\${PS_BIN%%.app/*}.app"
+    echo "[*] Waiting for Photoshop to close..."
+    echo "    Close Photoshop - the update will then install itself automatically."
+    while pgrep -f "Adobe Photoshop.app/Contents/MacOS" > /dev/null; do sleep 2; done
 fi
 
 echo "[*] Installing update..."
 
-# Backup storage (settings file and its companions, e.g. the background image)
-rm -rf "$TEMP_STORAGE"
-if ls "$DEST_DIR"/storage* > /dev/null 2>&1; then
-    mkdir -p "$TEMP_STORAGE"
-    cp -Rf "$DEST_DIR"/storage* "$TEMP_STORAGE/"
-fi
-
-# Extract ZIP
 rm -rf "$EXTRACT_PATH"
 mkdir -p "$EXTRACT_PATH"
-unzip -o "$ZIP_PATH" -d "$EXTRACT_PATH"
+unzip -o -q "$ZIP_PATH" -d "$EXTRACT_PATH"
 
-# Find content folder - check if files are at root or in a subfolder
+# Locate the folder that contains CSXS (zip may nest content one level down)
 if [ -d "$EXTRACT_PATH/CSXS" ]; then
     SOURCE_PATH="$EXTRACT_PATH"
 else
     CONTENT_FOLDER=$(find "$EXTRACT_PATH" -maxdepth 2 -type d -name "CSXS" | head -1 | xargs dirname 2>/dev/null)
-    if [ -n "$CONTENT_FOLDER" ]; then
-        SOURCE_PATH="$CONTENT_FOLDER"
-    else
-        SOURCE_PATH="$EXTRACT_PATH"
-    fi
+    if [ -n "$CONTENT_FOLDER" ]; then SOURCE_PATH="$CONTENT_FOLDER"; else SOURCE_PATH="$EXTRACT_PATH"; fi
 fi
 
-# Clean and recreate target
-rm -rf "$DEST_DIR"
+# Replace only the application folders; user settings (storage*) are never touched
 mkdir -p "$DEST_DIR"
-
-# Copy files
 for folder in app CSXS icons locale; do
     if [ -d "$SOURCE_PATH/$folder" ]; then
-        cp -r "$SOURCE_PATH/$folder" "$DEST_DIR/"
+        rm -rf "$DEST_DIR/$folder"
+        cp -R "$SOURCE_PATH/$folder" "$DEST_DIR/"
     fi
 done
-
-# Restore storage
-if [ -d "$TEMP_STORAGE" ]; then
-    cp -Rf "$TEMP_STORAGE"/storage* "$DEST_DIR/"
-    rm -rf "$TEMP_STORAGE"
+if [ -d "$SOURCE_PATH/themes" ]; then
+    mkdir -p "$DEST_DIR/app/themes"
+    cp -R "$SOURCE_PATH/themes/"* "$DEST_DIR/app/themes/"
 fi
 
 echo ""
@@ -413,36 +281,85 @@ echo "+------------------------------------------------------------------+"
 echo "|                      Update Complete!                            |"
 echo "+------------------------------------------------------------------+"
 echo ""
-echo "You can now open Photoshop and use TypeR."
-echo ""
-echo "This folder will be deleted automatically."
-read -p "Press Enter to exit..."
 
-# Cleanup - delete the entire TypeR_Update folder
-cd "$HOME/Downloads"
+if [ -n "$PS_APP" ] && [ -d "$PS_APP" ]; then
+    echo "[*] Relaunching Photoshop..."
+    open "$PS_APP"
+fi
+sleep 3
+
+cd "$HOME"
 rm -rf "$SCRIPT_DIR"
 `;
-          
-          const shScriptPath = `${downloadsPath}/install_update.command`;
-          window.cep.fs.writeFile(shScriptPath, installScript);
-          
-          // Make executable
-          csInterface.evalScript(`makeExecutable(${getExtendScriptString(shScriptPath)})`, () => {
-            onProgress && onProgress(locale.updateReady || 'Update ready to install...');
-            
-            // Open the folder in Finder
-            csInterface.evalScript(`openFolder(${getExtendScriptString(downloadsPath)})`, () => {
-              onComplete && onComplete(true); // true = needs manual step
-            });
-          });
-        }
-      })
-      .catch(err => {
-        console.error('Update failed:', err);
-        onError && onError(err.message || 'Update failed');
-      });
-    });
-    
+
+// Fallback when in-place install is impossible: drop the zip and an unattended
+// installer script in Downloads/TypeR_Update and launch it. The only remaining
+// user action is closing Photoshop whenever convenient.
+const runScriptFallback = async (zipBytes, onProgress, onComplete) => {
+  const osType = getOSType();
+  const userData = csInterface.getSystemPath(window.SystemPath.USER_DATA);
+  const userHome = osType === 'win'
+    ? userData.split('/AppData/')[0]
+    : userData.replace('/Library/Application Support', '');
+  const downloadsPath = `${userHome}/Downloads/TypeR_Update`;
+  const zipPath = `${downloadsPath}/TypeR.zip`;
+
+  await evalScriptAsync(`deleteFolder(${getExtendScriptString(downloadsPath)})`);
+  const mkdirResult = window.cep.fs.makedir(downloadsPath);
+  if (mkdirResult.err && mkdirResult.err !== 0 && mkdirResult.err !== 17) { // 17 = already exists
+    throw new Error('Failed to create download directory');
+  }
+
+  const writeResult = window.cep.fs.writeFile(zipPath, uint8ToBase64(zipBytes), window.cep.encoding.Base64);
+  if (writeResult.err) {
+    throw new Error('Failed to write ZIP file');
+  }
+
+  let launcherPath;
+  if (osType === 'win') {
+    const psScriptPath = `${downloadsPath}/install_update.ps1`;
+    launcherPath = `${downloadsPath}/install_update.cmd`;
+    window.cep.fs.writeFile(psScriptPath, buildWindowsInstallScript());
+    window.cep.fs.writeFile(launcherPath, `@echo off\r\ncd /d "%~dp0"\r\nPowerShell -NoProfile -ExecutionPolicy Bypass -File "install_update.ps1"\r\n`);
+  } else {
+    launcherPath = `${downloadsPath}/install_update.command`;
+    window.cep.fs.writeFile(launcherPath, buildMacInstallScript());
+    await evalScriptAsync(`makeExecutable(${getExtendScriptString(launcherPath)})`);
+  }
+
+  onProgress && onProgress(locale.updateReady || 'Update ready to install...');
+
+  const launchResult = await evalScriptAsync(`launchInstaller(${getExtendScriptString(launcherPath)})`);
+  if (String(launchResult).indexOf('OK') !== 0) {
+    // Could not start the installer: at least show the folder so the user can
+    // run it manually
+    await evalScriptAsync(`openFolder(${getExtendScriptString(downloadsPath)})`);
+  }
+  onComplete && onComplete(true); // true = a Photoshop close is still needed
+};
+
+const downloadAndInstallUpdate = async (downloadUrl, onProgress, onComplete, onError, options = {}) => {
+  try {
+    onProgress && onProgress(locale.updateDownloading || 'Downloading update...');
+    const zipBytes = await fetchUpdateZip(downloadUrl);
+
+    // Preferred path: overwrite the extension folder directly. CEF keeps the
+    // running panel in memory, so files on disk are not locked; the new
+    // version simply takes over at the next Photoshop restart.
+    try {
+      onProgress && onProgress(locale.updateInstalling || 'Installing update...');
+      await installUpdateInPlace(zipBytes, path);
+      onComplete && onComplete(false);
+      return;
+    } catch (inPlaceError) {
+      console.error('In-place update failed, falling back to script installer', inPlaceError);
+      if (options.inPlaceOnly) {
+        onError && onError(inPlaceError.message || 'Update failed');
+        return;
+      }
+    }
+
+    await runScriptFallback(zipBytes, onProgress, onComplete);
   } catch (e) {
     console.error('Update failed:', e);
     onError && onError(e.message || 'Update failed');
@@ -820,7 +737,7 @@ const parseMarkdownRuns = (input) => {
   return { text: plainText, runs, hasFormatting, overlaySegments };
 };
 
-const isMarkdownEnabled = () => readStorage("interpretMarkdown") === true;
+const isMarkdownEnabled = () => readStorage("interpretMarkdown") !== false;
 
 const buildRichTextPayload = (text, allowMarkdown = isMarkdownEnabled()) => {
   if (typeof text !== "string" || !allowMarkdown) {
@@ -926,6 +843,7 @@ const setActiveLayerText = (text, style, direction, callback = () => {}) => {
         text: parsed.text,
         style: null,
         contentOnly: true,
+        richTextRuns: parsed.richTextRuns,
       }
     : {
         text: parsed.text,
@@ -1206,6 +1124,13 @@ const toggleCleaningLayers = (callback = () => {}) => {
 // every 250ms, and gate the hotkey poll on it. Requires Node (see manifest
 // --enable-nodejs); if anything is unavailable we fail open to the old
 // behavior so hotkeys never break.
+//
+// The same watcher also reports the mouse side buttons (XBUTTON1/XBUTTON2).
+// They are the one input the panel cannot see for itself: ScriptUI's
+// keyboardState has no mouse state at all, and a DOM listener only fires
+// while the cursor sits over the panel -- useless when the user is working
+// on the canvas, which is exactly when the shortcut is wanted. GetAsyncKeyState
+// reads them globally, so binding them needs no setup from the user.
 const foregroundWatcher = {
   name: "",
   time: 0,
@@ -1251,6 +1176,52 @@ const toBase64Utf16le = (str) => {
   return window.btoa(bin);
 };
 
+// Mouse side-button presses arrive as discrete events rather than as polled
+// state, so consumers subscribe instead of sampling.
+const mouseShortcutListeners = [];
+const onMouseShortcut = (listener) => {
+  mouseShortcutListeners.push(listener);
+  return () => {
+    const index = mouseShortcutListeners.indexOf(listener);
+    if (index !== -1) mouseShortcutListeners.splice(index, 1);
+  };
+};
+
+// Emitted in the same order the settings recorder stores modifiers, so a
+// binding captured in the UI reads identically to what the watcher reports
+const WATCHER_MODIFIERS = [["W", "WIN"], ["C", "CTRL"], ["A", "ALT"], ["S", "SHIFT"]];
+
+const emitMouseShortcut = (button, mods, processName) => {
+  // A side button pressed in a browser or file explorer must not drive the
+  // panel: these are global reads, so the foreground check is what scopes them
+  if (!/photoshop/i.test(processName || "")) return;
+  const keys = [];
+  WATCHER_MODIFIERS.forEach(([flag, name]) => {
+    if (String(mods || "").indexOf(flag) !== -1) keys.push(name);
+  });
+  keys.push(button === "6" ? "MOUSE5" : "MOUSE4");
+  notePanelActivity();
+  mouseShortcutListeners.forEach((listener) => {
+    try {
+      listener(keys);
+    } catch (error) {
+      // A listener error must not tear down the watcher bridge
+    }
+  });
+};
+
+const handleWatcherLine = (rawLine) => {
+  const line = rawLine.trim();
+  if (!line) return;
+  if (line.indexOf("MB|") === 0) {
+    const parts = line.split("|");
+    emitMouseShortcut(parts[1], parts[2], parts.slice(3).join("|"));
+    return;
+  }
+  foregroundWatcher.name = line.indexOf("FG|") === 0 ? line.slice(3).trim() : line;
+  foregroundWatcher.time = Date.now();
+};
+
 const startForegroundWatcher = () => {
   if (foregroundWatcher.started || foregroundWatcher.stopped) return;
   if (!navigator.platform || navigator.platform.indexOf("Win") !== 0) return;
@@ -1262,14 +1233,35 @@ const startForegroundWatcher = () => {
   } catch (e) {
     return;
   }
+  // The loop ticks at 50ms for the mouse buttons, but the expensive part
+  // (Get-Process) now only runs when the foreground window actually changes,
+  // so this polls the side buttons 5x more often than the old script polled
+  // the process name while doing strictly less work per second.
   const psScript = [
-    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class FW { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); }';",
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class FW { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport(\"user32.dll\")] public static extern short GetAsyncKeyState(int vk); }';",
+    // GetAsyncKeyState's low bit means "pressed since the previous call", so
+    // prime it once: otherwise a click made before the panel opened replays here
+    "[void][FW]::GetAsyncKeyState(5); [void][FW]::GetAsyncKeyState(6);",
+    "$lastH = [IntPtr]::Zero; $n = ''; $tick = 0;",
     "while ($true) {",
-    "$h = [FW]::GetForegroundWindow(); $procId = [uint32]0;",
-    "[void][FW]::GetWindowThreadProcessId($h, [ref]$procId);",
-    "$n = ''; try { $n = (Get-Process -Id $procId -ErrorAction Stop).ProcessName } catch {};",
-    "[Console]::Out.WriteLine($n); [Console]::Out.Flush();",
-    "Start-Sleep -Milliseconds 250 }",
+    "$h = [FW]::GetForegroundWindow();",
+    // Re-resolve on focus change, and keep retrying while the name is empty so
+    // a transient Get-Process failure cannot wedge the gate shut
+    "if ($h -ne $lastH -or $n -eq '') { $lastH = $h; $procId = [uint32]0; [void][FW]::GetWindowThreadProcessId($h, [ref]$procId); $n = ''; try { $n = (Get-Process -Id $procId -ErrorAction Stop).ProcessName } catch {} }",
+    // 5 = XBUTTON1 (button4), 6 = XBUTTON2 (button5). The low bit is an edge,
+    // so a click shorter than one tick is still caught and holding never repeats
+    "foreach ($b in 5, 6) {",
+    "if (([FW]::GetAsyncKeyState($b) -band 1) -ne 0) {",
+    "$m = '';",
+    "if (([FW]::GetAsyncKeyState(0x5B) -band 0x8000) -ne 0 -or ([FW]::GetAsyncKeyState(0x5C) -band 0x8000) -ne 0) { $m += 'W' }",
+    "if (([FW]::GetAsyncKeyState(0x11) -band 0x8000) -ne 0) { $m += 'C' }",
+    "if (([FW]::GetAsyncKeyState(0x12) -band 0x8000) -ne 0) { $m += 'A' }",
+    "if (([FW]::GetAsyncKeyState(0x10) -band 0x8000) -ne 0) { $m += 'S' }",
+    "[Console]::Out.WriteLine('MB|' + $b + '|' + $m + '|' + $n) } }",
+    "$tick++;",
+    "if ($tick -ge 5) { $tick = 0; [Console]::Out.WriteLine('FG|' + $n) }",
+    "[Console]::Out.Flush();",
+    "Start-Sleep -Milliseconds 50 }",
   ].join(" ");
   foregroundWatcher.started = true;
   try {
@@ -1278,12 +1270,16 @@ const startForegroundWatcher = () => {
       stdio: ["ignore", "pipe", "ignore"],
     });
     foregroundWatcher.child = child;
+    // Button presses are one-shot events, so a chunk split mid-line can no
+    // longer be dropped the way a repeated status line could be: buffer the
+    // tail until its newline arrives.
+    let pending = "";
     child.stdout.on("data", (data) => {
-      const lines = data.toString().split(/\r?\n/).filter((line) => line.length);
-      if (lines.length) {
-        foregroundWatcher.name = lines[lines.length - 1];
-        foregroundWatcher.time = Date.now();
-      }
+      pending += data.toString();
+      if (pending.length > 8192) pending = pending.slice(-8192);
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop();
+      lines.forEach(handleWatcherLine);
     });
     const scheduleRestart = () => {
       if (foregroundWatcher.stopped) return;
@@ -1475,4 +1471,4 @@ const scanPsdFonts = (path, callback) => {
   );
 };
 
-export { csInterface, locale, openUrl, readStorage, writeToStorage, flushStorageWrite, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, getTypeRSelectionSnapshot, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isHostActionPending, notePanelActivity, isPanelIdle, notePanelInteraction, isPanelInteracting, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, toggleCleaningLayers, getHotkeyPressed, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, checkUpdate, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
+export { csInterface, locale, openUrl, readStorage, writeToStorage, flushStorageWrite, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, getTypeRSelectionSnapshot, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isHostActionPending, notePanelActivity, isPanelIdle, notePanelInteraction, isPanelInteracting, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, toggleCleaningLayers, getHotkeyPressed, onMouseShortcut, startForegroundWatcher, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };

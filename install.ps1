@@ -1,7 +1,15 @@
-﻿# Encodage pour les accents dans la console
+﻿param([switch]$Silent)
+
+# Encodage pour les accents dans la console
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-[Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 $OutputEncoding = New-Object System.Text.UTF8Encoding
+
+# Les invites bloquent les installations scriptées (CI, irm | iex, agents) :
+# on ne demande une touche que dans une vraie console interactive
+$Interactive = -not $Silent
+try {
+    if ([Console]::IsInputRedirected) { $Interactive = $false }
+} catch { $Interactive = $false }
 
 # --- 1. Définition robuste du dossier du script ---
 # $PSScriptRoot est une variable native fiable, contrairement à %~dp0
@@ -13,8 +21,8 @@ $ManifestPath = Join-Path $ScriptDir "CSXS\manifest.xml"
 if (-not (Test-Path $ManifestPath)) {
     Write-Host "[ERREUR] Fichier introuvable : $ManifestPath" -ForegroundColor Red
     Write-Host "Placez ce script à côté des dossiers 'CSXS', 'app', 'icons', 'locale', 'themes'."
-    Read-Host "Appuyez sur Entrée pour quitter..."
-    exit
+    if ($Interactive) { Read-Host "Appuyez sur Entrée pour quitter..." }
+    exit 1
 }
 
 # --- 3. Extraction de la version (plus précis que findstr) ---
@@ -60,7 +68,7 @@ elseif ($Lang -eq "es") {
     $msg_discord  = "Discord de ScanR si necesitas ayuda: https://discord.com/invite/Pdmfmqk"
 }
 elseif ($Lang -eq "pt") {
-    $msg_install  = "Photoshop extension TypeR v$ExtVersion will be installed."
+    $msg_install  = "A extensão do Photoshop TypeR v$ExtVersion será instalada."
     $msg_close    = "Feche o Photoshop (se estiver aberto)."
     $msg_complete = "Instalação concluída."
     $msg_open     = "Abra o Photoshop e no menu superior clique em: [Janela] > [Extensões] > [TypeR]"
@@ -75,11 +83,11 @@ Write-Host "+------------------------------------------------------------------+
 Write-Host "|                          TypeR Installer                         |" -ForegroundColor Cyan
 Write-Host "+------------------------------------------------------------------+" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "? $msg_install"
+Write-Host $msg_install
 Write-Host ""
-Write-Host "? $msg_close" -ForegroundColor Yellow
+Write-Host $msg_close -ForegroundColor Yellow
 Write-Host ""
-Read-Host -Prompt "? $msg_pause"
+if ($Interactive) { Read-Host -Prompt $msg_pause }
 
 # --- 5. Mode Debug (CSXS 6 à 18) ---
 # Ne nécessite pas les droits admin car c'est dans HKCU (utilisateur courant)
@@ -90,37 +98,21 @@ Read-Host -Prompt "? $msg_pause"
     }
 }
 
-# --- 6. Gestion des dossiers ---
+# --- 6. Copie des fichiers ---
+# On remplace uniquement les dossiers applicatifs : les réglages de
+# l'utilisateur (storage*) ne sont jamais touchés, donc plus besoin de
+# sauvegarde/restauration (et plus aucun risque de les perdre en cours de route)
 $AppData = $env:APPDATA
 $TargetDir = Join-Path $AppData "Adobe\CEP\extensions\typertools"
-
-# On crée un dossier TEMP pour contenir la sauvegarde (et non le fichier lui-même)
-$TempBackupContainer = Join-Path $env:TEMP "typer_backup_container"
-
-# Nettoyage préalable du temp au cas où
-if (Test-Path $TempBackupContainer) { Remove-Item $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue }
-New-Item -Path $TempBackupContainer -ItemType Directory -Force | Out-Null
-
-# SAUVEGARDE : On copie "storage" DANS le dossier conteneur
-# Cela préserve la nature de "storage" (que ce soit un fichier ou un dossier)
-# "storage*" : le fichier de réglages et ses annexes (image de fond)
-Get-ChildItem -Path $TargetDir -Filter "storage*" -ErrorAction SilentlyContinue | ForEach-Object {
-    Copy-Item $_.FullName -Destination $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-# Nettoyage dossier cible (Reset complet de l'extension)
-if (Test-Path $TargetDir) {
-    Remove-Item $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
-}
 New-Item -Path $TargetDir -ItemType Directory -Force | Out-Null
 
-# --- 7. Copie des fichiers ---
 $FoldersToCopy = @("app", "CSXS", "icons", "locale")
 
 foreach ($folder in $FoldersToCopy) {
     $Source = Join-Path $ScriptDir $folder
     $Dest = Join-Path $TargetDir $folder
     if (Test-Path $Source) {
+        if (Test-Path $Dest) { Remove-Item $Dest -Recurse -Force -ErrorAction SilentlyContinue }
         Copy-Item $Source -Destination $Dest -Recurse -Force
     }
 }
@@ -132,25 +124,15 @@ if (Test-Path "$ScriptDir\themes") {
     Copy-Item "$ScriptDir\themes\*" -Destination $ThemeDest -Recurse -Force
 }
 
-# RESTAURATION DU STORAGE
-# On vérifie si la sauvegarde existe dans le conteneur
-Get-ChildItem -Path $TempBackupContainer -Filter "storage*" -ErrorAction SilentlyContinue | ForEach-Object {
-    # On recopie chaque élément "storage*" vers la racine de l'extension
-    Copy-Item $_.FullName -Destination "$TargetDir" -Recurse -Force
-}
-
-# Nettoyage final du dossier temp
-if (Test-Path $TempBackupContainer) { Remove-Item $TempBackupContainer -Recurse -Force -ErrorAction SilentlyContinue }
-
-# --- 8. Fin ---
+# --- 7. Fin ---
 Write-Host ""
 Write-Host "+------------------------------------------------------------------+" -ForegroundColor Green
 Write-Host "|                      Installation Completed                      |" -ForegroundColor Green
 Write-Host "+------------------------------------------------------------------+" -ForegroundColor Green
 Write-Host ""
-Write-Host "? $msg_complete"
+Write-Host $msg_complete
 Write-Host ""
-Write-Host "? $msg_open" -ForegroundColor Cyan
+Write-Host $msg_open -ForegroundColor Cyan
 Write-Host ""
 Write-Host "+------------------------------------------------------------------+"
 Write-Host "| Credits:                                                         |"
@@ -159,4 +141,4 @@ Write-Host ("  {0}" -f $msg_credits)
 Write-Host ("  {0}" -f $msg_typertools)
 Write-Host ("  {0}" -f $msg_discord)
 Write-Host ""
-Read-Host -Prompt $msg_pause
+if ($Interactive) { Read-Host -Prompt $msg_pause }
