@@ -43,6 +43,19 @@ const {
   visibleWidth,
 } = loadAppModule("app_src/textShapeR.js");
 
+const shippedDefaultTuning = require("../app_src/textShapeRDefaultTuning.json");
+assert.strictEqual(shippedDefaultTuning.samples, 178);
+assert.ok(shippedDefaultTuning.style && shippedDefaultTuning.weights,
+  "the shipped default must contain the trained global style and ranker");
+assert.ok(!shippedDefaultTuning.exemplars && !shippedDefaultTuning.pairs,
+  "language-specific examples and replay data must not ship as global defaults");
+const defaultProbeText = "Je crois que nous devrions vraiment partir avant que la nuit tombe sur la ville.";
+const shippedDefaultTop = generateTextShapeRVariants(defaultProbeText, { limit: 12, profile: "balanced" })[0];
+setTextShapeRTuning({});
+const neutralProbeTop = generateTextShapeRVariants(defaultProbeText, { limit: 12, profile: "balanced" })[0];
+assert.notStrictEqual(shippedDefaultTop.text, neutralProbeTop.text,
+  "the shipped trained profile must affect default ranking");
+
 const variants = generateTextShapeRVariants("This sentence needs a pleasant bubble shaped manga layout today.");
 // Default cap is MAX_VARIANTS (12); the exact count depends on how many
 // unique candidates the sentence yields, so only bound it
@@ -197,15 +210,20 @@ bestWidths.forEach((width, index) => {
   assert.ok(Math.abs(width - bestWidths[index - 1]) / bubbleMax <= 0.6, `abrupt width jump in\n${bubbleBest.text}`);
 });
 
-// Feedback learning: marking a hand-typeset shape as ideal must return
-// bounded tuning knobs, bias future suggestions toward that style, and be
-// fully reversible by resetting the tuning
+// The shipped default uses Sakushi's global profile, but feedback learning is
+// deliberately isolated from it: a first lesson starts at sample 1 on the
+// engine's neutral baseline, then later lessons continue the user's history.
+// Marking a hand-typeset shape as ideal must return bounded tuning knobs, bias
+// future suggestions toward that style, and be reversible to the shipped
+// default; tests can still select `{}` explicitly to inspect the neutral core.
 const feedbackText = "Je crois que nous devrions vraiment partir avant que la nuit tombe sur la ville.";
 const baselineTop = generateTextShapeRVariants(feedbackText, { limit: 12, profile: "balanced" })[0];
 const chosenShape = "Je crois que\nnous devrions\nvraiment partir\navant que la\nnuit tombe\nsur la ville.";
+setTextShapeRTuning(null);
 const feedback = recordTextShapeRFeedback(chosenShape, { limit: 12, profile: "balanced" }, null);
 assert.ok(feedback, "feedback should be recorded");
-assert.strictEqual(feedback.tuning.samples, 1);
+assert.strictEqual(feedback.tuning.samples, 1,
+  "first Learn action must not inherit the bundled profile's 178 samples");
 assert.strictEqual(feedback.chosenLineCount, 6);
 // The chosen shape is taller than the baseline top: the bias must lean up
 assert.ok(feedback.tuning.lineTargetBias > 0);
@@ -236,7 +254,7 @@ const secondFeedback = recordTextShapeRFeedback(chosenShape, { limit: 12, profil
 assert.strictEqual(secondFeedback.tuning.samples, 2);
 // Repeated feedback on the same style converges: the exact hand-made shape
 // must climb the ranking until it sits at (or right next to) the top
-let convergedTuning = null;
+let convergedTuning = feedback.tuning;
 for (let pass = 0; pass < 3; pass++) {
   const step = recordTextShapeRFeedback(chosenShape, { limit: 12, profile: "balanced" }, convergedTuning);
   convergedTuning = step.tuning;
@@ -273,7 +291,7 @@ assert.ok(transferVariants[0].lines.length >= 5,
   `learned density should transfer to other texts, got ${transferVariants[0].lines.length} lines`);
 // Batch learning (Alt-click): several layers learned in sequence accumulate
 // samples and exemplars, each feeding the next generation pass
-setTextShapeRTuning(null);
+setTextShapeRTuning({});
 let batchTuning = null;
 [
   "On ne peut pas\nrester ici toute la nuit\nsans savoir ce qui\nnous attend dehors.",
@@ -288,7 +306,7 @@ assert.strictEqual(batchTuning.samples, 3);
 assert.strictEqual(batchTuning.exemplars.length, 3, "each distinct layer should add an exemplar");
 // Bubble-aware learning: the exemplar records the outline signature of the
 // selection it was validated in, so same-shaped bubbles recall it first
-setTextShapeRTuning(null);
+setTextShapeRTuning({});
 const bubbleFeedback = recordTextShapeRFeedback(chosenShape, {
   limit: 12,
   profile: "balanced",
@@ -340,15 +358,15 @@ assert.strictEqual(replacementFeedback.tuning.exemplars.length, 1,
 assert.strictEqual(replacementFeedback.tuning.exemplars[0].lines.join("\n"), replacementShape);
 // Without a selection the exemplar simply carries no bubble context
 assert.strictEqual(batchTuning.exemplars[0].bubble, null);
-setTextShapeRTuning(null);
+setTextShapeRTuning({});
 // Hyphenated feedback lowers the hyphen penalty and records the habit
 const hyphenFeedback = recordTextShapeRFeedback("CLYDE, JE PEUX UTI-\nLISER UN MÉDAILLON ?", { limit: 10 }, null);
 assert.ok(hyphenFeedback.tuning.hyphenPenaltyScale < 1);
 assert.strictEqual(hyphenFeedback.chosenHyphens, 1);
 assert.ok(hyphenFeedback.tuning.style.hyphenRate > 0, "hyphen habit should be learned");
 assert.ok(hyphenFeedback.tuning.style.hyphenLineY != null, "hyphen height should be learned");
-// Reset restores the exact untuned behaviour
-setTextShapeRTuning(null);
+// The neutral core remains exactly recoverable for isolated learning tests.
+setTextShapeRTuning({});
 const restoredTop = generateTextShapeRVariants(feedbackText, { limit: 12, profile: "balanced" })[0];
 assert.strictEqual(restoredTop.text, baselineTop.text);
 // Garbage tuning input must sanitize instead of breaking generation
@@ -407,7 +425,7 @@ const reverseReplay = trainFromPairOrder([replayPairB, replayPairA]);
 assert.deepStrictEqual(forwardReplay.weights, reverseReplay.weights,
   "the same replay evidence should produce identical ranking weights regardless of stored order");
 assert.strictEqual(forwardReplay.pairAccuracy, reverseReplay.pairAccuracy);
-setTextShapeRTuning(null);
+setTextShapeRTuning({});
 // Replay stability: a long consistent history must not be wrecked by a
 // single contradictory click — accuracy over the buffer stays high
 let guardTuning = null;
@@ -421,7 +439,7 @@ const contradiction = recordTextShapeRFeedback(
 );
 assert.ok(contradiction.tuning.pairAccuracy >= 0.6,
   `one contradictory feedback should not wreck the trained ranking, accuracy ${contradiction.tuning.pairAccuracy}`);
-setTextShapeRTuning(null);
+setTextShapeRTuning({});
 // The bubble is a constraint, not an objective: a strongly learned compact
 // style must survive bubble-aware mode. Train a tall-stack preference on one
 // text, then generate another text inside a round calibrated bubble — the
@@ -451,5 +469,8 @@ assert.ok(styledBubbleTop.lines.length >= 5,
 assert.ok(styledBubbleTop.lines.length * bubbleCalibration.linePx <= 300,
   `styled bubble top must still physically fit:\n${styledBubbleTop.text}`);
 setTextShapeRTuning(null);
+const restoredShippedDefaultTop = generateTextShapeRVariants(defaultProbeText, { limit: 12, profile: "balanced" })[0];
+assert.strictEqual(restoredShippedDefaultTop.text, shippedDefaultTop.text,
+  "null tuning must restore the shipped trained default");
 
 console.log("TextShapeR tests passed");

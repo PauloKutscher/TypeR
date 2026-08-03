@@ -1,3 +1,6 @@
+import defaultTextShapeRTuning from "./textShapeRDefaultTuning.json";
+
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const VOWELS = "aeiouyAEIOUY\u00e0\u00e2\u00e4\u00e9\u00e8\u00ea\u00eb\u00ee\u00ef\u00f4\u00f6\u00f9\u00fb\u00fc\u00c0\u00c2\u00c4\u00c9\u00c8\u00ca\u00cb\u00ce\u00cf\u00d4\u00d6\u00d9\u00db\u00dc";
 const MAX_VARIANTS = 12;
 const MARKDOWN_TOKENS = ["***", "**", "__", "*", "_"];
@@ -346,11 +349,15 @@ const sanitizeTuning = (raw) => {
   };
 };
 
-let tuning = { ...TUNING_DEFAULTS };
+// New installs use Sakushi's trained, language-agnostic ranking profile. The
+// bundled profile deliberately excludes verbatim exemplars and replay pairs:
+// those are tied to the French training dialogues and are not a sound default
+// for every language. A user's own tuning always replaces this profile.
+let tuning = sanitizeTuning(defaultTextShapeRTuning);
 // Bumped on every tuning change so cached variant lists never survive it
 let tuningRevision = 0;
 const setTextShapeRTuning = (next) => {
-  tuning = sanitizeTuning(next);
+  tuning = sanitizeTuning(next == null ? defaultTextShapeRTuning : next);
   tuningRevision++;
 };
 
@@ -364,7 +371,6 @@ const dehyphenate = (text) => {
 };
 
 const normalizeText = (text) => dehyphenate(String(text || "").replace(/\s+/g, " ").trim());
-const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 const stripMarkdownForMeasure = (text) => String(text || "")
   .replace(/\\([\\*_])/g, "$1")
@@ -1979,10 +1985,24 @@ const recordTextShapeRFeedback = (layerText, options = {}, currentTuning = null)
   if (!chosenLines.length) return null;
   const flatText = chosenLines.join(" ");
   if (!normalizeText(flatText)) return null;
-  const variants = generateTextShapeRVariants(flatText, options);
+  // The bundled default is a suggestion preset, not inherited user history.
+  // On the first Learn action `currentTuning` is null, so generate the lesson
+  // against the engine's real neutral baseline. Later lessons receive the
+  // persisted user tuning and continue from it normally.
+  const learningTuning = sanitizeTuning(currentTuning);
+  const previousTuning = tuning;
+  tuning = learningTuning;
+  tuningRevision++;
+  let variants;
+  try {
+    variants = generateTextShapeRVariants(flatText, options);
+  } finally {
+    tuning = previousTuning;
+    tuningRevision++;
+  }
   if (!variants.length) return null;
   const top = variants[0];
-  const next = sanitizeTuning(currentTuning || tuning);
+  const next = learningTuning;
   // Early feedback moves the knobs fast, later feedback stabilises them
   const alpha = 1 / Math.min(next.samples + 1, 5);
 
