@@ -42,6 +42,37 @@ const EDITOR_THEME_PRESETS = [
     },
   },
   {
+    id: "pure-dark",
+    labelKey: "settingsThemePureDark",
+    mode: "dark",
+    swatches: ["#000000", "#0a0a0a", "#4dabf7"],
+    colors: {
+      // Keep the large background and editor surfaces at absolute black so
+      // OLED pixels can switch off. Near-black elevations preserve just
+      // enough separation for controls and panels.
+      surface: "#000000",
+      surfaceAlt: "#060606",
+      panel: "#0a0a0a",
+      input: "#080808",
+      inputAlt: "#111111",
+      text: "#f2f2f2",
+      muted: "#8c8c8c",
+      border: "rgba(255, 255, 255, 0.12)",
+      borderStrong: "rgba(255, 255, 255, 0.24)",
+      accent: "#4dabf7",
+      accentHover: "#74c0fc",
+      accentText: "#000000",
+      accentSoft: "rgba(77, 171, 247, 0.2)",
+      codeBg: "#000000",
+      codeGutter: "#060606",
+      codeText: "#f2f2f2",
+      codeMuted: "#8c8c8c",
+      codeCurrent: "#10243a",
+      codeCurrentText: "#ffffff",
+      codePage: "#102b1a",
+    },
+  },
+  {
     id: "editor-light",
     label: "Light+",
     mode: "light",

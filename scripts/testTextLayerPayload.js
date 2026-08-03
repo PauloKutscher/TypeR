@@ -57,7 +57,7 @@ const makeStyle = (id, size = 20, leading = 24, textType = "inherit") => ({
   },
 });
 
-const baseStyle = makeStyle("base");
+const baseStyle = { ...makeStyle("base"), sizePresets: [20, 30, 40] };
 assert.strictEqual(getScaledStyle(null, 50), null);
 assert.strictEqual(getScaledStyle(baseStyle, null), baseStyle);
 
@@ -65,6 +65,8 @@ const scaled = getScaledStyle(baseStyle, 50);
 assert.notStrictEqual(scaled, baseStyle);
 assert.strictEqual(scaled.textProps.layerText.textStyleRange[0].textStyle.size, 10);
 assert.strictEqual(scaled.textProps.layerText.textStyleRange[0].textStyle.leading, 12);
+assert.deepStrictEqual(scaled.sizePresets, [10, 15, 20]);
+assert.deepStrictEqual(baseStyle.sizePresets, [20, 30, 40]);
 assert.strictEqual(baseStyle.textProps.layerText.textStyleRange[0].textStyle.size, 20);
 assert.strictEqual(resolveStylePointText(makeStyle("point", 20, 24, "point"), false), true);
 assert.strictEqual(resolveStylePointText(makeStyle("paragraph", 20, 24, "paragraph"), true), false);

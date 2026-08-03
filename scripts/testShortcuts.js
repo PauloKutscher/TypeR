@@ -17,6 +17,7 @@ const expectedNewCommands = [
   "previousPage",
   "previousStyle",
   "nextStyle",
+  "nextTextSizePreset",
   "applyStyle",
   "applyMultiple",
   "removeLastSelection",
@@ -40,8 +41,8 @@ const cleaningLayersBlock = commandBlockById.get("toggleCleaningLayers");
 assert(cleaningLayersBlock, "Missing shortcut command: toggleCleaningLayers");
 assert(
   /label:\s*"shortcut_toggleCleaningLayers"/.test(cleaningLayersBlock) &&
-    /defaultKeys:\s*\["CTRL",\s*"ALT",\s*"H"\]/.test(cleaningLayersBlock),
-  "toggleCleaningLayers must use its translated label and temporary Ctrl+Alt+H shortcut"
+    /defaultKeys:\s*\["CTRL",\s*"H"\]/.test(cleaningLayersBlock),
+  "toggleCleaningLayers must use its translated label and default Ctrl+H shortcut"
 );
 assert(contextSource.includes("getDefaultShortcuts()"), "Context must read defaults from the shortcut registry");
 assert(!contextSource.includes('add: ["WIN", "CTRL"]'), "Shortcut defaults must not be duplicated in context");
@@ -200,13 +201,14 @@ getCommand("previousTab").handler(baseContext);
 assert.deepStrictEqual(dispatches.shift(), { type: "switchTab", id: "tab-1" });
 getCommand("nextTab").handler(baseContext);
 assert.deepStrictEqual(dispatches.shift(), { type: "switchTab", id: "tab-3" });
-["previousPage", "previousStyle", "nextStyle"].forEach((id) => {
+["previousPage", "previousStyle", "nextStyle", "nextTextSizePreset"].forEach((id) => {
   getCommand(id).handler(baseContext);
 });
 assert.deepStrictEqual(dispatches, [
   { type: "previousPage" },
   { type: "previousStyle" },
   { type: "nextStyle" },
+  { type: "nextStyleSizePreset" },
 ]);
 
 const localeFiles = [

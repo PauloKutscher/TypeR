@@ -8,6 +8,11 @@ const getScaledStyle = (style, textScale) => {
   if (typeof textStyle.size === "number") {
     textStyle.size *= ratio;
   }
+  if (Array.isArray(scaledStyle.sizePresets)) {
+    scaledStyle.sizePresets = scaledStyle.sizePresets.map((size) => (
+      typeof size === "number" ? size * ratio : size
+    ));
+  }
   if (typeof textStyle.leading === "number" && textStyle.leading) {
     textStyle.leading *= ratio;
   }

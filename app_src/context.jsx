@@ -1,6 +1,7 @@
 import React from "react";
 import PropTypes from "prop-types";
-import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, checkUpdate } from "./utils";
+import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, nativeAlert } from "./utils";
+import { shouldRunUpdateCheck } from "./updateLogic";
 import config from "./config";
 import { getNextLineNumberState } from "./lineNumbering";
 import { CUSTOM_IMAGE_THEME_ID, normalizeCustomThemes, normalizeEditorTheme, normalizePageLineColor, setCustomEditorThemes } from "./themePresets";
@@ -11,8 +12,25 @@ import { getStoredSelectionLineIndex } from "./multiBubbleHistory";
 import { getAutomaticTagStyles } from "./folderUtils";
 import { perfMeasure } from "./perfDebug";
 import { TAB_FIELDS, createTab, migrateTabStorage } from "./tabStorage";
-
+import {
+  cycleStyleSizePreset,
+  normalizeStyleSizePresets,
+  normalizeStyleSizePresetWidthConfig,
+  setStyleSizePreset,
+  updateActiveStyleSizePreset,
+} from "./styleSizePresets";
+import {
+  STYLE_SIZE_TIP_THRESHOLD,
+  normalizeStyleSizeTipCount,
+  recordStyleSizeChange,
+} from "./styleSizeTip";
 const storage = readStorage();
+// A successful application is the clearest signal that someone is relying on
+// TextShapeR. Five applied suggestions are enough to introduce the learning
+// control without interrupting a first-time user.
+const TEXT_SHAPER_LEARN_TIP_THRESHOLD = 5;
+const hasTextShapeRLearning = (value) => Number(value?.samples) > 0;
+
 const storeFields = [
   "notFirstTime",
   "text",
@@ -29,6 +47,7 @@ const storeFields = [
   "defaultStyleId",
   "autoClosePSD",
   "checkUpdates",
+  "autoUpdate",
   "autoScrollStyle",
   "currentFolderTagPriority",
   "resizeTextBoxOnCenter",
@@ -45,12 +64,18 @@ const storeFields = [
   "showQuickStyleSize",
   "inlineTextShapeR",
   "textShapeRPerformanceTipShown",
+  "textShapeRUsageCount",
+  "textShapeRLearnUsed",
+  "textShapeRLearnTipShown",
   "textShapeRBubbleAware",
   "dehyphenateTextShapeR",
   "textShapeRTuning",
   "internalPadding",
   "interpretMarkdown",
   "styleSizeStep",
+  "styleSizeTipCount",
+  "styleSizeTipLastChangeAt",
+  "styleSizeTipShown",
   "resetLineCounterOnPage",
   "tabs",
   "currentTabId",
@@ -129,6 +154,33 @@ const normalizeUiLayout = (raw) => {
     uiScale: clampNumber(layout.sizes?.uiScale, 70, 150, defaultUiLayout.sizes.uiScale),
   };
   return { order, visible, sizes };
+};
+
+const shouldShowTextShapeRLearnTip = (state) => (
+  Number(state.textShapeRUsageCount) >= TEXT_SHAPER_LEARN_TIP_THRESHOLD &&
+  state.inlineTextShapeR &&
+  state.showTips !== false &&
+  state.uiLayout?.visible?.preview !== false &&
+  state.uiLayout?.visible?.previewWidget !== false &&
+  state.textShapeRLearnUsed !== true &&
+  state.textShapeRLearnTipShown !== true &&
+  !hasTextShapeRLearning(state.textShapeRTuning)
+);
+
+const showTextShapeRLearnTipIfEligible = (state) => {
+  if (!shouldShowTextShapeRLearnTip(state)) return;
+  state.textShapeRLearnTipShown = true;
+  state.textShapeRLearnTipVisible = true;
+};
+
+const showStyleSizeTipIfEligible = (state) => {
+  if (
+    normalizeStyleSizeTipCount(state.styleSizeTipCount) < STYLE_SIZE_TIP_THRESHOLD ||
+    state.showTips === false ||
+    state.styleSizeTipShown === true
+  ) return;
+  state.styleSizeTipShown = true;
+  state.styleSizeTipVisible = true;
 };
 
 const defaultShortcut = getDefaultShortcuts();
@@ -222,6 +274,7 @@ const initialState = {
   defaultStyleId: null,
   autoClosePSD: false,
   checkUpdates: config.checkUpdates,
+  autoUpdate: storage.data?.autoUpdate === true,
   autoScrollStyle: storage.data?.autoScrollStyle !== false,
   currentFolderTagPriority: storage.data?.currentFolderTagPriority !== false,
   resizeTextBoxOnCenter: false,
@@ -232,6 +285,10 @@ const initialState = {
   inlineTextShapeR: storage.data?.inlineTextShapeR !== false,
   textShapeRPerformanceTipShown: storage.data?.textShapeRPerformanceTipShown === true,
   textShapeRPerformanceTipVisible: false,
+  textShapeRUsageCount: 0,
+  textShapeRLearnUsed: false,
+  textShapeRLearnTipShown: false,
+  textShapeRLearnTipVisible: false,
   textShapeRBubbleAware: storage.data?.textShapeRBubbleAware !== false,
   dehyphenateTextShapeR: storage.data?.dehyphenateTextShapeR === true,
   textShapeRTuning: storage.data?.textShapeRTuning || null,
@@ -245,11 +302,26 @@ const initialState = {
   storedSelections: [],
   multiBubbleMode: false,
   internalPadding: 10,
-  interpretMarkdown: storage.data?.interpretMarkdown === true,
+  interpretMarkdown: storage.data?.interpretMarkdown !== false,
   styleSizeStep: 1,
+  styleSizeTipCount: 0,
+  styleSizeTipLastChangeAt: 0,
+  styleSizeTipShown: false,
+  styleSizeTipVisible: false,
   resetLineCounterOnPage: storage.data?.resetLineCounterOnPage !== false,
   multiTabEnabled: storage.data?.multiTabEnabled !== false,
   ...storage.data,
+  textShapeRUsageCount: Math.min(
+    TEXT_SHAPER_LEARN_TIP_THRESHOLD,
+    Math.max(0, Math.floor(Number(storage.data?.textShapeRUsageCount) || 0))
+  ),
+  textShapeRLearnUsed: storage.data?.textShapeRLearnUsed === true || hasTextShapeRLearning(storage.data?.textShapeRTuning),
+  textShapeRLearnTipShown: storage.data?.textShapeRLearnTipShown === true,
+  textShapeRLearnTipVisible: false,
+  styleSizeTipCount: normalizeStyleSizeTipCount(storage.data?.styleSizeTipCount),
+  styleSizeTipLastChangeAt: Math.max(0, Number(storage.data?.styleSizeTipLastChangeAt) || 0),
+  styleSizeTipShown: storage.data?.styleSizeTipShown === true,
+  styleSizeTipVisible: false,
   shortcut: { ...defaultShortcut, ...(storage.data?.shortcut || {}) },
   uiLayout: normalizeUiLayout(storage.data?.uiLayout),
   // The theme registry is filled by the theme manager at import time, so the
@@ -498,6 +570,52 @@ const baseReducer = (state, action) => {
       break;
     }
 
+    case "setStyleSizePreset": {
+      let changed = false;
+      const styles = state.styles.map((style) => {
+        if (style.id !== action.id) return style;
+        const nextStyle = setStyleSizePreset(style, action.size);
+        if (nextStyle !== style) changed = true;
+        return nextStyle;
+      });
+      newState.styles = changed ? styles : state.styles;
+      break;
+    }
+
+    case "updateActiveStyleSizePreset": {
+      let changed = false;
+      const styles = state.styles.map((style) => {
+        if (style.id !== action.id) return style;
+        const nextStyle = updateActiveStyleSizePreset(style, action.size);
+        if (nextStyle !== style) changed = true;
+        return nextStyle;
+      });
+      newState.styles = changed ? styles : state.styles;
+      if (changed && !state.styleSizeTipShown) {
+        const tracking = recordStyleSizeChange({
+          count: state.styleSizeTipCount,
+          lastChangeAt: state.styleSizeTipLastChangeAt,
+        }, action.now);
+        newState.styleSizeTipCount = tracking.count;
+        newState.styleSizeTipLastChangeAt = tracking.lastChangeAt;
+        showStyleSizeTipIfEligible(newState);
+      }
+      break;
+    }
+
+    case "nextStyleSizePreset": {
+      if (!state.currentStyleId) break;
+      let changed = false;
+      const styles = state.styles.map((style) => {
+        if (style.id !== state.currentStyleId) return style;
+        const nextStyle = cycleStyleSizePreset(style);
+        if (nextStyle !== style) changed = true;
+        return nextStyle;
+      });
+      newState.styles = changed ? styles : state.styles;
+      break;
+    }
+
     case "setTextScale": {
       let scale = parseInt(action.scale) || null;
       if (scale) {
@@ -733,6 +851,8 @@ const baseReducer = (state, action) => {
       } else if (!Array.isArray(stylePayload.prefixes)) {
         stylePayload.prefixes = [];
       }
+      stylePayload.sizePresets = normalizeStyleSizePresets(stylePayload);
+      Object.assign(stylePayload, normalizeStyleSizePresetWidthConfig(stylePayload));
       const editId = action.id || stylePayload.id;
       const styleExists = state.styles.some((s) => s.id === editId);
       newState.styles = styleExists
@@ -758,7 +878,8 @@ const baseReducer = (state, action) => {
       const styleToDup = action.data || state.styles.find((s) => s.id === state.currentStyleId);
       if (styleToDup) {
         const newStyleId = Math.random().toString(36).substr(2, 8);
-        const newStyle = { ...styleToDup, id: newStyleId, name: styleToDup.name + " copy" };
+        const targetFolder = action.folderId === undefined ? styleToDup.folder : action.folderId;
+        const newStyle = { ...styleToDup, id: newStyleId, name: styleToDup.name + " copy", folder: targetFolder || null };
         newState.styles = state.styles.concat(newStyle);
         newState.currentStyleId = newStyleId;
       }
@@ -766,7 +887,13 @@ const baseReducer = (state, action) => {
     }
 
     case "setStyles": {
-      newState.styles = action.data || [];
+      newState.styles = (action.data || []).map((style) => {
+        const normalizedStyle = {
+          ...style,
+          sizePresets: normalizeStyleSizePresets(style),
+        };
+        return { ...normalizedStyle, ...normalizeStyleSizePresetWidthConfig(normalizedStyle) };
+      });
       break;
     }
 
@@ -811,6 +938,11 @@ const baseReducer = (state, action) => {
 
   case "setCheckUpdates": {
     newState.checkUpdates = !!action.value;
+    break;
+  }
+
+  case "setAutoUpdate": {
+    newState.autoUpdate = !!action.value;
     break;
   }
 
@@ -863,6 +995,8 @@ const baseReducer = (state, action) => {
       newState.showTips = !!action.value;
       if (!newState.showTips) {
         newState.textShapeRPerformanceTipVisible = false;
+        newState.textShapeRLearnTipVisible = false;
+        newState.styleSizeTipVisible = false;
       } else if (
         newState.inlineTextShapeR &&
         newState.uiLayout?.visible?.preview !== false &&
@@ -871,6 +1005,15 @@ const baseReducer = (state, action) => {
         newState.textShapeRPerformanceTipShown = true;
         newState.textShapeRPerformanceTipVisible = true;
       }
+      if (newState.showTips) {
+        showTextShapeRLearnTipIfEligible(newState);
+        showStyleSizeTipIfEligible(newState);
+      }
+      break;
+    }
+
+    case "hideStyleSizeTip": {
+      newState.styleSizeTipVisible = false;
       break;
     }
 
@@ -902,8 +1045,10 @@ const baseReducer = (state, action) => {
           newState.textShapeRPerformanceTipShown = true;
           newState.textShapeRPerformanceTipVisible = true;
         }
+        showTextShapeRLearnTipIfEligible(newState);
       } else {
         newState.textShapeRPerformanceTipVisible = false;
+        newState.textShapeRLearnTipVisible = false;
       }
       break;
     }
@@ -921,6 +1066,23 @@ const baseReducer = (state, action) => {
       break;
     }
 
+    case "recordTextShapeRUse": {
+      const currentCount = Math.max(0, Math.floor(Number(newState.textShapeRUsageCount) || 0));
+      newState.textShapeRUsageCount = Math.min(TEXT_SHAPER_LEARN_TIP_THRESHOLD, currentCount + 1);
+      showTextShapeRLearnTipIfEligible(newState);
+      break;
+    }
+
+    case "showTextShapeRLearnTip": {
+      showTextShapeRLearnTipIfEligible(newState);
+      break;
+    }
+
+    case "hideTextShapeRLearnTip": {
+      newState.textShapeRLearnTipVisible = false;
+      break;
+    }
+
     case "setTextShapeRBubbleAware": {
       newState.textShapeRBubbleAware = !!action.value;
       break;
@@ -928,6 +1090,10 @@ const baseReducer = (state, action) => {
 
     case "setTextShapeRTuning": {
       newState.textShapeRTuning = action.value || null;
+      if (action.learned === true) newState.textShapeRLearnUsed = true;
+      if (action.learned === true || hasTextShapeRLearning(action.value)) {
+        newState.textShapeRLearnTipVisible = false;
+      }
       break;
     }
 
@@ -1599,15 +1765,51 @@ const ContextProvider = React.memo(function ContextProvider(props) {
       backgroundImage: state.backgroundImage,
     });
   }, [state.editorTheme, state.customThemes, state.pageLineColor, state.backgroundImage]);
+  const updateCheckRan = React.useRef(false);
   React.useEffect(() => {
-    if (state.checkUpdates) {
-      checkUpdate(config.appVersion).then((data) => {
-        if (data) {
-          dispatch({ type: 'setModal', modal: 'update', data });
-        }
-      });
-    }
-  }, [state.checkUpdates]);
+    if (!state.checkUpdates || updateCheckRan.current) return;
+    updateCheckRan.current = true;
+    const now = Date.now();
+    // The GitHub API allows 60 unauthenticated requests/hour per IP; one check
+    // per day is plenty. The manual button in the settings bypasses this.
+    if (!shouldRunUpdateCheck(readStorage("lastUpdateCheckAt"), now)) return;
+    checkUpdate(config.appVersion).then((data) => {
+      writeToStorage({ lastUpdateCheckAt: now });
+      if (!data) return;
+      // Already installed on disk, only waiting for a Photoshop restart —
+      // do not nag or reinstall in the meantime
+      if (readStorage("lastInstalledUpdateVersion") === data.version) return;
+      if (state.autoUpdate && data.downloadUrl) {
+        downloadAndInstallUpdate(
+          data.downloadUrl,
+          null,
+          (needsManualStep) => {
+            if (needsManualStep) {
+              // inPlaceOnly prevents this, but keep the modal as safety net
+              dispatch({ type: "setModal", modal: "update", data });
+              return;
+            }
+            writeToStorage({ lastInstalledUpdateVersion: data.version });
+            nativeAlert(
+              (locale.updateAutoInstalled || "TypeR {version} has been installed. Restart Photoshop to apply it.").replace("{version}", data.version),
+              locale.successTitle,
+              false
+            );
+          },
+          () => {
+            // Silent install failed: fall back to the interactive modal
+            dispatch({ type: "setModal", modal: "update", data });
+          },
+          { inPlaceOnly: true }
+        );
+        return;
+      }
+      if (readStorage("skippedUpdateVersion") === data.version) return;
+      // Fetch the zip in the background so the Install click is instant
+      prefetchUpdateZip(data.downloadUrl);
+      dispatch({ type: "setModal", modal: "update", data });
+    });
+  }, [state.checkUpdates, state.autoUpdate]);
   return <Context.Provider value={contextValue}>{props.children}</Context.Provider>;
 });
 ContextProvider.propTypes = {

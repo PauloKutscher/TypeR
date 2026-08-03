@@ -3,17 +3,18 @@ import "./stylesBlock.scss";
 import React from "react";
 import deepClone from "../../deepClone";
 import PropTypes from "prop-types";
-import { FiArrowRightCircle, FiPlus, FiFolderPlus, FiChevronDown, FiChevronUp, FiCopy, FiEye, FiEyeOff, FiMinus, FiInfo, FiX } from "react-icons/fi";
+import { FiArrowRightCircle, FiPlus, FiFolderPlus, FiChevronDown, FiChevronUp, FiCopy, FiClipboard, FiTrash2, FiPlusSquare, FiEye, FiEyeOff, FiMinus, FiInfo, FiX } from "react-icons/fi";
 import { MdEdit, MdLock } from "react-icons/md";
 import { CiExport } from "react-icons/ci";
 
 import config from "../../config";
-import { locale, nativeAlert, getActiveLayerText, setActiveLayerText, rgbToHex, getStyleObject, getUserFonts, refreshUserFonts } from "../../utils";
+import { locale, nativeAlert, nativeConfirm, getActiveLayerText, setActiveLayerText, rgbToHex, getStyleObject, getUserFonts, refreshUserFonts } from "../../utils";
 import { useContext } from "../../context";
 import { buildFolderTree } from "../../folderUtils";
 import { collectFontRefs, exportZipWithFonts } from "../../fontFileExport";
 import { createFontPreviewRegistry, getFontPreviewFamily } from "../../fontPreview";
 import { notePerfRender } from "../../perfDebug";
+import { getStyleTextSize, normalizeStyleSizePresets } from "../../styleSizePresets";
 
 const FontPreviewContext = React.createContext({ aliases: {}, css: "", revision: 0 });
 const emptyIdSet = new Set();
@@ -32,12 +33,80 @@ const StylesBlock = React.memo(function StylesBlock() {
     direction: state.direction,
     showQuickStyleSize: state.showQuickStyleSize,
     styleSizeStep: state.styleSizeStep,
+    styleSizeTipVisible: state.styleSizeTipVisible,
   }));
   const fontTextStyles = React.useMemo(
     () => (context.state.styles || []).map((style) => style.textProps?.layerText?.textStyleRange?.[0]?.textStyle || {}),
     [context.state.styles]
   );
   const [installedFonts, setInstalledFonts] = React.useState(getUserFonts);
+  const [copiedStyle, setCopiedStyle] = React.useState(null);
+  const [styleContextMenu, setStyleContextMenu] = React.useState(null);
+
+  const closeStyleContextMenu = React.useCallback(() => {
+    setStyleContextMenu(null);
+  }, []);
+
+  const openStyleContextMenu = React.useCallback((e, style) => {
+    e.preventDefault();
+    e.stopPropagation();
+    context.dispatch({ type: "setCurrentStyleId", id: style.id });
+    setStyleContextMenu({ type: "style", style, folderId: style.folder || null, x: e.clientX, y: e.clientY });
+  }, [context.dispatch]);
+
+  const openFolderContextMenu = React.useCallback((e, folderId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setStyleContextMenu({ type: "folder", folderId: folderId || null, x: e.clientX, y: e.clientY });
+  }, []);
+
+  React.useEffect(() => {
+    if (!styleContextMenu) return undefined;
+    const closeOnEscape = (e) => {
+      if (e.key === "Escape") closeStyleContextMenu();
+    };
+    document.addEventListener("mousedown", closeStyleContextMenu);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("blur", closeStyleContextMenu);
+    window.addEventListener("resize", closeStyleContextMenu);
+    return () => {
+      document.removeEventListener("mousedown", closeStyleContextMenu);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("blur", closeStyleContextMenu);
+      window.removeEventListener("resize", closeStyleContextMenu);
+    };
+  }, [styleContextMenu, closeStyleContextMenu]);
+
+  const copyContextStyle = React.useCallback(() => {
+    if (!styleContextMenu?.style) return;
+    setCopiedStyle(deepClone(styleContextMenu.style));
+    closeStyleContextMenu();
+  }, [styleContextMenu, closeStyleContextMenu]);
+
+  const pasteContextStyle = React.useCallback(() => {
+    if (!copiedStyle || !styleContextMenu) return;
+    context.dispatch({
+      type: "duplicateStyle",
+      data: deepClone(copiedStyle),
+      folderId: styleContextMenu.folderId,
+    });
+    closeStyleContextMenu();
+  }, [copiedStyle, styleContextMenu, context.dispatch, closeStyleContextMenu]);
+
+  const duplicateContextStyle = React.useCallback(() => {
+    if (!styleContextMenu?.style) return;
+    context.dispatch({ type: "duplicateStyle", data: styleContextMenu.style });
+    closeStyleContextMenu();
+  }, [styleContextMenu, context.dispatch, closeStyleContextMenu]);
+
+  const deleteContextStyle = React.useCallback(() => {
+    const styleId = styleContextMenu?.style?.id;
+    if (!styleId) return;
+    closeStyleContextMenu();
+    nativeConfirm(locale.confirmDeleteStyle, locale.confirmTitle, (ok) => {
+      if (ok) context.dispatch({ type: "deleteStyle", id: styleId });
+    });
+  }, [styleContextMenu, context.dispatch, closeStyleContextMenu]);
 
   // Fonts are fetched once at panel startup: enumerating app.fonts blocks
   // Photoshop, and refreshing on focus used to swallow clicks on style items
@@ -118,6 +187,22 @@ const StylesBlock = React.memo(function StylesBlock() {
           </button>
         </div>
       )}
+      {context.state.showTips !== false && context.state.styleSizeTipVisible && (
+        <div className="export-font-tip style-size-tip hostBrdBotContrast" role="status">
+          <FiInfo size={14} className="export-font-tip-icon" />
+          <span className="export-font-tip-text">
+            {locale.styleSizeStepTip || "Tip: You can change the font size increment in Settings > Behavior > Styles, for example to 0.5 for finer adjustments."}
+          </span>
+          <button
+            type="button"
+            className="export-font-tip-close"
+            title={locale.close}
+            onClick={() => context.dispatch({ type: "hideStyleSizeTip" })}
+          >
+            <FiX size={14} />
+          </button>
+        </div>
+      )}
       <div className="folders-list">
         {hasContent ? (
           <React.Fragment>
@@ -135,6 +220,8 @@ const StylesBlock = React.memo(function StylesBlock() {
                 direction={context.state.direction}
                 showQuickStyleSize={context.state.showQuickStyleSize}
                 styleSizeStep={context.state.styleSizeStep}
+                onOpenStyleContextMenu={openStyleContextMenu}
+                onOpenFolderContextMenu={openFolderContextMenu}
               />
             )}
             <FolderTree
@@ -149,6 +236,8 @@ const StylesBlock = React.memo(function StylesBlock() {
               direction={context.state.direction}
               showQuickStyleSize={context.state.showQuickStyleSize}
               styleSizeStep={context.state.styleSizeStep}
+              onOpenStyleContextMenu={openStyleContextMenu}
+              onOpenFolderContextMenu={openFolderContextMenu}
             />
           </React.Fragment>
         ) : (
@@ -157,6 +246,42 @@ const StylesBlock = React.memo(function StylesBlock() {
           </div>
         )}
       </div>
+      {styleContextMenu && (
+        <div
+          className="style-context-menu hostBgdLight hostBrdContrast"
+          role="menu"
+          style={{
+            left: Math.max(4, Math.min(styleContextMenu.x, window.innerWidth - 196)),
+            top: Math.max(4, Math.min(styleContextMenu.y, window.innerHeight - (styleContextMenu.type === "style" ? 146 : 42))),
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          {styleContextMenu.type === "style" && (
+            <button type="button" role="menuitem" onClick={copyContextStyle}>
+              <FiCopy size={15} />
+              <span>{locale.copyStyle}</span>
+            </button>
+          )}
+          <button type="button" role="menuitem" onClick={pasteContextStyle} disabled={!copiedStyle}>
+            <FiClipboard size={15} />
+            <span>{locale.pasteStyle}</span>
+          </button>
+          {styleContextMenu.type === "style" && (
+            <React.Fragment>
+              <button type="button" role="menuitem" onClick={duplicateContextStyle}>
+                <FiPlusSquare size={15} />
+                <span>{locale.duplicateStyle}</span>
+              </button>
+              <div className="style-context-menu-separator hostBrdTopContrast" />
+              <button type="button" role="menuitem" className="m-danger" onClick={deleteContextStyle}>
+                <FiTrash2 size={15} />
+                <span>{locale.delete}</span>
+              </button>
+            </React.Fragment>
+          )}
+        </div>
+      )}
       <div className="style-add hostBrdTopContrast style-btn-list">
         <button className="topcoat-button--large" onClick={() => context.dispatch({ type: "setModal", modal: "editFolder", data: { create: true } })}>
           <FiFolderPlus size={18} /> {locale.addFolder}
@@ -234,6 +359,8 @@ const FolderTree = React.memo(function FolderTree(props) {
           styleSizeStep={props.styleSizeStep}
           siblingFolderIds={props.folders.map((item) => item.id)}
           parentId={props.parentId}
+          onOpenStyleContextMenu={props.onOpenStyleContextMenu}
+          onOpenFolderContextMenu={props.onOpenFolderContextMenu}
         />
       ))}
     </div>
@@ -251,6 +378,8 @@ FolderTree.propTypes = {
   direction: PropTypes.string,
   showQuickStyleSize: PropTypes.bool,
   styleSizeStep: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+  onOpenStyleContextMenu: PropTypes.func.isRequired,
+  onOpenFolderContextMenu: PropTypes.func.isRequired,
 };
 
 const FolderItem = React.memo(function FolderItem(props) {
@@ -463,6 +592,7 @@ const FolderItem = React.memo(function FolderItem(props) {
         className="folder-header"
         style={{ paddingLeft: props.depth ? props.depth * 12 + 4 : 4 }}
         onClick={toggleFolder}
+        onContextMenu={(e) => props.onOpenFolderContextMenu(e, props.data.id || null)}
         draggable={!!props.data.id}
         onDragStart={startFolderDrag}
         onDragEnd={endFolderDrag}
@@ -509,6 +639,8 @@ const FolderItem = React.memo(function FolderItem(props) {
                 direction={props.direction}
                 showQuickStyleSize={props.showQuickStyleSize}
                 styleSizeStep={props.styleSizeStep}
+                onOpenStyleContextMenu={props.onOpenStyleContextMenu}
+                onOpenFolderContextMenu={props.onOpenFolderContextMenu}
               />
             </div>
           )}
@@ -527,6 +659,7 @@ const FolderItem = React.memo(function FolderItem(props) {
                   direction={props.direction}
                   showQuickStyleSize={props.showQuickStyleSize}
                   styleSizeStep={props.styleSizeStep}
+                  onOpenContextMenu={props.onOpenStyleContextMenu}
                 />
               ))}
               {!styles.length && (
@@ -554,6 +687,8 @@ FolderItem.propTypes = {
   styleSizeStep: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
   siblingFolderIds: PropTypes.array,
   parentId: PropTypes.oneOfType([PropTypes.string, PropTypes.oneOf([null])]),
+  onOpenStyleContextMenu: PropTypes.func.isRequired,
+  onOpenFolderContextMenu: PropTypes.func.isRequired,
 };
 
 // StyleItem deliberately avoids useContext: subscribing to the global context
@@ -568,27 +703,20 @@ const StyleItem = React.memo(function StyleItem(props) {
   const prefixes = props.style.prefixes || [];
   const dispatch = props.dispatch;
 
+  const unit = props.style.textProps?.typeUnit ? props.style.textProps.typeUnit.substr(0, 3) : "px";
+  const showQuickStyleSize = props.showQuickStyleSize !== false;
+  const sizePresets = normalizeStyleSizePresets(props.style);
+  const activeSize = getStyleTextSize(props.style);
   const [quickSizeOverride, setQuickSizeOverride] = React.useState(null);
-  const displaySize = quickSizeOverride !== null ? quickSizeOverride : (textStyle.size || "");
-
   const [quickOpen, setQuickOpen] = React.useState(false);
   const quickCloseTimeout = React.useRef(null);
   const quickWrapRef = React.useRef(null);
-  const quickInputRef = React.useRef(null);
-  const sizeValue = textStyle.size || "";
-  const unit = props.style.textProps?.typeUnit ? props.style.textProps.typeUnit.substr(0, 3) : "px";
-  const showQuickStyleSize = props.showQuickStyleSize !== false;
+  const displaySize = quickSizeOverride !== null ? quickSizeOverride : (activeSize || "");
   const sizeStep = Number(props.styleSizeStep) > 0 ? Number(props.styleSizeStep) : 1;
   const sizeStepDecimals = (sizeStep.toString().split(".")[1] || "").length;
-  const normalizeSizeStep = (value) => {
-    const rounded = Math.round(value / sizeStep) * sizeStep;
-    return parseFloat(rounded.toFixed(sizeStepDecimals));
-  };
 
-  React.useEffect(() => {
-    return () => {
-      if (quickCloseTimeout.current) clearTimeout(quickCloseTimeout.current);
-    };
+  React.useEffect(() => () => {
+    if (quickCloseTimeout.current) clearTimeout(quickCloseTimeout.current);
   }, []);
 
   // StyleItem now handles its own select/open dispatch instead of receiving closures as props
@@ -612,6 +740,7 @@ const StyleItem = React.memo(function StyleItem(props) {
         const nextTextStyle = styleWithActiveSize.textProps?.layerText?.textStyleRange?.[0]?.textStyle;
         if (!nextTextStyle) return;
         nextTextStyle.size = activeTextStyle.size;
+        styleWithActiveSize.autoSizeByPageWidth = false;
         setActiveLayerText("", styleWithActiveSize, direction);
       });
     } else {
@@ -619,15 +748,17 @@ const StyleItem = React.memo(function StyleItem(props) {
     }
   }, [props.direction, props.style]);
 
-  const duplicateStyle = React.useCallback((e) => {
-    e.stopPropagation();
-    dispatch({ type: "duplicateStyle", data: props.style });
-  }, [dispatch, props.style]);
-
   const togglePrefixes = React.useCallback((e) => {
     e.stopPropagation();
     dispatch({ type: "toggleStylePrefixes", id: props.style.id });
   }, [dispatch, props.style.id]);
+
+  const selectSizePreset = (size) => (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!props.active) dispatch({ type: "setCurrentStyleId", id: props.style.id });
+    dispatch({ type: "setStyleSizePreset", id: props.style.id, size });
+  };
 
   const openQuickSize = () => {
     if (quickCloseTimeout.current) clearTimeout(quickCloseTimeout.current);
@@ -640,41 +771,25 @@ const StyleItem = React.memo(function StyleItem(props) {
       document.activeElement.blur();
     }
   };
-  const applyQuickSize = React.useCallback(
-    (nextSize) => {
-      if (!props.style.textProps?.layerText?.textStyleRange?.length) return;
-      const parsed = parseFloat(nextSize);
-      if (!Number.isFinite(parsed) || parsed <= 0) return;
-      const newTextProps = deepClone(props.style.textProps);
-      const newStyle = newTextProps.layerText.textStyleRange[0].textStyle;
-      newStyle.size = parsed;
-      if (newStyle.impliedFontSize != null) newStyle.impliedFontSize = parsed;
-      dispatch({
-        type: "saveStyle",
-        data: { ...props.style, textProps: newTextProps, edited: Date.now() },
-      });
-    },
-    [dispatch, props.style]
-  );
-  const stopQuickEvent = (e) => {
-    e.stopPropagation();
+  const stopQuickEvent = (e) => e.stopPropagation();
+  const applyQuickSize = (value) => {
+    const size = parseFloat(value);
+    if (!Number.isFinite(size) || size <= 0) return;
+    dispatch({ type: "updateActiveStyleSizePreset", id: props.style.id, size });
   };
   const changeQuickSize = (e) => {
     stopQuickEvent(e);
     const value = e.target.value;
     setQuickSizeOverride(value);
-    if (value === "") return;
-    applyQuickSize(value);
+    if (value !== "") applyQuickSize(value);
   };
   const nudgeQuickSize = (delta) => (e) => {
     stopQuickEvent(e);
-    const baseValue = parseFloat(quickSizeOverride ?? textStyle.size ?? 1);
-    const nextValue = Math.max(1, normalizeSizeStep(baseValue + delta * sizeStep));
+    const baseValue = parseFloat(quickSizeOverride ?? activeSize ?? 1);
+    const rounded = Math.round((baseValue + delta * sizeStep) / sizeStep) * sizeStep;
+    const nextValue = Math.max(1, parseFloat(rounded.toFixed(sizeStepDecimals)));
     setQuickSizeOverride(nextValue);
     applyQuickSize(nextValue);
-  };
-  const resetQuickSize = () => {
-    setQuickSizeOverride(null);
   };
   const startDrag = React.useCallback((e) => {
     currentDraggingStyleId = props.style.id;
@@ -731,6 +846,7 @@ const StyleItem = React.memo(function StyleItem(props) {
       onDragLeave={props.onDragLeaveStyle}
       onDrop={dropStyle}
       onClick={selectStyle}
+      onContextMenu={(e) => props.onOpenContextMenu(e, props.style)}
     >
       {props.dropEdge && <span className={"style-drop-indicator m-" + props.dropEdge} aria-hidden="true" />}
       <div className="style-marker">
@@ -755,6 +871,22 @@ const StyleItem = React.memo(function StyleItem(props) {
         </span>
       </div>
       <div className="style-actions">
+        {showQuickStyleSize && sizePresets.length > 0 && (
+          <div className="style-size-presets" aria-label={locale.editStyleSizePresetsLabel || "Text size presets"}>
+            {sizePresets.map((size) => (
+              <button
+                type="button"
+                key={size}
+                className={"style-size-preset" + (size === activeSize ? " m-active" : "")}
+                title={`${locale.editStyleActivateSizePreset || "Use this size preset"}: ${size}${unit}`}
+                onClick={selectSizePreset(size)}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                {size}<span>{unit}</span>
+              </button>
+            ))}
+          </div>
+        )}
         {showQuickStyleSize ? (
           <div
             className={"style-quick-size-wrap" + (quickOpen ? " m-open" : "")}
@@ -769,26 +901,20 @@ const StyleItem = React.memo(function StyleItem(props) {
             <button className={"topcoat-icon-button--large--quiet" + (props.active ? " m-cta" : "")} title={locale.editStyle} onClick={openStyle}>
               <MdEdit size={16} />
             </button>
-            {sizeValue !== "" && (
-              <span className="style-quick-size-badge" title={locale.editStyleFontSize || "Font size"}>
-                {sizeValue}{unit}
-              </span>
-            )}
-            <div className="style-quick-size hostBrdContrast" title={locale.editStyleFontSize || "Font size"} onMouseDown={stopQuickEvent} onClick={stopQuickEvent}>
-              <button className="style-quick-size-btn" title={locale.shortcut_decrease || "Decrease text size"} onClick={nudgeQuickSize(-1)}>
+            <div className="style-quick-size hostBrdContrast" title={locale.editStyleFontSize || "Font size"}>
+              <button type="button" className="style-quick-size-btn" title={locale.shortcut_decrease || "Decrease text size"} onClick={nudgeQuickSize(-1)}>
                 <FiMinus size={12} />
               </button>
               <input
-                ref={quickInputRef}
                 type="number"
                 min={1}
                 step={sizeStep}
                 value={displaySize}
                 onChange={changeQuickSize}
-                onBlur={resetQuickSize}
+                onBlur={() => setQuickSizeOverride(null)}
                 className="style-quick-size-input"
               />
-              <button className="style-quick-size-btn" title={locale.shortcut_increase || "Increase text size"} onClick={nudgeQuickSize(1)}>
+              <button type="button" className="style-quick-size-btn" title={locale.shortcut_increase || "Increase text size"} onClick={nudgeQuickSize(1)}>
                 <FiPlus size={12} />
               </button>
             </div>
@@ -798,9 +924,6 @@ const StyleItem = React.memo(function StyleItem(props) {
             <MdEdit size={16} />
           </button>
         )}
-        <button className={"topcoat-icon-button--large--quiet" + (props.active ? " m-cta" : "")} title={locale.duplicateStyle} onClick={duplicateStyle}>
-          <FiCopy size={16} />
-        </button>
         <button className={"topcoat-icon-button--large--quiet" + (props.active ? " m-cta" : "")} title={locale.insertStyle} onClick={insertStyle}>
           <FiArrowRightCircle size={16} />
         </button>
@@ -819,6 +942,7 @@ StyleItem.propTypes = {
   direction: PropTypes.string,
   showQuickStyleSize: PropTypes.bool,
   styleSizeStep: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+  onOpenContextMenu: PropTypes.func.isRequired,
 };
 
 export default StylesBlock;

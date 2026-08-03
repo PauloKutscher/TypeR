@@ -78,6 +78,207 @@
         }
     }
 }
+.style-edit-size-section {
+    margin-top: 12px;
+    margin-bottom: 10px;
+    padding: 9px;
+    border: 1px solid rgba(#000, .18);
+    border-radius: 4px;
+    background: rgba(#000, .07);
+}
+.style-edit-size-heading {
+    display: flex;
+    align-items: flex-start;
+    gap: 7px;
+    SVG {
+        flex: 0 0 auto;
+        margin-top: 1px;
+        opacity: .55;
+    }
+}
+.style-edit-size-title {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 15px;
+}
+.style-edit-size-descr {
+    margin-top: 1px;
+    font-size: 10px;
+    line-height: 13px;
+    opacity: .55;
+}
+.style-edit-size-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+.style-edit-size-preset {
+    position: relative;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    width: 92px;
+    height: 30px;
+    padding: 3px 23px 3px 4px;
+    border: 1px solid rgba(#000, .35);
+    border-radius: 3px;
+    background: rgba(#000, .13);
+    cursor: pointer;
+    transition: border-color .12s ease, background-color .12s ease;
+    &:hover {
+        border-color: rgba(#fff, .42);
+        background: rgba(#000, .2);
+    }
+    &.m-active {
+        border-color: #55b2f8;
+        background: rgba(#288edf, .38);
+        box-shadow: inset 0 0 0 1px rgba(#fff, .12);
+    }
+    INPUT[type=number] {
+        box-sizing: border-box;
+        width: 100%;
+        height: 22px;
+        padding: 0 19px 0 4px;
+        font-size: 12px;
+        text-align: right;
+    }
+}
+.style-edit-size-unit {
+    position: absolute;
+    right: 28px;
+    font-size: 10px;
+    pointer-events: none;
+    opacity: .55;
+}
+.style-edit-size-remove {
+    position: absolute;
+    top: 6px;
+    right: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 0;
+    border-radius: 2px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    opacity: .55;
+    &:hover:not(:disabled) {
+        background: rgba(#000, .2);
+        opacity: 1;
+    }
+    &:disabled {
+        cursor: default;
+        opacity: .15;
+    }
+}
+.style-edit-size-add {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 82px;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px dashed rgba(#fff, .3);
+    border-radius: 3px;
+    background: transparent;
+    color: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    opacity: .7;
+    &:hover {
+        border-color: rgba(#fff, .55);
+        background: rgba(#000, .1);
+        opacity: 1;
+    }
+}
+.light-theme {
+    .style-edit-size-preset:hover,
+    .style-edit-size-remove:hover:not(:disabled),
+    .style-edit-size-add:hover {
+        background: rgba(#000, .08);
+    }
+    .style-edit-size-add {
+        border-color: rgba(#000, .3);
+    }
+}
+.style-edit-auto-size {
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px solid;
+}
+.style-edit-auto-size-toggle {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 18px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    &.m-disabled {
+        cursor: default;
+        opacity: .45;
+    }
+    .topcoat-checkbox__checkmark {
+        flex: 0 0 auto;
+    }
+}
+.style-edit-auto-size-descr {
+    margin: 4px 0 0 23px;
+    font-size: 10px;
+    line-height: 13px;
+    opacity: .55;
+}
+.style-edit-auto-size-rules {
+    margin-top: 9px;
+    padding: 7px;
+    border-radius: 3px;
+    background: rgba(#000, .09);
+}
+.style-edit-auto-size-default {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 11px;
+    SELECT {
+        width: 105px;
+        height: 24px;
+        padding: 0 5px;
+        flex: 0 0 auto;
+    }
+}
+.style-edit-auto-size-breakpoints {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(#000, .18);
+}
+.style-edit-auto-size-rule {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 26px;
+    font-size: 10px;
+    STRONG {
+        width: 46px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    INPUT[type=number] {
+        box-sizing: border-box;
+        width: 76px;
+        height: 22px;
+        padding: 0 4px;
+        flex: 0 0 auto;
+        text-align: right;
+    }
+}
 .style-edit-props-col {
     position: relative;
     align-items: center;
@@ -85,6 +286,9 @@
     width: 50%;
     &.m-justify {
         justify-content: space-between;
+    }
+    &.m-leading {
+        width: 100%;
     }
     & + & {
         margin-left: 15px;

@@ -221,6 +221,13 @@ const shortcutCommands = [
     handler: (ctx) => ctx.dispatch({ type: "nextStyle" }),
   },
   {
+    id: "nextTextSizePreset",
+    label: "shortcut_nextTextSizePreset",
+    defaultKeys: [],
+    repeatDelay: 300,
+    handler: (ctx) => ctx.dispatch({ type: "nextStyleSizePreset" }),
+  },
+  {
     id: "increase",
     label: "shortcut_increase",
     defaultKeys: ["CTRL", "SHIFT", "PLUS"],
@@ -237,7 +244,7 @@ const shortcutCommands = [
   {
     id: "toggleCleaningLayers",
     label: "shortcut_toggleCleaningLayers",
-    defaultKeys: ["CTRL", "ALT", "H"],
+    defaultKeys: ["CTRL", "H"],
     repeatDelay: 300,
     handler: () => toggleCleaningLayers(),
   },
@@ -344,6 +351,8 @@ const shortcutKeyLabels = {
   ARROWDOWN: "↓",
   ARROWLEFT: "←",
   ARROWRIGHT: "→",
+  MOUSE4: "Mouse 4",
+  MOUSE5: "Mouse 5",
 };
 
 const formatShortcut = (keys) => (keys || [])
