@@ -1883,6 +1883,19 @@ function getUserFonts() {
   });
 }
 
+function reloadUserFonts() {
+  // app.fonts is built once at startup; refreshFonts() (CC 2015+) makes
+  // Photoshop rescan the system so freshly installed fonts appear without a
+  // restart. Only called after an explicit install action — the rescan
+  // briefly blocks the host.
+  try {
+    app.refreshFonts();
+  } catch (e) {
+    // Older hosts without refreshFonts still return the current list.
+  }
+  return getUserFonts();
+}
+
 var frontmostCheckCache = { time: 0, front: true };
 
 function isHostAppFrontmost() {

@@ -1,5 +1,5 @@
 import React from "react";
-import { FiX, FiSettings, FiEye, FiEyeOff, FiToggleLeft, FiDatabase, FiAlertTriangle, FiChevronUp, FiChevronDown, FiRotateCcw, FiCheck, FiPlayCircle, FiType, FiEdit2, FiPlus, FiImage, FiTrash2, FiUsers } from "react-icons/fi";
+import { FiX, FiSettings, FiEye, FiEyeOff, FiToggleLeft, FiDatabase, FiAlertTriangle, FiChevronUp, FiChevronDown, FiRotateCcw, FiCheck, FiPlayCircle, FiType, FiEdit2, FiPlus, FiImage, FiTrash2, FiUsers, FiBookOpen } from "react-icons/fi";
 import { MdSave } from "react-icons/md";
 import { FaKeyboard, FaFileExport, FaFileImport } from "react-icons/fa";
 
@@ -29,6 +29,8 @@ import Shortcut from "./shortCut";
 import FontScanPromo from "./fontScanPromo";
 import ProfileSettings from "./profileSettings";
 import UnsavedChangesDialog from "./unsavedChangesDialog";
+import FontViewer from "./fontViewer";
+import { getFontViewerStatus } from "../../fontViewerApi";
 import { shortcutCommands } from "../../shortcutCommands";
 import { isPerfDebugEnabled, setPerfDebugEnabled, reportPerfDebug, resetPerfDebug } from "../../perfDebug";
 import { clearTypeRCache, formatCacheBytes, getTypeRCacheInfo } from "../../cepCache";
@@ -162,6 +164,7 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [multiTabConfirmOpen, setMultiTabConfirmOpen] = React.useState(false);
   const [edited, setEdited] = React.useState(false);
   const [discardConfirmOpen, setDiscardConfirmOpen] = React.useState(false);
+  const [fontViewerAvailable, setFontViewerAvailable] = React.useState(false);
 
   // Interface layout editor (appearance tab)
   const [uiLayout, setUiLayoutLocal] = React.useState(() => normalizeUiLayout(context.state.uiLayout));
@@ -192,6 +195,20 @@ const SettingsModal = React.memo(function SettingsModal() {
   React.useEffect(() => {
     if (activeTab === "data") setCacheInfo(getTypeRCacheInfo());
   }, [activeTab]);
+
+  React.useEffect(() => {
+    let active = true;
+    getFontViewerStatus()
+      .then((status) => {
+        if (active) setFontViewerAvailable(status.enabled === true);
+      })
+      .catch(() => {
+        if (active) setFontViewerAvailable(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const shortcutConflicts = React.useMemo(() => {
     const bySignature = {};
@@ -1049,6 +1066,13 @@ const SettingsModal = React.memo(function SettingsModal() {
     { id: "appearance", label: locale.settingsTabAppearance || "Appearance", icon: FiEye },
     { id: "behavior", label: locale.settingsTabBehavior || "Behavior", icon: FiToggleLeft },
     { id: "shortcuts", label: locale.settingsTabShortcuts || "Shortcuts", icon: FaKeyboard },
+    {
+      id: "fontViewer",
+      label: locale.settingsTabFontViewer,
+      icon: FiBookOpen,
+      disabled: !fontViewerAvailable,
+      disabledTitle: locale.fontViewerUnavailable,
+    },
     { id: "data", label: locale.settingsTabData || "Data", icon: FiDatabase }
   ];
 
@@ -1798,6 +1822,9 @@ const SettingsModal = React.memo(function SettingsModal() {
           </div>
         );
 
+      case "fontViewer":
+        return <FontViewer />;
+
       case "data":
         return (
           <div className="fields">
@@ -1908,8 +1935,12 @@ const SettingsModal = React.memo(function SettingsModal() {
               return (
                 <button
                   key={tab.id}
-                  className={`settings-tab ${activeTab === tab.id ? 'settings-tab--active' : ''}`}
-                  onClick={() => setActiveTab(tab.id)}
+                  className={`settings-tab ${activeTab === tab.id ? 'settings-tab--active' : ''}${tab.disabled ? ' settings-tab--disabled' : ''}`}
+                  aria-disabled={tab.disabled || undefined}
+                  title={tab.disabled ? tab.disabledTitle : undefined}
+                  onClick={() => {
+                    if (!tab.disabled) setActiveTab(tab.id);
+                  }}
                 >
                   <IconComponent size={16} />
                   <span>{tab.label}</span>
@@ -1917,9 +1948,12 @@ const SettingsModal = React.memo(function SettingsModal() {
               );
             })}
           </div>
-          <form className="settings-content" onSubmit={save}>
+          <form
+            className={`settings-content${activeTab === "fontViewer" ? " settings-content--font-viewer" : ""}`}
+            onSubmit={activeTab === "fontViewer" ? (event) => event.preventDefault() : save}
+          >
             {renderTabContent()}
-            <div className="settings-actions hostBgdLight hostBrdTopContrast">
+            {activeTab !== "fontViewer" && <div className="settings-actions hostBgdLight hostBrdTopContrast">
               {edited && (
                 <span className="settings-unsaved">
                   {locale.settingsUnsavedChanges || "Unsaved changes"}
@@ -1928,7 +1962,7 @@ const SettingsModal = React.memo(function SettingsModal() {
               <button type="submit" className={edited ? "topcoat-button--large--cta" : "topcoat-button--large"}>
                 <MdSave size={18} /> {locale.save}
               </button>
-            </div>
+            </div>}
           </form>
         </div>
         {themeToDelete && (

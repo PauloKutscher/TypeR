@@ -385,6 +385,15 @@ body[data-editor-theme]:not([data-editor-theme="system"]) {
     box-shadow: inset 0 -2px 0 var(--editor-accent) !important;
   }
 
+  .settings-tab--disabled,
+  .settings-tab--disabled:hover {
+    color: var(--editor-muted) !important;
+    opacity: 0.4 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    cursor: not-allowed;
+  }
+
   .settings-group-title {
     color: var(--editor-text) !important;
   }

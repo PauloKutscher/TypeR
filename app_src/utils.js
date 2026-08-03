@@ -550,12 +550,15 @@ const getUserFonts = () => {
   return Array.isArray(userFonts) ? userFonts.concat([]) : [];
 };
 
-const refreshUserFonts = (callback) => {
+const refreshUserFonts = (callback, rescanHost) => {
   if (typeof callback === "function") userFontsCallbacks.push(callback);
   if (userFontsRequestPending) return;
 
   userFontsRequestPending = true;
-  csInterface.evalScript("getUserFonts()", (data) => {
+  // rescanHost runs app.refreshFonts() in Photoshop first, so fonts installed
+  // during the session show up without a restart. Reserved for explicit
+  // install actions: the rescan briefly blocks the host.
+  csInterface.evalScript(rescanHost ? "reloadUserFonts()" : "getUserFonts()", (data) => {
     const dataObj = safeJsonParse(data);
     const fonts = dataObj.fonts || [];
     userFonts = fonts;
