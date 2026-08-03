@@ -1,5 +1,5 @@
 import React from "react";
-import { FiX, FiSettings, FiEye, FiEyeOff, FiToggleLeft, FiDatabase, FiAlertTriangle, FiChevronUp, FiChevronDown, FiRotateCcw, FiCheck, FiPlayCircle, FiType, FiEdit2, FiPlus, FiImage, FiTrash2, FiUsers, FiBookOpen } from "react-icons/fi";
+import { FiX, FiSettings, FiEye, FiEyeOff, FiToggleLeft, FiDatabase, FiAlertTriangle, FiChevronUp, FiChevronDown, FiRotateCcw, FiCheck, FiPlayCircle, FiType, FiEdit2, FiPlus, FiImage, FiTrash2, FiUsers } from "react-icons/fi";
 import { MdSave } from "react-icons/md";
 import { FaKeyboard, FaFileExport, FaFileImport } from "react-icons/fa";
 
@@ -30,6 +30,7 @@ import FontScanPromo from "./fontScanPromo";
 import ProfileSettings from "./profileSettings";
 import UnsavedChangesDialog from "./unsavedChangesDialog";
 import FontViewer from "./fontViewer";
+import FontFinderLogo from "./fontFinderLogo";
 import { getFontViewerStatus } from "../../fontViewerApi";
 import { shortcutCommands } from "../../shortcutCommands";
 import { isPerfDebugEnabled, setPerfDebugEnabled, reportPerfDebug, resetPerfDebug } from "../../perfDebug";
@@ -1069,7 +1070,7 @@ const SettingsModal = React.memo(function SettingsModal() {
     {
       id: "fontViewer",
       label: locale.settingsTabFontViewer,
-      icon: FiBookOpen,
+      icon: FontFinderLogo,
       disabled: !fontViewerAvailable,
       disabledTitle: locale.fontViewerUnavailable,
     },

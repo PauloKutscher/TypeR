@@ -11,18 +11,21 @@ import {
   FiPlusCircle,
   FiRefreshCw,
   FiSearch,
+  FiShuffle,
   FiSliders,
-  FiType,
   FiX,
 } from "react-icons/fi";
 import { locale, openUrl, refreshUserFonts } from "../../utils";
 import { uint8ToBase64 } from "../../updateInstaller";
 import { FONT_VIEWER_API_BASE, getDownloadManifest, getFontFamilies, getFontFilters } from "../../fontViewerApi";
 import { installFontFiles, isFontInstallSupported } from "../../fontInstaller";
+import { shuffleFamilies } from "../../fontViewerRandom";
+import FontFinderLogo from "./fontFinderLogo";
 
 import "./fontViewer.scss";
 
 const PER_PAGE = 200;
+const RANDOM_BATCH_SIZE = 24;
 const DOWNLOAD_CONCURRENCY = 3;
 const VIEW_STORAGE_KEY = "typer.fontViewer.compactView";
 const SCROLL_STORAGE_KEY = "typer.fontViewer.scrollTop";
@@ -271,6 +274,15 @@ const FontCard = React.memo(({ family, letter, letterStart, previewText, upperca
           <strong title={family.family}>{family.family}</strong>
           <small>{(family.styles || []).join(" · ") || locale.fontViewerUncategorized}</small>
         </div>
+        <button
+          type="button"
+          className="font-viewer-icon-button"
+          title={locale.fontViewerDownloadOne}
+          aria-label={locale.fontViewerDownloadOne}
+          onClick={() => onDownload([activeFont])}
+        >
+          <FiDownload size={15} />
+        </button>
         {installSupported && (
           <button
             type="button"
@@ -282,15 +294,6 @@ const FontCard = React.memo(({ family, letter, letterStart, previewText, upperca
             {isInstalled ? <FiCheckCircle size={15} /> : <FiPlusCircle size={15} />}
           </button>
         )}
-        <button
-          type="button"
-          className="font-viewer-icon-button"
-          title={locale.fontViewerDownloadOne}
-          aria-label={locale.fontViewerDownloadOne}
-          onClick={() => onDownload([activeFont])}
-        >
-          <FiDownload size={15} />
-        </button>
       </div>
       <div className="font-viewer-chips">
         {chips.map((chip) => <span key={chip}>{chip}</span>)}
@@ -352,6 +355,9 @@ const FontViewer = () => {
   const [uppercase, setUppercase] = React.useState(false);
   const [compactView, setCompactView] = React.useState(readCompactView);
   const [sort, setSort] = React.useState("name");
+  const [randomSeed, setRandomSeed] = React.useState(() => Date.now() >>> 0);
+  const [randomOffset, setRandomOffset] = React.useState(0);
+  const [randomLoading, setRandomLoading] = React.useState(false);
   const [filtersOpen, setFiltersOpen] = React.useState(false);
   const [filterData, setFilterData] = React.useState(null);
   const [filterError, setFilterError] = React.useState(false);
@@ -380,6 +386,7 @@ const FontViewer = () => {
   const scrollRestored = React.useRef(false);
   const rememberedScroll = React.useRef(readStoredScroll());
   const requestSignatureRef = React.useRef("");
+  const randomPageKeysRef = React.useRef(new Set());
 
   React.useEffect(() => {
     mounted.current = true;
@@ -440,6 +447,9 @@ const FontViewer = () => {
 
   const requestSignature = JSON.stringify({ query, selectedFilters });
   requestSignatureRef.current = requestSignature;
+  React.useEffect(() => {
+    setRandomOffset(0);
+  }, [requestSignature]);
   React.useEffect(() => {
     let active = true;
     const currentRequest = requestId.current + 1;
@@ -558,6 +568,7 @@ const FontViewer = () => {
           busy: true,
           error: false,
           message: locale.fontViewerDownloading.replace("{current}", completed).replace("{total}", namedFonts.length),
+          progress: completed / namedFonts.length,
         });
       }
       return { id: font.id, name: font.saveName, displayName: font.name || font.family || font.saveName, bytes };
@@ -630,8 +641,12 @@ const FontViewer = () => {
 
   const selectedFonts = Object.values(selected);
   const visibleFamilies = React.useMemo(
-    () => sortFamilies(families.filter((family) => family && family.fonts && family.fonts.length), sort),
-    [families, sort]
+    () => {
+      const available = families.filter((family) => family && family.fonts && family.fonts.length);
+      if (sort !== "random") return sortFamilies(available, sort);
+      return shuffleFamilies(available, randomSeed).slice(randomOffset, randomOffset + RANDOM_BATCH_SIZE);
+    },
+    [families, sort, randomSeed, randomOffset]
   );
   const availableLetters = React.useMemo(
     () => new Set(visibleFamilies.map((family) => getFamilyLetter(family.family))),
@@ -747,11 +762,62 @@ const FontViewer = () => {
     else scrollRoot.scrollTop = 0;
   };
 
+  const shuffleLoadedFonts = async () => {
+    if (randomLoading) return;
+    const availableCount = families.filter((family) => family && family.fonts && family.fonts.length).length;
+    const nextOffset = sort === "random" ? randomOffset + RANDOM_BATCH_SIZE : 0;
+    if (sort === "random" && nextOffset < availableCount) {
+      setRandomOffset(nextOffset);
+      scrollToTop();
+      return;
+    }
+
+    setSort("random");
+    setRandomOffset(0);
+    setRandomSeed((current) => (current + 0x9e3779b9) >>> 0);
+    scrollToTop();
+
+    // Fetch one unseen catalogue page only when starting Random or after the
+    // local reservoir has been consumed. Each page then powers several clicks.
+    const totalPages = Math.max(1, Math.ceil((pagination.total || 0) / PER_PAGE));
+    const sequentialPages = Math.max(1, Number(pagination.page) || page || 1);
+    const candidates = [];
+    for (let randomPage = sequentialPages + 1; randomPage <= totalPages; randomPage += 1) {
+      const key = `${requestSignature}:${randomPage}`;
+      if (!randomPageKeysRef.current.has(key)) candidates.push({ key, page: randomPage });
+    }
+    if (!candidates.length) return;
+
+    const candidate = candidates[Math.floor(Math.random() * candidates.length)];
+    randomPageKeysRef.current.add(candidate.key);
+    setRandomLoading(true);
+    try {
+      const data = await getFontFamilies({
+        page: candidate.page,
+        perPage: PER_PAGE,
+        q: query,
+        tags: selectedFilters.tags,
+        genres: selectedFilters.genres,
+        styles: selectedFilters.styles,
+        collections: selectedFilters.collections,
+      });
+      if (mounted.current && requestSignatureRef.current === requestSignature) {
+        setFamilies((current) => uniqueById(current.concat(data.families || [])));
+      }
+    } catch (randomError) {
+      // The already loaded reservoir still provides a useful Random mode.
+      // Forget failed pages so a later batch can retry through the API cache.
+      randomPageKeysRef.current.delete(candidate.key);
+    } finally {
+      if (mounted.current) setRandomLoading(false);
+    }
+  };
+
   return (
     <div ref={viewerRef} className={`font-viewer${compactView ? " m-compact" : ""}`}>
       <div className="font-viewer-intro">
         <div>
-          <h2><FiType size={18} /> {locale.fontViewerTitle}</h2>
+          <h2><FontFinderLogo size={20} /> {locale.fontViewerTitle}</h2>
           <p>{locale.fontViewerIntro}</p>
         </div>
         <div className="font-viewer-credit-block">
@@ -803,7 +869,19 @@ const FontViewer = () => {
         <select value={sort} onChange={(event) => setSort(event.target.value)} title={locale.fontViewerSort}>
           <option value="name">{locale.fontViewerSortName}</option>
           <option value="recent">{locale.fontViewerSortRecent}</option>
+          {sort === "random" && <option value="random">{locale.fontViewerRandom}</option>}
         </select>
+        <button
+          type="button"
+          className={`font-viewer-random-button${sort === "random" ? " m-active" : ""}`}
+          disabled={!visibleFamilies.length || loading || alphabetLoading || randomLoading}
+          onClick={shuffleLoadedFonts}
+          title={locale.fontViewerRandomHint}
+          aria-label={locale.fontViewerRandomHint}
+          aria-pressed={sort === "random"}
+        >
+          {randomLoading ? <i className="font-viewer-spinner" /> : <FiShuffle size={13} />} {locale.fontViewerRandom}
+        </button>
         <button
           type="button"
           className="font-viewer-view-toggle"
@@ -840,7 +918,7 @@ const FontViewer = () => {
         </div>
       )}
 
-      {!!visibleFamilies.length && (
+      {sort === "name" && !!visibleFamilies.length && (
         <nav className="font-viewer-alphabet" aria-label={locale.fontViewerAlphabetNav} aria-busy={alphabetLoading}>
           <button
             type="button"
@@ -870,10 +948,23 @@ const FontViewer = () => {
       )}
 
       {downloadState.message && (
-        <div className={`font-viewer-status${downloadState.error ? " m-error" : ""}`}>
-          {downloadState.busy && <span className="font-viewer-spinner" />}
-          {downloadState.message}
-          {!downloadState.busy && <button type="button" title={locale.close} onClick={() => setDownloadState({ busy: false, message: "", error: false })}><FiX size={12} /></button>}
+        <div
+          className={`font-viewer-status${downloadState.error ? " m-error" : ""}${downloadState.busy ? " m-busy" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="font-viewer-status-row">
+            {downloadState.message}
+            {!downloadState.busy && <button type="button" title={locale.close} onClick={() => setDownloadState({ busy: false, message: "", error: false })}><FiX size={12} /></button>}
+          </div>
+          {downloadState.busy && (
+            <span className="font-viewer-status-track" aria-hidden="true">
+              <span
+                className={`font-viewer-status-bar${downloadState.progress == null ? " m-indeterminate" : ""}`}
+                style={downloadState.progress == null ? null : { width: `${Math.round(downloadState.progress * 100)}%` }}
+              />
+            </span>
+          )}
         </div>
       )}
 
@@ -912,7 +1003,7 @@ const FontViewer = () => {
         </div>
       )}
 
-      {!error && !loading && pagination.has_more && (
+      {!error && !loading && sort !== "random" && pagination.has_more && (
         <button type="button" className="font-viewer-load-more" onClick={() => setPage((value) => value + 1)}>{locale.fontViewerLoadMore}</button>
       )}
 

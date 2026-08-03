@@ -22,6 +22,18 @@
   --fv-panel-strong: rgba(0, 0, 0, 0.075);
 }
 
+.font-finder-logo {
+  display: block;
+  flex: 0 0 auto;
+  overflow: visible;
+  color: currentColor;
+  --font-finder-logo-lens: rgba(40, 142, 223, 0.2);
+}
+
+.font-finder-logo__lens {
+  fill: var(--font-finder-logo-lens);
+}
+
 .font-viewer-intro {
   display: flex;
   align-items: flex-start;
@@ -35,6 +47,11 @@
     gap: 7px;
     margin: 0 0 3px;
     font-size: 15px;
+
+    .font-finder-logo {
+      color: #8fceff;
+      filter: drop-shadow(0 0 4px rgba(40, 142, 223, 0.32));
+    }
   }
 
   p {
@@ -44,6 +61,12 @@
     line-height: 1.4;
     opacity: 0.68;
   }
+}
+
+.light-theme .font-viewer-intro h2 .font-finder-logo {
+  color: #1976d2;
+  filter: none;
+  --font-finder-logo-lens: rgba(25, 118, 210, 0.14);
 }
 
 .font-viewer-credit,
@@ -208,7 +231,8 @@
   }
 }
 
-.font-viewer-view-toggle {
+.font-viewer-view-toggle,
+.font-viewer-random-button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -226,6 +250,23 @@
     border-color: #288edf;
     background: rgba(40, 142, 223, 0.12);
   }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.4;
+  }
+}
+
+.font-viewer-random-button {
+  &.m-active {
+    border-color: #288edf;
+    background: rgba(40, 142, 223, 0.18);
+    color: #8fceff;
+  }
+}
+
+.light-theme .font-viewer-random-button.m-active {
+  color: #1976d2;
 }
 
 .font-viewer-result-count {
@@ -339,13 +380,20 @@
 
 .font-viewer-status {
   display: flex;
-  align-items: center;
-  gap: 7px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
   min-height: 28px;
   padding: 5px 8px;
   border-left: 3px solid #49a970;
   background: rgba(73, 169, 112, 0.13);
   font-size: 10px;
+  box-sizing: border-box;
+
+  &.m-busy {
+    border-left-color: #288edf;
+    background: rgba(40, 142, 223, 0.1);
+  }
 
   &.m-error {
     border-left-color: #d85858;
@@ -361,6 +409,47 @@
     color: inherit;
     cursor: pointer;
   }
+}
+
+.font-viewer-status-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.font-viewer-status-track {
+  display: block;
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+
+  .light-theme & {
+    background: rgba(0, 0, 0, 0.12);
+  }
+}
+
+.font-viewer-status-bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #288edf;
+  transition: width 0.25s ease;
+
+  &.m-indeterminate {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 38%;
+    animation: font-viewer-status-sweep 1.15s ease-in-out infinite;
+  }
+}
+
+@keyframes font-viewer-status-sweep {
+  0% { transform: translateX(-115%); }
+  100% { transform: translateX(305%); }
 }
 
 .font-viewer-alphabet {
