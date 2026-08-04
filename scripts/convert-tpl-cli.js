@@ -12,6 +12,40 @@ function generateId() {
   return Math.random().toString(36).substring(2, 8);
 }
 
+function extractActionDescriptorString(cleanHex, keyIndex, keyHexLength) {
+  const lenPos = keyIndex + keyHexLength;
+  const lenHex = cleanHex.slice(lenPos, lenPos + 8);
+  const strLen = parseInt(lenHex, 16);
+  if (!isNaN(strLen) && strLen > 0 && strLen < 300) {
+    const utf16Hex = cleanHex.slice(lenPos + 8, lenPos + 8 + strLen * 4);
+    const parsedUtf16 = hexToText(utf16Hex).trim();
+    if (parsedUtf16 && Math.abs(parsedUtf16.length - strLen) <= 2) {
+      return parsedUtf16;
+    }
+
+    const asciiHex = cleanHex.slice(lenPos + 8, lenPos + 8 + strLen * 2);
+    const parsedAscii = hexToText(asciiHex).trim();
+    if (parsedAscii && Math.abs(parsedAscii.length - strLen) <= 2) {
+      return parsedAscii;
+    }
+
+    if (parsedUtf16) return parsedUtf16;
+    if (parsedAscii) return parsedAscii;
+  }
+  const rawHex = cleanHex.slice(lenPos, lenPos + 240);
+  const rawText = hexToText(rawHex);
+  return rawText
+    .split('TEXT')[0]
+    .split('UntF')[0]
+    .split('FntN')[0]
+    .split('FntS')[0]
+    .split('Scrp')[0]
+    .split('long')[0]
+    .split('enum')[0]
+    .split('\0')[0]
+    .trim();
+}
+
 function convertTplFileToTypeRExport(tplFilePath, outputJsonPath) {
   if (!fs.existsSync(tplFilePath)) {
     console.error(`Error: File not found - ${tplFilePath}`);
@@ -77,29 +111,18 @@ function convertTplFileToTypeRExport(tplFilePath, outputJsonPath) {
       }
     }
 
-    const psNameHex = hexData.slice(
-      startIndex + patterns.fontPostScript.length,
-      startIndex + patterns.fontPostScript.length + 100
-    );
-    const postScriptName = hexToText(psNameHex).split('TEXT')[0].split('UntF')[0].split('\0')[0].trim();
+    const postScriptName = extractActionDescriptorString(hexData, startIndex, patterns.fontPostScript.length);
 
     const fntNTEXTIndex = hexData.indexOf(patterns.fntNTEXT, startIndex);
     let fontFamily = '';
     let fontStyle = 'Regular';
 
     if (fntNTEXTIndex !== -1 && fntNTEXTIndex - startIndex < 2000) {
-      const fntSTEXTIndex = hexData.indexOf(patterns.fntSTEXT, fntNTEXTIndex);
-      if (fntSTEXTIndex !== -1 && fntSTEXTIndex - fntNTEXTIndex < 500) {
-        fontFamily = hexToText(hexData.slice(
-          fntNTEXTIndex + patterns.fntNTEXT.length,
-          fntSTEXTIndex
-        )).trim();
-
-        fontStyle = hexToText(hexData.slice(
-          fntSTEXTIndex + patterns.fntSTEXT.length,
-          fntSTEXTIndex + 100
-        )).split('Scrplong')[0].trim() || 'Regular';
-      }
+      fontFamily = extractActionDescriptorString(hexData, fntNTEXTIndex, patterns.fntNTEXT.length);
+    }
+    const fntSTEXTIndex = hexData.indexOf(patterns.fntSTEXT, fntNTEXTIndex !== -1 ? fntNTEXTIndex : startIndex);
+    if (fntSTEXTIndex !== -1 && fntSTEXTIndex - startIndex < 2000) {
+      fontStyle = extractActionDescriptorString(hexData, fntSTEXTIndex, patterns.fntSTEXT.length) || 'Regular';
     }
 
     if (!fontFamily) {
