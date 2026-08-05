@@ -273,6 +273,13 @@ const shortcutCommands = [
     }),
   },
   {
+    id: "detectBubbles",
+    label: "shortcut_detectBubbles",
+    defaultKeys: [],
+    repeatDelay: 300,
+    handler: (ctx) => ctx.dispatch({ type: "setModal", modal: "bubbleDetect" }),
+  },
+  {
     id: "removeLastSelection",
     label: "shortcut_removeLastSelection",
     defaultKeys: [],

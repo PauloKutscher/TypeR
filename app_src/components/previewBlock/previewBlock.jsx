@@ -1,7 +1,7 @@
 import "./previewBlock.scss";
 
 import React from "react";
-import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiChevronsRight, FiPlay, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiInfo, FiRotateCcw, FiStar, FiX } from "react-icons/fi";
+import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiChevronsRight, FiCrosshair, FiPlay, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiInfo, FiRotateCcw, FiStar, FiX } from "react-icons/fi";
 import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
@@ -1278,6 +1278,15 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           {uiVisible.previewAlignButton !== false && (
             <button className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large" title={withShortcutHint(locale.alignLayerDescr, context.state.shortcut.center)} onClick={handleAlignLayer}>
               <MdCenterFocusWeak size={18} /> {locale.alignLayer}
+            </button>
+          )}
+          {context.state.multiBubbleMode && (
+            <button
+              className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large"
+              title={withShortcutHint(locale.bubbleDetectButtonDescr || "Detect the speech bubbles of the open document", context.state.shortcut.detectBubbles)}
+              onClick={() => context.dispatch({ type: "setModal", modal: "bubbleDetect" })}
+            >
+              <FiCrosshair size={18} /> {locale.bubbleDetectButton || "Detect"}
             </button>
           )}
           {uiVisible.previewSizeControls !== false && (

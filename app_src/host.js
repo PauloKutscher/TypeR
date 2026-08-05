@@ -3254,6 +3254,75 @@ function createTextLayersInStoredSelections(data, point) {
   return state.result;
 }
 
+// Exports a flattened, downscaled snapshot of the active document to a temp
+// PNG so the panel can run auto bubble detection on real pixels. The heavy
+// work (duplicate, flatten, resize, save) happens once per explicit user
+// request; afterwards only bubble bounds ever cross the bridge again.
+function exportDocumentSnapshot(data) {
+  data = data || {};
+  var maxDim = data.maxDim ? parseInt(data.maxDim, 10) : 1500;
+  if (isNaN(maxDim) || maxDim < 200) maxDim = 1500;
+  if (maxDim > 4000) maxDim = 4000;
+  if (!documents.length) {
+    return jamJSON.stringify({ error: "doc" });
+  }
+  var sourceDoc = app.activeDocument;
+  var previousDialogs = app.displayDialogs;
+  app.displayDialogs = DialogModes.NO;
+  var dup = null;
+  var result = null;
+  try {
+    var docWidth = Math.round(sourceDoc.width.as ? sourceDoc.width.as("px") : parseFloat(sourceDoc.width));
+    var docHeight = Math.round(sourceDoc.height.as ? sourceDoc.height.as("px") : parseFloat(sourceDoc.height));
+    // Merged duplicate: what the user sees, without touching the original
+    dup = sourceDoc.duplicate("_TypeR_BubbleScan", true);
+    try {
+      dup.flatten();
+    } catch (flattenError) {}
+    // Grayscale/CMYK/16-bit pages all normalize to 8-bit RGB so the panel
+    // canvas decode always sees the same pixel format
+    try {
+      if (dup.mode !== DocumentMode.RGB) dup.changeMode(ChangeMode.RGB);
+    } catch (modeError) {}
+    try {
+      if (dup.bitsPerChannel !== BitsPerChannelType.EIGHT) dup.bitsPerChannel = BitsPerChannelType.EIGHT;
+    } catch (bitsError) {}
+    var scale = Math.min(1, maxDim / Math.max(docWidth, docHeight));
+    if (scale < 1) {
+      dup.resizeImage(
+        UnitValue(Math.max(1, Math.round(docWidth * scale)), "px"),
+        UnitValue(Math.max(1, Math.round(docHeight * scale)), "px"),
+        null,
+        ResampleMethod.BILINEAR
+      );
+    }
+    var file = new File(Folder.temp.fsName + "/typer_bubble_snapshot.png");
+    var pngOptions = new PNGSaveOptions();
+    pngOptions.compression = 4;
+    pngOptions.interlaced = false;
+    dup.saveAs(file, pngOptions, true, Extension.LOWERCASE);
+    result = {
+      path: file.fsName,
+      imageWidth: Math.round(parseFloat(dup.width.as ? dup.width.as("px") : dup.width)),
+      imageHeight: Math.round(parseFloat(dup.height.as ? dup.height.as("px") : dup.height)),
+      docWidth: docWidth,
+      docHeight: docHeight,
+    };
+  } catch (e) {
+    result = { error: "scriptError: " + e.message };
+  }
+  if (dup) {
+    try {
+      dup.close(SaveOptions.DONOTSAVECHANGES);
+    } catch (closeError) {}
+  }
+  try {
+    app.activeDocument = sourceDoc;
+  } catch (activateError) {}
+  app.displayDialogs = previousDialogs;
+  return jamJSON.stringify(result);
+}
+
 function openFile(path, autoClose) {
   if (autoClose && _hostState.lastOpenedDocId !== null) {
     for (var i = 0; i < app.documents.length; i++) {
