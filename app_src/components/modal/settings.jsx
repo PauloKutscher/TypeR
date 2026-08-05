@@ -40,6 +40,20 @@ import { clearTypeRCache, formatCacheBytes, getTypeRCacheInfo } from "../../cepC
 
 // Interactive layout mockup: canvas px per real panel px
 const LAYOUT_CANVAS_SCALE = 0.3;
+const getTplImportDetail = (error) => {
+  switch (error?.code) {
+    case "TPL_INVALID_FILE":
+      return locale.tplImportInvalidFile;
+    case "TPL_MISSING_TOOL_DATA":
+      return locale.tplImportMissingData;
+    case "TPL_NO_TEXT_PRESETS":
+      return locale.tplImportNoTextPresets;
+    case "TPL_TRUNCATED_DATA":
+    case "TPL_UNSUPPORTED_DATA":
+    default:
+      return locale.tplImportUnsupportedData;
+  }
+};
 // Sub-elements shown in the inspector for each selectable mockup region
 const LAYOUT_BLOCK_ELEMENTS = {
   preview: ["previewCreateButton", "previewAlignButton", "previewSizeControls", "previewNav", "previewWidget"],
@@ -822,14 +836,15 @@ const SettingsModal = React.memo(function SettingsModal() {
         console.log("[TPL Import] CEP readFile result status code:", result.err);
         if (result.err) {
           console.error("[TPL Import] CEP readFile failed. Error code:", result.err);
-          nativeAlert(`Could not read file "${filename}" (CEP error code: ${result.err}).`, locale.errorTitle || "Import Error", true);
+          nativeAlert(
+            locale.tplImportReadError.replace("{filename}", filename).replace("{code}", result.err),
+            locale.errorTitle,
+            true
+          );
         } else {
           try {
             const rawData = result.data || "";
             console.log("[TPL Import] Raw data retrieved, length:", rawData.length);
-            if (!rawData) {
-              throw new Error("The selected file is empty.");
-            }
             const cleanBase64 = rawData.replace(/\s+/g, "");
             const binaryString = window.atob(cleanBase64);
             console.log("[TPL Import] Decoded binary length:", binaryString.length, "bytes");
@@ -839,21 +854,22 @@ const SettingsModal = React.memo(function SettingsModal() {
             }
             console.log("[TPL Import] Converted hex length:", hexData.length, "chars");
             const importedData = convertTplHexToTypeRFormat(hexData, filename);
-            if (importedData && importedData.folders && importedData.styles && importedData.styles.length > 0) {
-              console.log(`[TPL Import] Success: Imported ${importedData.styles.length} style(s) into folder "${importedData.folders[0]?.name}".`);
-              context.dispatch({
-                type: "importStyleLibrary",
-                folders: importedData.folders,
-                styles: importedData.styles,
-              });
-              foldersImported += importedData.folders.length;
-            } else {
-              throw new Error("No text tool presets found in this .TPL file.");
-            }
+            console.log(`[TPL Import] Success: Imported ${importedData.styles.length} style(s) into folder "${importedData.folders[0]?.name}".`);
+            context.dispatch({
+              type: "importStyleLibrary",
+              folders: importedData.folders,
+              styles: importedData.styles,
+            });
+            foldersImported += importedData.folders.length;
           } catch (error) {
             console.error("[TPL Import Exception]", error);
-            const detailMsg = error.message || String(error);
-            nativeAlert(`Error importing TPL file "${filename}":\n${detailMsg}`, locale.errorTitle || "Import Error", true);
+            nativeAlert(
+              locale.tplImportError
+                .replace("{filename}", filename)
+                .replace("{message}", getTplImportDetail(error)),
+              locale.errorTitle,
+              true
+            );
           }
         }
       } else {

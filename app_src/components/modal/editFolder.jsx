@@ -100,8 +100,8 @@ const EditFolderModal = React.memo(function EditFolderModal() {
         if (!currentData.id) return;
         const permanent = deleteStyles || e.shiftKey;
         const confirmText = permanent
-            ? (locale.confirmDeleteFolderPermanent || 'Are you sure you want to delete this folder AND all presets inside it?')
-            : (locale.confirmDeleteFolderWithChildren || locale.confirmDeleteFolder || 'Are you sure you want to delete this folder?');
+            ? locale.confirmDeleteFolderPermanent
+            : (locale.confirmDeleteFolderWithChildren || locale.confirmDeleteFolder);
         nativeConfirm(confirmText, locale.confirmTitle, ok => {
             if (!ok) return;
             context.dispatch({type: 'deleteFolder', id: currentData.id, permanent});
@@ -243,7 +243,7 @@ const EditFolderModal = React.memo(function EditFolderModal() {
                                         onChange={e => setDeleteStyles(e.target.checked)}
                                     />
                                     <div className="topcoat-checkbox__checkmark"></div>
-                                    <span>{locale.deleteFolderStylesLabel || 'Delete all presets/styles inside this folder'}</span>
+                                    <span>{locale.deleteFolderStylesLabel}</span>
                                 </label>
                             </div>
                         )}

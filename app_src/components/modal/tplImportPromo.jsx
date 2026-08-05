@@ -7,13 +7,13 @@ const TplImportPromo = React.memo(function TplImportPromo({ onImportTpl }) {
     <div className="fsr-promo hostBgd">
       <div className="fsr-promo-text">
         <b>
-          {locale.tplImportTitle || "Photoshop Presets (.TPL)"}
-          <em className="fsr-promo-badge">{locale.badgeNew || "NEW"}</em>
+          {locale.tplImportTitle}
+          <em className="fsr-promo-badge">{locale.badgeNew}</em>
         </b>
-        <span>{locale.tplImportPromo || "Convert and import Photoshop .TPL text tool preset files directly into your TypeR style library."}</span>
+        <span>{locale.tplImportPromo}</span>
       </div>
       <button type="button" className="topcoat-button--large fsr-promo-btn" onClick={onImportTpl}>
-        <FaFileImport size={16} /> {locale.tplImportOpen || "Import .TPL Presets"}
+        <FaFileImport size={16} /> {locale.tplImportOpen}
       </button>
     </div>
   );
