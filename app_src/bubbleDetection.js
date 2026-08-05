@@ -16,11 +16,20 @@ const DEFAULT_DETECT_OPTIONS = {
   maxAreaRatio: 0.12,
   // Bubbles are compact: area / bounding-box area. Thin frames and stray
   // gutter slivers fall well below this.
-  minFillRatio: 0.35,
+  minFillRatio: 0.45,
   // Bounding box minimum in snapshot pixels
   minSizePx: 12,
   // Width/height ratio cap, either orientation
   maxAspect: 8,
+  // A bubble is convex-ish: each row/column crosses it in one solid run.
+  // White backdrops with art poking through split into many runs per line.
+  maxRunsPerLine: 1.8,
+  // A bubble is sealed by a dark outline: marching a few pixels outward from
+  // the region edge must hit a dark pixel almost everywhere. White areas that
+  // fade into light screentones or paper gray fail this.
+  outlineDarkThreshold: 170,
+  outlineProbeDepth: 3,
+  minOutlineDarkRatio: 0.55,
 };
 
 // The UI exposes one "sensitivity" knob instead of raw thresholds: higher
@@ -45,6 +54,113 @@ const buildWhiteMask = (imageData, whiteThreshold) => {
     }
   }
   return mask;
+};
+
+// Shape and outline analysis of one surviving candidate. Runs a second,
+// bbox-local flood fill from the component's seed (cheap: candidates are
+// already area-capped) to measure:
+// - runsPerLine: average count of solid segments per occupied row/column.
+//   Bubbles are convex-ish (≈1); enclosed backdrops with art poking through
+//   are jagged (>>1).
+// - outlineDarkRatio: fraction of edge probes that hit a dark pixel within
+//   outlineProbeDepth when marching outward. Bubbles are sealed by their
+//   outline (≈1); whites that fade into light tones are not.
+const analyzeCandidate = (mask, imageData, bounds, seedIdx, opts) => {
+  const { data, width, height } = imageData;
+  const { minX, maxX, minY, maxY } = bounds;
+  const boxWidth = maxX - minX + 1;
+  const boxHeight = maxY - minY + 1;
+  const local = new Uint8Array(boxWidth * boxHeight);
+  const stack = [seedIdx];
+  local[(((seedIdx / width) | 0) - minY) * boxWidth + ((seedIdx % width) - minX)] = 1;
+  while (stack.length) {
+    const idx = stack.pop();
+    const x = idx % width;
+    const y = (idx / width) | 0;
+    const neighbors = [
+      x > minX ? idx - 1 : -1,
+      x < maxX ? idx + 1 : -1,
+      y > minY ? idx - width : -1,
+      y < maxY ? idx + width : -1,
+    ];
+    for (let n = 0; n < 4; n++) {
+      const nIdx = neighbors[n];
+      if (nIdx < 0 || !mask[nIdx]) continue;
+      const localIdx = (((nIdx / width) | 0) - minY) * boxWidth + ((nIdx % width) - minX);
+      if (local[localIdx]) continue;
+      local[localIdx] = 1;
+      stack.push(nIdx);
+    }
+  }
+
+  let rowRuns = 0;
+  let occupiedRows = 0;
+  for (let y = 0; y < boxHeight; y++) {
+    let runs = 0;
+    let inRun = false;
+    for (let x = 0; x < boxWidth; x++) {
+      const filled = local[y * boxWidth + x];
+      if (filled && !inRun) runs++;
+      inRun = !!filled;
+    }
+    if (runs) {
+      rowRuns += runs;
+      occupiedRows++;
+    }
+  }
+  let colRuns = 0;
+  let occupiedCols = 0;
+  for (let x = 0; x < boxWidth; x++) {
+    let runs = 0;
+    let inRun = false;
+    for (let y = 0; y < boxHeight; y++) {
+      const filled = local[y * boxWidth + x];
+      if (filled && !inRun) runs++;
+      inRun = !!filled;
+    }
+    if (runs) {
+      colRuns += runs;
+      occupiedCols++;
+    }
+  }
+  const runsPerLine = Math.max(
+    occupiedRows ? rowRuns / occupiedRows : 0,
+    occupiedCols ? colRuns / occupiedCols : 0
+  );
+
+  const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+  let samples = 0;
+  let sealed = 0;
+  for (let y = 0; y < boxHeight; y++) {
+    for (let x = 0; x < boxWidth; x++) {
+      if (!local[y * boxWidth + x]) continue;
+      const globalX = x + minX;
+      const globalY = y + minY;
+      for (let d = 0; d < 4; d++) {
+        const dx = directions[d][0];
+        const dy = directions[d][1];
+        const nx = globalX + dx;
+        const ny = globalY + dy;
+        const inBox = nx >= minX && nx <= maxX && ny >= minY && ny <= maxY;
+        if (inBox && local[(ny - minY) * boxWidth + (nx - minX)]) continue;
+        samples++;
+        for (let depth = 1; depth <= opts.outlineProbeDepth; depth++) {
+          const px = globalX + dx * depth;
+          const py = globalY + dy * depth;
+          if (px < 0 || py < 0 || px >= width || py >= height) break;
+          const p = (py * width + px) * 4;
+          const luma = data[p] * 0.299 + data[p + 1] * 0.587 + data[p + 2] * 0.114;
+          if (luma < opts.outlineDarkThreshold) {
+            sealed++;
+            break;
+          }
+        }
+      }
+    }
+  }
+  const outlineDarkRatio = samples ? sealed / samples : 0;
+
+  return { runsPerLine, outlineDarkRatio };
 };
 
 // Connected components (4-connectivity, iterative flood fill) over the white
@@ -109,6 +225,9 @@ const detectBubbles = (imageData, options) => {
     if (aspect > opts.maxAspect) continue;
     const fillRatio = area / (boxWidth * boxHeight);
     if (fillRatio < opts.minFillRatio) continue;
+    const shape = analyzeCandidate(mask, imageData, { minX, maxX, minY, maxY }, start, opts);
+    if (shape.runsPerLine > opts.maxRunsPerLine) continue;
+    if (shape.outlineDarkRatio < opts.minOutlineDarkRatio) continue;
     bubbles.push({
       left: minX,
       top: minY,
@@ -118,6 +237,8 @@ const detectBubbles = (imageData, options) => {
       height: boxHeight,
       area,
       fillRatio,
+      runsPerLine: shape.runsPerLine,
+      outlineDarkRatio: shape.outlineDarkRatio,
       xMid: (minX + maxX + 1) / 2,
       yMid: (minY + maxY + 1) / 2,
     });

@@ -72,6 +72,31 @@ assert.strictEqual(first.right, 70, "Bubble A right edge");
 assert.strictEqual(second.top, 25, "Bubble B top edge");
 assert(first.fillRatio > 0.9, "Text glyphs must not break the bubble fill ratio");
 
+// A jagged white region (art poking through a backdrop) must be rejected by
+// the runs-per-line filter even though its fill ratio is decent: three
+// vertical teeth joined by a base, fill ratio 0.7 but 3 runs on most rows.
+const jaggedPage = makeImage(200, 150, 90);
+fillRect(jaggedPage, 20, 20, 30, 50, 255);
+fillRect(jaggedPage, 40, 20, 50, 50, 255);
+fillRect(jaggedPage, 60, 20, 70, 50, 255);
+fillRect(jaggedPage, 20, 50, 70, 60, 255);
+assert.strictEqual(
+  detectBubbles(jaggedPage, getDetectionOptions(5)).length,
+  0,
+  "Jagged comb-shaped regions must be rejected by the runs-per-line filter"
+);
+
+// A white region sealed only by light gray (a backdrop fading into paper or
+// light screentone, no dark outline) must be rejected by the outline probe.
+const unsealedPage = makeImage(200, 150, 90);
+fillRect(unsealedPage, 110, 80, 175, 130, 210); // light-gray surround
+fillRect(unsealedPage, 120, 90, 165, 120, 255); // white core, no dark ring
+assert.strictEqual(
+  detectBubbles(unsealedPage, getDetectionOptions(5)).length,
+  0,
+  "White regions without a dark outline must be rejected"
+);
+
 // A near-white bubble (scanned page) appears only at higher sensitivity
 const dirtyPage = makeImage(200, 150, 90);
 fillRect(dirtyPage, 40, 40, 100, 90, 218);
