@@ -4,12 +4,13 @@ import React from "react";
 import { FiRefreshCw, FiX, FiMinusCircle, FiPlusCircle, FiLayers, FiCheckCircle } from "react-icons/fi";
 import { AiOutlineBorderInner } from "react-icons/ai";
 
-import { locale, exportDocumentSnapshot, createTextLayersInStoredSelections, deselectDocument } from "../../utils";
+import { locale, exportDocumentSnapshot, createTextLayersInStoredSelections, deselectDocument, readStorage } from "../../utils";
 import { useContext } from "../../context";
 import { buildStoredSelectionPayload } from "../../textLayerPayload";
 import {
   getDetectionOptions,
-  detectBubbles,
+  detectLearnedBubbles,
+  normalizeBubbleLearning,
   orderBubbles,
   bubbleToSelection,
   getNextUsableLineIndex,
@@ -18,6 +19,7 @@ import {
 } from "../../bubbleDetection";
 
 const SNAPSHOT_MAX_DIM = 1500;
+const LEARNING_STORAGE_KEY = "bubbleDetectionLearning";
 
 const BubbleDetectModal = React.memo(function BubbleDetectModal() {
   const context = useContext((state) => ({
@@ -44,6 +46,7 @@ const BubbleDetectModal = React.memo(function BubbleDetectModal() {
   const [hoverId, setHoverId] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const imageDataRef = React.useRef(null);
+  const learningRef = React.useRef(normalizeBubbleLearning(readStorage(LEARNING_STORAGE_KEY)));
   const activeRef = React.useRef(true);
   React.useEffect(() => () => {
     activeRef.current = false;
@@ -54,7 +57,7 @@ const BubbleDetectModal = React.memo(function BubbleDetectModal() {
   }, [context.dispatch]);
 
   const runDetection = React.useCallback((pixels, sensitivityValue) => {
-    const detectedBubbles = detectBubbles(pixels, getDetectionOptions(sensitivityValue))
+    const detectedBubbles = detectLearnedBubbles(pixels, getDetectionOptions(sensitivityValue), learningRef.current)
       .map((bubble, index) => ({ ...bubble, id: index }));
     setRawBubbles(detectedBubbles);
     setExcluded({});

@@ -12,6 +12,7 @@ const modalLoaders = {
     fontScanR: () => import(/* webpackChunkName: "modal-font-scan" */ './fontScanR'),
     update: () => import(/* webpackChunkName: "modal-update" */ './update'),
     bubbleDetect: () => import(/* webpackChunkName: "modal-bubble-detect" */ './bubbleDetect'),
+    bubbleDetectTrainer: () => import(/* webpackChunkName: "modal-bubble-detect-trainer" */ './bubbleDetectTrainer'),
 };
 const HelpModal = React.lazy(modalLoaders.help);
 const WalkthroughModal = React.lazy(modalLoaders.walkthrough);
@@ -22,6 +23,7 @@ const ExportModal = React.lazy(modalLoaders.export);
 const FontScanRModal = React.lazy(modalLoaders.fontScanR);
 const UpdateModal = React.lazy(modalLoaders.update);
 const BubbleDetectModal = React.lazy(modalLoaders.bubbleDetect);
+const BubbleDetectTrainerModal = React.lazy(modalLoaders.bubbleDetectTrainer);
 let modalStylesPromise = null;
 const loadModalStyles = () => {
     if (!modalStylesPromise) {
@@ -87,6 +89,7 @@ const Modal = React.memo(function Modal() {
     else if (modalType === 'fontScanR') modalContent = <FontScanRModal />;
     else if (modalType === 'update') modalContent = <UpdateModal />;
     else if (modalType === 'bubbleDetect') modalContent = <BubbleDetectModal />;
+    else if (modalType === 'bubbleDetectTrainer') modalContent = <BubbleDetectTrainerModal />;
 
     React.useEffect(() => {
         if (!context.state.notFirstTime) {

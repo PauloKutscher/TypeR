@@ -52,6 +52,34 @@
     opacity: 0.7;
   }
 
+  .bubble-detect-selection-error {
+    padding: 6px 8px;
+    border: 1px solid rgba(255, 140, 80, 0.55);
+    border-radius: 3px;
+    background: rgba(255, 140, 80, 0.1);
+    font-size: 11px;
+  }
+
+  .bubble-trainer-progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-size: 11px;
+
+    span:first-of-type {
+      flex: 1 1 auto;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    span:last-child {
+      flex: 0 0 auto;
+      opacity: 0.65;
+    }
+  }
+
   .bubble-detect-stage {
     position: relative;
     align-self: center;
@@ -97,6 +125,23 @@
       font-weight: bold;
       line-height: 16px;
       text-align: center;
+    }
+
+    .bubble-trainer-split-action {
+      position: absolute;
+      top: -2px;
+      right: -2px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      border: 1px solid #fff;
+      border-radius: 3px;
+      background: #8c54d9;
+      color: #fff;
+      cursor: pointer;
     }
 
     &.m-excluded .bubble-detect-badge {

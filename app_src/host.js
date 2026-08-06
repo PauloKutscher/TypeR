@@ -127,6 +127,10 @@ var _hostState = {
     selections: [],
   },
   hiddenCleaningLayerIdsByDocument: {},
+  bubbleTrainer: {
+    workDoc: null,
+    previousDoc: null,
+  },
   lastOpenedDocId: null,
   suspendedRun: null,
   pathScanFails: 0,
@@ -3321,6 +3325,98 @@ function exportDocumentSnapshot(data) {
   } catch (activateError) {}
   app.displayDialogs = previousDialogs;
   return jamJSON.stringify(result);
+}
+
+function _closeBubbleTrainerWorkDocument() {
+  var trainer = _hostState.bubbleTrainer;
+  if (!trainer || !trainer.workDoc) return;
+  try {
+    trainer.workDoc.close(SaveOptions.DONOTSAVECHANGES);
+  } catch (closeError) {}
+  trainer.workDoc = null;
+}
+
+function _hideBubbleTrainerTextLayers(container) {
+  if (!container || !container.layers) return;
+  for (var i = 0; i < container.layers.length; i++) {
+    var layer = container.layers[i];
+    try {
+      if (layer.typename === "ArtLayer" && layer.kind === LayerKind.TEXT) {
+        layer.visible = false;
+      } else if (layer.typename === "LayerSet") {
+        _hideBubbleTrainerTextLayers(layer);
+      }
+    } catch (layerError) {}
+  }
+}
+
+// Opens one PSD as a disposable training document. Text layers are hidden on
+// the duplicate only, so neither open documents nor source files are changed.
+// The duplicate remains active so the user can add missed bubbles with the
+// Photoshop Magic Wand before moving to the next item in the batch.
+function openBubbleTrainingDocument(data) {
+  data = data || {};
+  var path = data.path;
+  if (!path) return jamJSON.stringify({ error: "badPath" });
+  var file = new File(path);
+  if (!file.exists) return jamJSON.stringify({ error: "notFound", file: path });
+  var trainer = _hostState.bubbleTrainer;
+  if (!trainer.previousDoc) {
+    try {
+      trainer.previousDoc = app.activeDocument;
+    } catch (noPreviousDocument) {}
+  }
+  _closeBubbleTrainerWorkDocument();
+  var sourceDoc = null;
+  var sourceWasOpen = false;
+  var previousDialogs = app.displayDialogs;
+  app.displayDialogs = DialogModes.NO;
+  try {
+    for (var i = 0; i < app.documents.length; i++) {
+      try {
+        if (app.documents[i].fullName && app.documents[i].fullName.fsName === file.fsName) {
+          sourceDoc = app.documents[i];
+          sourceWasOpen = true;
+          break;
+        }
+      } catch (fullNameError) {}
+    }
+    if (!sourceDoc) sourceDoc = app.open(file);
+    var workDoc = sourceDoc.duplicate("_TypeR_BubbleTrainer", false);
+    trainer.workDoc = workDoc;
+    if (!sourceWasOpen) {
+      try {
+        sourceDoc.close(SaveOptions.DONOTSAVECHANGES);
+      } catch (sourceCloseError) {}
+    }
+    app.activeDocument = workDoc;
+    _hideBubbleTrainerTextLayers(workDoc);
+    var snapshot = jamJSON.parse(exportDocumentSnapshot({ maxDim: data.maxDim || 1500 }));
+    snapshot.file = file.fsName;
+    snapshot.name = file.name;
+    return jamJSON.stringify(snapshot);
+  } catch (trainingError) {
+    _closeBubbleTrainerWorkDocument();
+    return jamJSON.stringify({
+      error: "trainingOpenFailed",
+      file: path,
+      message: trainingError && trainingError.message ? trainingError.message : String(trainingError),
+    });
+  } finally {
+    app.displayDialogs = previousDialogs;
+  }
+}
+
+function closeBubbleTrainingDocument() {
+  var trainer = _hostState.bubbleTrainer;
+  _closeBubbleTrainerWorkDocument();
+  if (trainer && trainer.previousDoc) {
+    try {
+      app.activeDocument = trainer.previousDoc;
+    } catch (restoreError) {}
+    trainer.previousDoc = null;
+  }
+  return "OK";
 }
 
 function openFile(path, autoClose) {

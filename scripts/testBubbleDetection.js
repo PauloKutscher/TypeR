@@ -20,7 +20,18 @@ new Function("require", "module", "exports", transformed)(
 
 const {
   getDetectionOptions,
+  getBubbleFeatureVector,
+  getBubbleConfidence,
+  normalizeBubbleLearning,
+  trainBubbleLearning,
+  getBubbleSplitConfidence,
+  trainBubbleSplitLearning,
+  detectBubbleCandidates,
   detectBubbles,
+  detectLearnedBubbles,
+  findCandidateForBounds,
+  createManualBubble,
+  createSplitBubbles,
   orderBubbles,
   bubbleToSelection,
   assignLinesToBubbles,
@@ -43,6 +54,18 @@ const makeImage = (width, height, gray) => {
 const fillRect = (image, left, top, right, bottom, gray) => {
   for (let y = top; y < bottom; y++) {
     for (let x = left; x < right; x++) {
+      const p = (y * image.width + x) * 4;
+      image.data[p] = gray;
+      image.data[p + 1] = gray;
+      image.data[p + 2] = gray;
+    }
+  }
+};
+
+const fillEllipse = (image, centerX, centerY, radiusX, radiusY, gray) => {
+  for (let y = Math.floor(centerY - radiusY); y <= Math.ceil(centerY + radiusY); y++) {
+    for (let x = Math.floor(centerX - radiusX); x <= Math.ceil(centerX + radiusX); x++) {
+      if (((x - centerX) / radiusX) ** 2 + ((y - centerY) / radiusY) ** 2 > 1) continue;
       const p = (y * image.width + x) * 4;
       image.data[p] = gray;
       image.data[p + 1] = gray;
@@ -110,6 +133,93 @@ assert.strictEqual(
   1,
   "High sensitivity must accept off-white regions"
 );
+
+// ---- local learning ---------------------------------------------------------
+
+const falsePositivePage = makeImage(200, 150, 90);
+fillRect(falsePositivePage, 40, 35, 90, 80, 255);
+const falsePositive = detectBubbleCandidates(falsePositivePage, getDetectionOptions(5))[0];
+const initialConfidence = getBubbleConfidence(falsePositive, falsePositivePage, null);
+const negativeLearning = trainBubbleLearning(null, [falsePositive.features], false);
+assert(
+  getBubbleConfidence(falsePositive, falsePositivePage, negativeLearning) < initialConfidence,
+  "Excluding a false positive must lower the confidence of similar candidates"
+);
+assert.strictEqual(negativeLearning.negativeSamples, 1, "Negative feedback must be persisted as one example");
+assert.strictEqual(
+  detectBubbles(falsePositivePage, { ...getDetectionOptions(5), learning: negativeLearning }).length,
+  1,
+  "Experimental learning must not change the normal stable detector"
+);
+assert.strictEqual(
+  detectLearnedBubbles(falsePositivePage, getDetectionOptions(5), negativeLearning).length,
+  0,
+  "The promoted learned detector must apply negative training feedback"
+);
+
+const weakBubble = {
+  width: 20,
+  height: 20,
+  area: 400,
+  fillRatio: 0.5,
+  runsPerLine: 1.7,
+  outlineDarkRatio: 0.5,
+};
+const weakFeatures = getBubbleFeatureVector(weakBubble, falsePositivePage);
+const weakCandidate = { ...weakBubble, features: weakFeatures };
+const positiveLearning = trainBubbleLearning(null, [weakFeatures], true);
+assert(
+  getBubbleConfidence(weakCandidate, falsePositivePage, positiveLearning) >
+    getBubbleConfidence(weakCandidate, falsePositivePage, normalizeBubbleLearning(null)),
+  "Adding a missed bubble must raise the confidence of similar candidates"
+);
+assert.strictEqual(positiveLearning.positiveSamples, 1, "Positive feedback must be persisted as one example");
+
+const matched = findCandidateForBounds([falsePositive], { left: 38, top: 34, right: 92, bottom: 82 });
+assert.strictEqual(matched, falsePositive, "A Photoshop selection must match an overlapping hidden candidate");
+const manualBubble = createManualBubble(
+  { left: 10, top: 15, right: 45, bottom: 55 },
+  falsePositivePage,
+  falsePositive
+);
+assert.strictEqual(manualBubble.manual, true, "A manually selected bubble must remain identifiable");
+assert.strictEqual(manualBubble.width, 35, "Manual bubble bounds must use snapshot coordinates");
+
+// A connected peanut shape has two distance-map peaks separated by a narrow
+// saddle and must be offered as two bubble instances. A plain oval must not.
+const doubleBubblePage = makeImage(500, 700, 50);
+fillEllipse(doubleBubblePage, 250, 220, 70, 78, 255);
+fillEllipse(doubleBubblePage, 250, 355, 62, 82, 255);
+const doubleCandidate = detectBubbleCandidates(doubleBubblePage, { ...getDetectionOptions(5), detectSplits: true })[0];
+assert(doubleCandidate.splitSuggestion, "A connected double bubble must expose a split suggestion");
+const splitChildren = createSplitBubbles(doubleCandidate, doubleBubblePage);
+assert.strictEqual(splitChildren.length, 2, "A split suggestion must create exactly two bubble instances");
+assert(splitChildren[0].yMid < splitChildren[1].yMid, "Vertical double bubbles must split into top and bottom instances");
+assert.strictEqual(
+  detectLearnedBubbles(doubleBubblePage, getDetectionOptions(5), normalizeBubbleLearning(null)).length,
+  2,
+  "The promoted learned detector must return connected double bubbles as two instances"
+);
+const manualDouble = createManualBubble(
+  { left: doubleCandidate.left, top: doubleCandidate.top, right: doubleCandidate.right, bottom: doubleCandidate.bottom },
+  doubleBubblePage,
+  null
+);
+assert(manualDouble.splitSuggestion, "A manually added double bubble must also offer a split");
+
+const ovalPage = makeImage(500, 700, 50);
+fillEllipse(ovalPage, 250, 290, 70, 140, 255);
+const ovalCandidate = detectBubbleCandidates(ovalPage, { ...getDetectionOptions(5), detectSplits: true })[0];
+assert.strictEqual(ovalCandidate.splitSuggestion, null, "A single elongated oval must not be split");
+
+const splitConfidence = getBubbleSplitConfidence(doubleCandidate.splitSuggestion, null);
+const rejectedSplitLearning = trainBubbleSplitLearning(null, [doubleCandidate.splitSuggestion], false);
+assert(
+  getBubbleSplitConfidence(doubleCandidate.splitSuggestion, rejectedSplitLearning) < splitConfidence,
+  "Merging an automatic split must lower the confidence of similar splits"
+);
+const acceptedSplitLearning = trainBubbleSplitLearning(rejectedSplitLearning, [doubleCandidate.splitSuggestion], true);
+assert.strictEqual(acceptedSplitLearning.splitPositiveSamples, 1, "Confirming a split must persist one positive split example");
 
 // ---- reading order ----------------------------------------------------------
 

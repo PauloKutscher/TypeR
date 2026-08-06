@@ -1289,6 +1289,13 @@ const PreviewBlock = React.memo(function PreviewBlock() {
               <FiCrosshair size={18} /> {locale.bubbleDetectButton || "Detect"}
             </button>
           )}
+          <button
+            className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large"
+            title={locale.bubbleTrainerButtonDescr}
+            onClick={() => context.dispatch({ type: "setModal", modal: "bubbleDetectTrainer" })}
+          >
+            <FaMagic size={16} /> {locale.bubbleTrainerButton}
+          </button>
           {uiVisible.previewSizeControls !== false && (
             <div className="preview-top_change-size-cont">
               <button className="topcoat-icon-button--large" title={locale.layerTextSizeMinus} onClick={handleDecrease}>
