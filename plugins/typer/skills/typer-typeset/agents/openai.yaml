@@ -1,0 +1,10 @@
+interface:
+  display_name: "TypeR Autonomous Typeset"
+  short_description: "Typeset manga pages in Photoshop with TypeR"
+  default_prompt: "Use $typer-typeset to typeset the current manga page autonomously in TypeR."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "typer"
+      description: "TypeR bridge tools for Photoshop typesetting"

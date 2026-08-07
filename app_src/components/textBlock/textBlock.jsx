@@ -261,6 +261,15 @@ const TextBlock = React.memo(function TextBlock() {
     [ignoreTagsRegex, renderMarkdownText]
   );
 
+  // An image can also be opened outside this component (MCP bridge open_image
+  // dispatches setLastOpenedImagePath directly): keep the dedup ref in sync so
+  // the effect below doesn't re-open the same file.
+  React.useEffect(() => {
+    if (context.state.lastOpenedImagePath) {
+      lastOpenedPath.current = context.state.lastOpenedImagePath;
+    }
+  }, [context.state.lastOpenedImagePath]);
+
   React.useEffect(() => {
     let image = context.state.images[0] || null;
     for (const line of context.state.lines) {

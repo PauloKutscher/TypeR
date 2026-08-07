@@ -11,6 +11,7 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import { ContextProvider } from './context';
 import HotkeysListner from './hotkeys';
+import McpBridge from './mcpBridge';
 import MainComponent from './components/main/main';
 import GlobalTooltip from './components/globalTooltip';
 
@@ -50,6 +51,7 @@ const App = React.memo(function App() {
     <ErrorBoundary>
       <ContextProvider>
         <HotkeysListner />
+        <McpBridge />
         <MainComponent />
         <GlobalTooltip />
       </ContextProvider>

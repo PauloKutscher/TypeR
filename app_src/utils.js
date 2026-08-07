@@ -1522,4 +1522,25 @@ const scanPsdFonts = (path, callback) => {
   );
 };
 
-export { csInterface, locale, openUrl, readStorage, writeToStorage, flushStorageWrite, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, getTypeRSelectionSnapshot, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isHostActionPending, notePanelActivity, isPanelIdle, notePanelInteraction, isPanelInteracting, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, exportDocumentSnapshot, openBubbleTrainingDocument, closeBubbleTrainingDocument, alignTextLayerToSelection, changeActiveLayerTextSize, toggleCleaningLayers, getHotkeyPressed, onMouseShortcut, startForegroundWatcher, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, getUpdateTestConfig, clearUpdateTestConfig, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
+export {
+  csInterface, locale, openUrl, buildRichTextPayload, trackHostAction,
+  readStorage, writeToStorage, flushStorageWrite, deleteStorageFile,
+  nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts,
+  getActiveLayerText, getSelectedTextLayers, getTypeRSelectionSnapshot,
+  setActiveLayerText, setSelectedTextLayers, setLayerTextFast,
+  getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener,
+  hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent,
+  isHostActionPending, notePanelActivity, isPanelIdle, notePanelInteraction,
+  isPanelInteracting, startSelectionMonitoring, stopSelectionMonitoring,
+  getSelectionChanged, deselectDocument, undoLastTextChange,
+  getActiveLayerRenderedText, getAllLayersRenderedTexts,
+  createTextLayerInSelection, createTextLayersInStoredSelections,
+  exportDocumentSnapshot, openBubbleTrainingDocument,
+  closeBubbleTrainingDocument, alignTextLayerToSelection,
+  changeActiveLayerTextSize, toggleCleaningLayers, getHotkeyPressed,
+  onMouseShortcut, startForegroundWatcher, resizeTextArea, scrollToLine,
+  scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle,
+  getDefaultStroke, openFile, scanPsdFonts, getUpdateTestConfig,
+  clearUpdateTestConfig, checkUpdate, prefetchUpdateZip,
+  downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns
+};

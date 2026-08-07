@@ -1,0 +1,28 @@
+{
+  "name": "typer",
+  "version": "0.1.0",
+  "description": "Autonomous manga and comics typesetting in Photoshop through TypeR tools.",
+  "author": {
+    "name": "ScanR",
+    "url": "https://github.com/ScanR/TypeR"
+  },
+  "homepage": "https://github.com/ScanR/TypeR",
+  "repository": "https://github.com/ScanR/TypeR",
+  "license": "MIT",
+  "keywords": ["photoshop", "manga", "comics", "typesetting", "typer"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "TypeR",
+    "shortDescription": "Autonomous Photoshop manga typesetting",
+    "longDescription": "Let an LLM inspect manga pages, detect and order speech bubbles, map script lines, select typography, shape and center text, review layers, save, and move through a chapter with TypeR.",
+    "developerName": "ScanR",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://github.com/ScanR/TypeR",
+    "defaultPrompt": [
+      "Use TypeR to inspect and typeset the current manga page.",
+      "Review the current page, correct its bubble-to-dialogue mapping, and finish the typeset."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

@@ -113,6 +113,11 @@ var _hostState = {
     value: 0,
     result: "",
   },
+  nudgeActiveTextLayer: {
+    deltaX: 0,
+    deltaY: 0,
+    result: "",
+  },
   selectionMonitor: {
     lastBoundsKey: null,
     lastBounds: null,
@@ -1814,6 +1819,24 @@ function _changeActiveLayerTextSize() {
   state.result = "";
 }
 
+function _nudgeActiveTextLayer() {
+  var state = _hostState.nudgeActiveTextLayer;
+  if (!documents.length) {
+    state.result = "doc";
+    return;
+  }
+  if (!_layerIsTextLayer()) {
+    state.result = "layer";
+    return;
+  }
+  try {
+    _moveLayer(state.deltaX, state.deltaY);
+    state.result = "";
+  } catch (e) {
+    state.result = "scriptError: " + e.message;
+  }
+}
+
 function _changeSize_alt() {
   var increasing = _hostState.changeActiveLayerTextSize.value > 0;
   _forEachSelectedLayer(function () {
@@ -2067,6 +2090,14 @@ function _getAllRenderedTextLines() {
     try {
       _selectLayerById(ids[index]);
       if (!_layerIsTextLayer()) continue;
+      var layerName = "";
+      var layerBounds = null;
+      try {
+        layerName = app.activeDocument.activeLayer.name || "";
+      } catch (layerNameError) {}
+      try {
+        layerBounds = _getCurrentTextLayerBounds();
+      } catch (layerBoundsError) {}
       // Re-detect the bubble around this layer (same wand scan as the
       // bubble-aware mode) so each learned exemplar keeps its outline context
       var bubble = null;
@@ -2101,7 +2132,13 @@ function _getAllRenderedTextLines() {
           } catch (deleteError) {}
         }
       }
-      if (text) entries.push({ text: text, bubble: bubble });
+      if (text) entries.push({
+        layerId: ids[index],
+        name: layerName,
+        bounds: layerBounds,
+        text: text,
+        bubble: bubble
+      });
     } catch (layerError) {}
   }
   if (originalId !== null) {
@@ -2284,6 +2321,26 @@ function getCurrentSelection() {
     return jamJSON.stringify({ error: selection.error });
   }
   return jamJSON.stringify(selection);
+}
+
+function selectTypeRMcpBounds(data) {
+  if (!documents.length) return "no_document";
+  if (!data || typeof data.left !== "number" || typeof data.top !== "number" ||
+      typeof data.right !== "number" || typeof data.bottom !== "number" ||
+      data.right <= data.left || data.bottom <= data.top) {
+    return "bad_bounds";
+  }
+  try {
+    app.activeDocument.selection.select([
+      [data.left, data.top],
+      [data.right, data.top],
+      [data.right, data.bottom],
+      [data.left, data.bottom]
+    ], SelectionType.REPLACE, 0, false);
+    return "";
+  } catch (e) {
+    return "scriptError: " + e.message;
+  }
 }
 
 function _buildBoundsShapeRows(bounds, sampleCount) {
@@ -3256,6 +3313,77 @@ function createTextLayersInStoredSelections(data, point) {
   
   app.activeDocument.suspendHistory("TyperTools Multiple Paste", "_createTextLayersInStoredSelections()");
   return state.result;
+}
+
+function nudgeActiveTextLayer(data) {
+  if (!documents.length) return "doc";
+  var state = _hostState.nudgeActiveTextLayer;
+  state.deltaX = data && typeof data.deltaX === "number" ? data.deltaX : 0;
+  state.deltaY = data && typeof data.deltaY === "number" ? data.deltaY : 0;
+  state.result = "";
+  if (!state.deltaX && !state.deltaY) return "bad_offset";
+  app.activeDocument.suspendHistory("TyperTools Optical Center", "_nudgeActiveTextLayer()");
+  return state.result;
+}
+
+// Small, stable document contract for the MCP bridge. Keeping this in the
+// host avoids inferring Photoshop state from TypeR's last-opened path.
+function getTypeRMcpDocumentInfo() {
+  if (!documents.length) return jamJSON.stringify({ error: "document" });
+  try {
+    var doc = app.activeDocument;
+    var path = null;
+    try {
+      path = doc.fullName.fsName;
+    } catch (unsavedError) {}
+    var activeLayer = null;
+    try {
+      activeLayer = {
+        id: _getActiveLayerId(),
+        name: doc.activeLayer.name || "",
+        isText: _layerIsTextLayer()
+      };
+    } catch (layerError) {}
+    return jamJSON.stringify({
+      id: doc.id,
+      name: doc.name,
+      path: path,
+      width: Math.round(doc.width.as ? doc.width.as("px") : parseFloat(doc.width)),
+      height: Math.round(doc.height.as ? doc.height.as("px") : parseFloat(doc.height)),
+      resolution: doc.resolution,
+      saved: !!doc.saved,
+      activeLayer: activeLayer
+    });
+  } catch (e) {
+    return jamJSON.stringify({ error: "scriptError: " + e.message });
+  }
+}
+
+function saveTypeRMcpDocument(data) {
+  data = data || {};
+  if (!documents.length) return jamJSON.stringify({ error: "document" });
+  var doc = app.activeDocument;
+  var previousDialogs = app.displayDialogs;
+  app.displayDialogs = DialogModes.NO;
+  try {
+    if (data.path) {
+      var file = new File(data.path);
+      var options = new PhotoshopSaveOptions();
+      options.layers = true;
+      doc.saveAs(file, options, !!data.asCopy, Extension.LOWERCASE);
+    } else {
+      doc.save();
+    }
+    var savedPath = null;
+    try {
+      savedPath = doc.fullName.fsName;
+    } catch (pathError) {}
+    return jamJSON.stringify({ saved: true, path: savedPath, asCopy: !!data.asCopy });
+  } catch (e) {
+    return jamJSON.stringify({ error: "scriptError: " + e.message });
+  } finally {
+    app.displayDialogs = previousDialogs;
+  }
 }
 
 // Exports a flattened, downscaled snapshot of the active document to a temp
