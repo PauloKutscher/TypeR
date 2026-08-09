@@ -1,5 +1,5 @@
 const FONT_VIEWER_API_BASE = "https://tools.carbonscans.com/fonts/api";
-const FILTER_CACHE_KEY = "typer.fontViewer.filters.v1";
+const FILTER_CACHE_KEY = "typer.fontViewer.filters.v2";
 const STATUS_CACHE_TTL = 60 * 1000;
 const FILTER_CACHE_TTL = 24 * 60 * 60 * 1000;
 const FAMILY_CACHE_TTL = 30 * 60 * 1000;
