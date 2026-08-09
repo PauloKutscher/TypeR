@@ -1192,6 +1192,14 @@ const SettingsModal = React.memo(function SettingsModal() {
                 </div>
                 <div className="field-descr">{locale.settingsDefaultStyleDescr}</div>
               </div>
+              <div className="settings-checkbox-grid">
+                {renderToggle(
+                  resizeTextBoxOnCenter,
+                  changeResizeTextBoxOnCenter,
+                  locale.settingsResizeTextBoxOnCenterLabel || "Fit text box to bubble when centering",
+                  locale.settingsResizeTextBoxOnCenterHint || "Fits the text box to the bubble before centering without changing the font size."
+                )}
+              </div>
             </div>
             <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupTextScript || "Script & tags"}</div>
@@ -1691,12 +1699,6 @@ const SettingsModal = React.memo(function SettingsModal() {
             <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupTextPositioning || "Text positioning"}</div>
               <div className="settings-checkbox-grid">
-                {renderToggle(
-                  resizeTextBoxOnCenter,
-                  changeResizeTextBoxOnCenter,
-                  locale.settingsResizeTextBoxOnCenterLabel,
-                  locale.settingsResizeTextBoxOnCenterHint || "Resizes text box during automatic centering"
-                )}
                 {renderToggle(
                   multiBubbleMode,
                   changeMultiBubbleMode,

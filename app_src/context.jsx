@@ -290,7 +290,7 @@ const initialState = {
   textShapeRLearnUsed: false,
   textShapeRLearnTipShown: false,
   textShapeRLearnTipVisible: false,
-  textShapeRBubbleAware: storage.data?.textShapeRBubbleAware !== false,
+  textShapeRBubbleAware: storage.data?.textShapeRBubbleAware === true,
   dehyphenateTextShapeR: storage.data?.dehyphenateTextShapeR === true,
   textShapeRTuning: storage.data?.textShapeRTuning || null,
   modalType: null,
@@ -1041,7 +1041,6 @@ const baseReducer = (state, action) => {
     case "setInlineTextShapeR": {
       newState.inlineTextShapeR = !!action.value;
       if (newState.inlineTextShapeR) {
-        newState.textShapeRBubbleAware = true;
         if (
           state.showTips !== false &&
           state.uiLayout?.visible?.preview !== false &&
