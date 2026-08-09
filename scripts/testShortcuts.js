@@ -44,6 +44,12 @@ assert(
     /defaultKeys:\s*\["CTRL",\s*"H"\]/.test(cleaningLayersBlock),
   "toggleCleaningLayers must use its translated label and default Ctrl+H shortcut"
 );
+const insertTextBlock = commandBlockById.get("insertText");
+assert(insertTextBlock, "Missing shortcut command: insertText");
+assert(
+  /defaultKeys:\s*\["WIN",\s*"SHIFT",\s*"V"\]/.test(insertTextBlock),
+  "insertText must use the safer default Cmd/Ctrl+Shift+V shortcut"
+);
 assert(contextSource.includes("getDefaultShortcuts()"), "Context must read defaults from the shortcut registry");
 assert(!contextSource.includes('add: ["WIN", "CTRL"]'), "Shortcut defaults must not be duplicated in context");
 assert(hotkeySource.includes("shortcutCommands.forEach"), "Hotkey matching must use the shortcut registry");
@@ -115,6 +121,14 @@ new Function("require", "module", "exports", transformedCommands)(
 );
 const runtimeCommands = commandModule.exports.shortcutCommands;
 const getCommand = (id) => runtimeCommands.find((command) => command.id === id);
+assert.deepStrictEqual(commandModule.exports.getDefaultShortcuts().insertText, ["WIN", "SHIFT", "V"]);
+const migratedShortcuts = commandModule.exports.migrateShortcutDefaults(
+  { insertText: ["WIN", "V"], nextPage: ["ALT", "P"] },
+  commandModule.exports.getDefaultShortcuts()
+);
+assert.strictEqual(migratedShortcuts.migrated, true, "The old insertText default must be migrated");
+assert.deepStrictEqual(migratedShortcuts.shortcuts.insertText, ["WIN", "SHIFT", "V"]);
+assert.deepStrictEqual(migratedShortcuts.shortcuts.nextPage, ["ALT", "P"], "Custom shortcuts must be preserved");
 
 const dispatches = [];
 const baseContext = {

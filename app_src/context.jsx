@@ -7,7 +7,7 @@ import { getNextLineNumberState } from "./lineNumbering";
 import { CUSTOM_IMAGE_THEME_ID, normalizeCustomThemes, normalizeEditorTheme, normalizePageLineColor, setCustomEditorThemes } from "./themePresets";
 import { normalizeBackgroundImage } from "./backgroundImage";
 import { applyThemeState } from "./lib/themeManager";
-import { getDefaultShortcuts } from "./shortcutCommands";
+import { getDefaultShortcuts, migrateShortcutDefaults } from "./shortcutCommands";
 import { getStoredSelectionLineIndex } from "./multiBubbleHistory";
 import { getAutomaticTagStyles } from "./folderUtils";
 import { perfMeasure } from "./perfDebug";
@@ -184,6 +184,7 @@ const showStyleSizeTipIfEligible = (state) => {
 };
 
 const defaultShortcut = getDefaultShortcuts();
+const shortcutMigration = migrateShortcutDefaults(storage.data?.shortcut, defaultShortcut);
 
 const normalizeFolders = (folders) => {
   const normalized = (folders || []).map((folder) => {
@@ -322,7 +323,7 @@ const initialState = {
   styleSizeTipLastChangeAt: Math.max(0, Number(storage.data?.styleSizeTipLastChangeAt) || 0),
   styleSizeTipShown: storage.data?.styleSizeTipShown === true,
   styleSizeTipVisible: false,
-  shortcut: { ...defaultShortcut, ...(storage.data?.shortcut || {}) },
+  shortcut: shortcutMigration.shortcuts,
   uiLayout: normalizeUiLayout(storage.data?.uiLayout),
   // The theme registry is filled by the theme manager at import time, so the
   // stored id can already point at a custom theme here
@@ -346,6 +347,10 @@ const activeTab = initialState.tabs.find((tab) => tab.id === initialState.curren
 loadTabIntoState(initialState, activeTab);
 // Keep stored selections across restarts (loadTabIntoState clears them)
 initialState.storedSelections = storage.data?.storedSelections || [];
+
+if (shortcutMigration.migrated) {
+  writeToStorage({ shortcut: initialState.shortcut });
+}
 
 if (tabStorage.migrated) {
   const migratedData = {

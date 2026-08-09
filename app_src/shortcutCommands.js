@@ -251,7 +251,8 @@ const shortcutCommands = [
   {
     id: "insertText",
     label: "shortcut_insertText",
-    defaultKeys: ["WIN", "V"],
+    defaultKeys: ["WIN", "SHIFT", "V"],
+    legacyDefaultKeys: ["WIN", "V"],
     repeatDelay: 0,
     handler: insertLineText,
   },
@@ -330,6 +331,29 @@ const getDefaultShortcuts = () => shortcutCommands.reduce((shortcuts, command) =
   return shortcuts;
 }, {});
 
+const sameShortcut = (left, right) => (
+  Array.isArray(left) &&
+  Array.isArray(right) &&
+  left.length === right.length &&
+  left.every((key, index) => key === right[index])
+);
+
+// Move users who still have an unchanged previous default onto the new one,
+// while preserving shortcuts they explicitly customized.
+const migrateShortcutDefaults = (storedShortcuts, defaults = getDefaultShortcuts()) => {
+  const stored = storedShortcuts && typeof storedShortcuts === "object" ? storedShortcuts : {};
+  const shortcuts = { ...defaults, ...stored };
+  let migrated = false;
+
+  shortcutCommands.forEach((command) => {
+    if (!sameShortcut(stored[command.id], command.legacyDefaultKeys)) return;
+    shortcuts[command.id] = (defaults[command.id] || []).concat([]);
+    migrated = true;
+  });
+
+  return { shortcuts, migrated };
+};
+
 const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform || "");
 const shortcutKeyLabels = {
   WIN: isMac ? "Cmd" : "Win",
@@ -367,6 +391,7 @@ const withShortcutHint = (label, keys) => {
 export {
   shortcutCommands,
   getDefaultShortcuts,
+  migrateShortcutDefaults,
   shortcutKeyLabels,
   formatShortcut,
   withShortcutHint,
