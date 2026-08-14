@@ -508,7 +508,11 @@ const PreviewBlock = React.memo(function PreviewBlock() {
               source: "bubble",
             };
           rememberBubbleShape(bubbleShapeCache.current, bubbleKey, shape);
-          setInlineSelectionShape((current) => (shape || current ? shape : current));
+          // A failed detection must clear the shape, exactly like the cached
+          // path above: keeping the previous bubble would shape the text after
+          // another layer's outline. React bails out on its own when the value
+          // is unchanged, so no guard is needed here.
+          setInlineSelectionShape(shape);
         } catch (error) {}
       });
     });
