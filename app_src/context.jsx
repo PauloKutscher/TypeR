@@ -4,6 +4,7 @@ import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, getUp
 import { shouldRunUpdateCheck } from "./updateLogic";
 import config from "./config";
 import { getNextLineNumberState } from "./lineNumbering";
+import { isPageMarker } from "./pageMarker";
 import { CUSTOM_IMAGE_THEME_ID, normalizeCustomThemes, normalizeEditorTheme, normalizePageLineColor, setCustomEditorThemes } from "./themePresets";
 import { normalizeBackgroundImage } from "./backgroundImage";
 import { applyThemeState } from "./lib/themeManager";
@@ -513,7 +514,7 @@ const baseReducer = (state, action) => {
       let foundNextPage = false;
       for (let i = state.currentLineIndex + 1; i < state.lines.length; i++) {
         const line = state.lines[i];
-        if (line.rawText.match(/Page [0-9]+/i)) {
+        if (isPageMarker(line.rawText)) {
           // Select the first usable line after that page marker.
           for (let j = i + 1; j < state.lines.length; j++) {
             if (!state.lines[j].ignore) {
@@ -536,13 +537,13 @@ const baseReducer = (state, action) => {
       if (!state.text) break;
       const pageMarkers = [];
       for (let i = 0; i < state.currentLineIndex; i++) {
-        if (state.lines[i].rawText.match(/Page [0-9]+/i)) pageMarkers.push(i);
+        if (isPageMarker(state.lines[i].rawText)) pageMarkers.push(i);
       }
       // The nearest marker is the current page; move to the one before it.
       const targetMarker = pageMarkers.length > 1 ? pageMarkers[pageMarkers.length - 2] : -1;
       if (targetMarker < 0) break;
       for (let i = targetMarker + 1; i < state.lines.length; i++) {
-        if (state.lines[i].rawText.match(/Page [0-9]+/i)) break;
+        if (isPageMarker(state.lines[i].rawText)) break;
         if (!state.lines[i].ignore) {
           newState.currentLineIndex = state.lines[i].rawIndex;
           thenScroll = true;
@@ -1506,7 +1507,7 @@ const baseReducer = (state, action) => {
         text = text.replace(ignoreTagsRegex, "");
       }
       text = text.trim();
-      const isPage = rawText.match(/Page [0-9]+/i);
+      const isPage = isPageMarker(rawText);
       const ignore = !!ignorePrefix || !text || isPage;
       if (isPage && newState.images.length && lastTextLine) lastTextLine.last = true;
       const lineNumberState = getNextLineNumberState({

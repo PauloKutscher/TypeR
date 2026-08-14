@@ -2,23 +2,12 @@ const assert = require("assert");
 const babel = require("@babel/core");
 const fs = require("fs");
 const path = require("path");
+const { loadAppModule } = require("./loadAppModule");
 
 const rootDir = path.resolve(__dirname, "..");
-const historySource = fs.readFileSync(
-  path.join(rootDir, "app_src", "multiBubbleHistory.js"),
-  "utf8"
+const { getStoredSelectionLineIndex } = loadAppModule(
+  path.join(rootDir, "app_src", "multiBubbleHistory.js")
 );
-const transformedHistory = babel.transformSync(historySource, {
-  presets: [["@babel/preset-env", { modules: "commonjs" }]],
-}).code;
-const historyModule = { exports: {} };
-new Function("require", "module", "exports", transformedHistory)(
-  require,
-  historyModule,
-  historyModule.exports
-);
-
-const { getStoredSelectionLineIndex } = historyModule.exports;
 
 const lines = [
   { rawIndex: 0, rawText: "Page 1", ignore: true },

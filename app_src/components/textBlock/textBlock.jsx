@@ -5,13 +5,28 @@ import PropTypes from "prop-types";
 import { FiArrowRightCircle, FiBold, FiItalic, FiTarget } from "react-icons/fi";
 
 import config from "../../config";
-import { locale, setActiveLayerText, resizeTextArea, scrollToLine, openFile, convertHtmlToMarkdown, parseMarkdownRuns } from "../../utils";
+import { locale, setActiveLayerText, resizeTextArea, scrollToLine, openFile, parseMarkdownRuns } from "../../utils";
+import { convertHtmlToMarkdownDetailed } from "../../markdownConvert";
+import { analyzeStructuralNumbers } from "../../structuralNumbers";
+import { writePasteDebugReport } from "../../pasteDebug";
 import { useContext } from "../../context";
 import { notePerfRender } from "../../perfDebug";
 import { formatMarkdownSelection } from "../../markdownFormatting";
 import { createPageImageLookup, getImageForPage } from "../../pageImageMapping";
+import { isPageMarker, matchPageMarker } from "../../pageMarker";
 
 const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Every paste overwrites %TEMP%/typer-paste-debug.log with the per-line
+// decision and the raw clipboard HTML, so a false positive can be diagnosed
+// without CEF remote debugging.
+const reportStructuralNumbers = (analysis, lines, html) => {
+  const logPath = writePasteDebugReport(analysis, lines, html);
+  console.info(
+    `[TypeR paste] dropped ${analysis.dropped} structural number(s)` +
+      (logPath ? ` — report: ${logPath}` : "")
+  );
+};
 
 const textSelectionMirrorProperties = [
   "boxSizing", "fontFamily", "fontSize", "fontWeight", "fontStyle", "fontVariant",
@@ -71,7 +86,7 @@ const LineItem = React.memo(function LineItem({ line, direction, isCurrent, disp
   const className = "text-line" +
     (line.ignore ? " m-empty" : "") +
     (isCurrent ? " m-current" : "") +
-    (line.rawText.match(/Page [0-9]+/i) ? " m-page" : "");
+    (isPageMarker(line.rawText) ? " m-page" : "");
 
   const handleSelect = React.useCallback(() => {
     dispatch({ type: "setCurrentLineIndex", index: line.rawIndex });
@@ -265,10 +280,10 @@ const TextBlock = React.memo(function TextBlock() {
     let image = context.state.images[0] || null;
     for (const line of context.state.lines) {
       if (line.ignore) {
-        const page = line.rawText.match(/Page ([0-9]+)/i);
-        const pageImage = page
-          ? getImageForPage(context.state.images, Number(page[1]), pageImageLookup)
-          : null;
+        const page = matchPageMarker(line.rawText);
+        const pageImage = page === null
+          ? null
+          : getImageForPage(context.state.images, page, pageImageLookup);
         if (pageImage) image = pageImage;
       }
       if (line.rawIndex === context.state.currentLineIndex) {
@@ -287,10 +302,10 @@ const TextBlock = React.memo(function TextBlock() {
     return context.state.lines.map((line) => {
       let lineNum;
       if (line.ignore) {
-        const page = line.rawText.match(/Page ([0-9]+)/i);
-        const currentImage = page
-          ? getImageForPage(context.state.images, Number(page[1]), pageImageLookup)
-          : null;
+        const page = matchPageMarker(line.rawText);
+        const currentImage = page === null
+          ? null
+          : getImageForPage(context.state.images, page, pageImageLookup);
         if (currentImage) {
           lineNum = currentImage.name;
         } else {
@@ -398,7 +413,11 @@ const TextBlock = React.memo(function TextBlock() {
       if (!markdownEnabled) return;
       const html = clipboard.getData("text/html");
       if (!html) return;
-      const markdown = convertHtmlToMarkdown(html);
+      const converted = convertHtmlToMarkdownDetailed(html);
+      if (!converted.markdown) return;
+      const analysis = analyzeStructuralNumbers(converted.lines);
+      reportStructuralNumbers(analysis, converted.lines, html);
+      const markdown = analysis.keep.map((line) => line.text).join("\n");
       if (!markdown) return;
       const plainText = clipboard.getData("text/plain") || "";
       if (markdown === plainText) return;

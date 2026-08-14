@@ -161,10 +161,28 @@ const wrapStyledRun = (text, bold, italic, family) => {
   return `${marker}${text}${marker}`;
 };
 
-const convertDomToMarkdown = (nodes) => {
+// Walks the pasted DOM once and returns both the markdown string and, for each
+// output line, which table cell it came from. The cell provenance is the only
+// structural evidence that survives the flattening, and it is what lets a
+// caller tell an auxiliary numbering column apart from a line of dialogue that
+// happens to be a number. Lines from outside any cell get `cellId: null`.
+const convertDomToMarkdownDetailed = (nodes) => {
   const runs = [];
   let pendingBreak = false;
   let hasContent = false;
+  // Provenance tracking. `lineOwners[n]` is the cell that produced output line
+  // n; first writer wins, so a cell that opens a line owns it even if a later
+  // sibling node appends to the same line.
+  const cellStack = [];
+  const lineOwners = [];
+  let lineIndex = 0;
+  let nextCellId = 0;
+  let nextRowId = 0;
+  const noteLineOwner = () => {
+    if (lineOwners[lineIndex] === undefined) {
+      lineOwners[lineIndex] = cellStack.length ? cellStack[cellStack.length - 1] : null;
+    }
+  };
   // Whitespace-only text (e.g. a lone &nbsp; inside an empty spacer <p>) is
   // buffered instead of pushed immediately: if real content follows on the
   // same line it's a genuine inter-word space and gets flushed as-is; if a
@@ -206,16 +224,20 @@ const convertDomToMarkdown = (nodes) => {
         pushRun("\n", { bold: false, italic: false });
         pendingBreak = false;
         pendingWhitespace = "";
+        lineIndex += 1;
       } else if (pendingWhitespace) {
         pushRun(pendingWhitespace, { bold: false, italic: false });
         pendingWhitespace = "";
       }
+      noteLineOwner();
       pushRun(segment, style);
       hasContent = true;
     });
   };
 
-  const walk = (node, style) => {
+  let currentRowId = null;
+
+  const walk = (node, style, colIndex) => {
     if (node.nodeType === 3) {
       const value = (node.nodeValue || "").replace(/\u00a0/g, " ");
       pushText(value, style);
@@ -240,14 +262,31 @@ const convertDomToMarkdown = (nodes) => {
 
     const isBlock = /^(p|div|li|ul|ol|tr|td|th|table|thead|tbody)$/i.test(tag);
     if (isBlock) emitBreak();
-    for (const child of Array.from(node.childNodes)) {
-      walk(child, nextStyle);
+    const isCell = tag === "td" || tag === "th";
+    if (isCell) {
+      // A column index is only meaningful inside a real <tr> grid. Cells pasted
+      // as bare siblings (the common "one <td> per row" export shape) get null
+      // so nothing downstream mistakes their sibling order for columns.
+      cellStack.push({
+        cellId: nextCellId++,
+        colIndex: currentRowId === null ? null : colIndex,
+        rowId: currentRowId,
+      });
     }
+    const previousRowId = currentRowId;
+    if (tag === "tr") currentRowId = nextRowId++;
+    let childColumn = 0;
+    for (const child of Array.from(node.childNodes)) {
+      const isChildCell = child.nodeType === 1 && /^(td|th)$/i.test(child.tagName);
+      walk(child, nextStyle, isChildCell ? childColumn++ : undefined);
+    }
+    currentRowId = previousRowId;
+    if (isCell) cellStack.pop();
     if (isBlock) emitBreak();
   };
 
   for (const node of nodes) {
-    walk(node, { bold: false, italic: false });
+    walk(node, { bold: false, italic: false }, undefined);
   }
 
   let markdown = "";
@@ -265,18 +304,50 @@ const convertDomToMarkdown = (nodes) => {
     prevStyledFamily = family;
   }
 
-  return markdown.trim();
+  markdown = markdown.trim();
+  const texts = markdown ? markdown.split("\n") : [];
+  const cellLineCounts = new Map();
+  texts.forEach((text, index) => {
+    const owner = lineOwners[index];
+    if (!owner) return;
+    cellLineCounts.set(owner.cellId, (cellLineCounts.get(owner.cellId) || 0) + 1);
+  });
+  const seenInCell = new Map();
+  const lines = texts.map((text, index) => {
+    const owner = lineOwners[index] || null;
+    if (!owner) return { text, cellId: null, colIndex: null, rowId: null, posInCell: 0, cellLineCount: 1 };
+    const posInCell = seenInCell.get(owner.cellId) || 0;
+    seenInCell.set(owner.cellId, posInCell + 1);
+    return {
+      text,
+      cellId: owner.cellId,
+      colIndex: owner.colIndex,
+      rowId: owner.rowId,
+      posInCell,
+      cellLineCount: cellLineCounts.get(owner.cellId) || 1,
+    };
+  });
+
+  return { markdown, lines };
 };
 
-const convertHtmlToMarkdown = (html) => {
-  if (!html) return "";
+const convertDomToMarkdown = (nodes) => convertDomToMarkdownDetailed(nodes).markdown;
+
+const parseHtml = (html) => {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
-  return convertDomToMarkdown(Array.from(doc.body.childNodes));
+  return Array.from(doc.body.childNodes);
 };
+
+const convertHtmlToMarkdown = (html) => (html ? convertDomToMarkdown(parseHtml(html)) : "");
+
+const convertHtmlToMarkdownDetailed = (html) =>
+  html ? convertDomToMarkdownDetailed(parseHtml(html)) : { markdown: "", lines: [] };
 
 export {
   parseMarkdownRuns,
   convertHtmlToMarkdown,
+  convertHtmlToMarkdownDetailed,
   convertDomToMarkdown,
+  convertDomToMarkdownDetailed,
 };
