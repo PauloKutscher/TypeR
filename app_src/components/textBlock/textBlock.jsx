@@ -201,27 +201,6 @@ const TextBlock = React.memo(function TextBlock() {
     return new RegExp(`(${ignoreTagsPattern})`, "g");
   }, [ignoreTagsPattern]);
 
-  const renderMarkdownText = React.useCallback(
-    (text, keyPrefix = "md") => {
-      if (!markdownEnabled) return text;
-      const parsed = parseMarkdownRuns(text);
-      if (!parsed.hasFormatting) {
-        return parsed.text;
-      }
-      return parsed.runs.map((run, index) => {
-        const runStyle = {};
-        if (run.bold) runStyle.fontWeight = "bold";
-        if (run.italic) runStyle.fontStyle = "italic";
-        return (
-          <span key={`${keyPrefix}-${index}`} style={runStyle}>
-            {run.text}
-          </span>
-        );
-      });
-    },
-    [markdownEnabled]
-  );
-
   const renderMarkdownOverlay = React.useCallback(
     (text) => {
       if (!markdownEnabled) return text;
@@ -243,13 +222,17 @@ const TextBlock = React.memo(function TextBlock() {
     [markdownEnabled]
   );
 
+  // Highlight layer only: its glyphs are transparent, so it must carry the raw
+  // characters of the line and nothing else. Styling markdown here would hide
+  // the marker characters from the layout, making it wrap earlier than the
+  // textarea and dragging every highlight a row away from its line.
   const renderHighlightedText = React.useCallback(
     (text) => {
       if (text === undefined || text === null || text === "") {
         return <span>{" "}</span>;
       }
       if (!ignoreTagsRegex) {
-        return <span>{renderMarkdownText(text)}</span>;
+        return <span>{text}</span>;
       }
       const parts = text.split(ignoreTagsRegex);
       const nodes = parts.map((part, index) => {
@@ -263,7 +246,7 @@ const TextBlock = React.memo(function TextBlock() {
         }
         return (
           <React.Fragment key={`text-${index}`}>
-            {renderMarkdownText(part, `md-${index}`)}
+            {part}
           </React.Fragment>
         );
       });
@@ -273,7 +256,7 @@ const TextBlock = React.memo(function TextBlock() {
       }
       return nodes;
     },
-    [ignoreTagsRegex, renderMarkdownText]
+    [ignoreTagsRegex]
   );
 
   React.useEffect(() => {

@@ -21,6 +21,21 @@ const getFirstUsableLineIndexOnCurrentPage = (lines, currentLineIndex) => {
   return currentLineIndex;
 };
 
+// Re-clicking a bubble that is already stored produces bounds a pixel or two
+// off, which an exact comparison counts as a brand new bubble: the extra entry
+// then shifts every text one selection down the list at paste time. Same 5px
+// tolerance the host uses to decide a selection did not really change.
+export const isDuplicateSelection = (storedSelections, selection, tolerance = 5) => {
+  if (!selection || !Array.isArray(storedSelections)) return false;
+  return storedSelections.some((stored) => (
+    stored &&
+    Math.abs(stored.top - selection.top) <= tolerance &&
+    Math.abs(stored.left - selection.left) <= tolerance &&
+    Math.abs(stored.right - selection.right) <= tolerance &&
+    Math.abs(stored.bottom - selection.bottom) <= tolerance
+  ));
+};
+
 export const getStoredSelectionLineIndex = (selection, fallbackLineIndex, lines = []) => {
   if (!selection || typeof selection.lineIndex !== "number") return fallbackLineIndex;
   if (!Array.isArray(lines) || !lines.length) return selection.lineIndex;

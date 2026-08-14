@@ -9,6 +9,7 @@ import { FaMagic } from "react-icons/fa";
 import { csInterface, locale, nativeConfirm, setActiveLayerText, setLayerTextFast, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isHostActionPending, isPanelIdle, isPanelInteracting, notePanelActivity, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, getUserFonts, refreshUserFonts, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { getScaledStyle } from "../../textLayerPayload";
+import { isDuplicateSelection } from "../../multiBubbleHistory";
 import { getBubbleCacheKey, haveSameLayerSize } from "../../textShapeRTracking";
 import { pasteInSelection, withShortcutHint } from "../../shortcutCommands";
 import { createFontPreviewRegistry, getFontPreviewFamily } from "../../fontPreview";
@@ -875,18 +876,17 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           return;
         }
         if (selection.multiSelection && selection.multiSelection.length > 0) {
-          const storedHashSet = new Set((context.state.storedSelections || []).map((storedSelection) => getSelectionBoundsHash(storedSelection)));
+          const knownSelections = (context.state.storedSelections || []).concat([]);
           let nextLineIndex = context.state.currentLineIndex;
           const entries = [];
 
           for (const multiSelection of selection.multiSelection) {
             const { shiftKey, ...cleanSelection } = multiSelection;
-            const selectionHash = getSelectionBoundsHash(cleanSelection);
-            if (storedHashSet.has(selectionHash)) {
+            if (isDuplicateSelection(knownSelections, cleanSelection)) {
               continue;
             }
 
-            storedHashSet.add(selectionHash);
+            knownSelections.push(cleanSelection);
             entries.push({ selection: cleanSelection, lineIndex: nextLineIndex });
             const nextLine = getNextUsableLineIndex(context.state.lines || [], nextLineIndex);
             nextLineIndex = nextLine.index;
@@ -910,10 +910,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           return;
         }
         const { shiftKey, ...cleanSelection } = selection;
-        const newHash = getSelectionBoundsHash(cleanSelection);
-        const storedHashSet = new Set((context.state.storedSelections || []).map((storedSelection) => getSelectionBoundsHash(storedSelection)));
-
-        if (!storedHashSet.has(newHash)) {
+        if (!isDuplicateSelection(context.state.storedSelections || [], cleanSelection)) {
           addSelectionAndAdvance(cleanSelection);
         }
       }

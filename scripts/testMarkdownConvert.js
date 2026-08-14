@@ -178,4 +178,36 @@ assert.strictEqual(
   "Page 1\nFinal Chapter\nGraduation Ceremony\nTsukiya Noah!\nHere!"
 );
 
+// The editor stacks a transparent highlight layer under the glyph layers, so
+// both must lay out the exact characters the textarea holds. The overlay keeps
+// the markers as hidden spans; the highlight layer must not process markdown at
+// all. Drop a single character on either side and every highlight drifts a
+// wrapped row away from its line.
+[
+  "**bold** text",
+  "Career path survey___Year ___Class ___Number  Name",
+  "a _really_ long *one* here",
+  "escaped \\*star\\* and \\_score\\_",
+  "no markers at all",
+].forEach((raw) => {
+  assert.strictEqual(
+    parseMarkdownRuns(raw).overlaySegments.map((segment) => segment.text).join(""),
+    raw,
+    `Overlay segments must keep every character of: ${raw}`
+  );
+});
+
+const textBlockSource = fs.readFileSync(
+  path.resolve(__dirname, "../app_src/components/textBlock/textBlock.jsx"),
+  "utf8"
+);
+const highlightRenderer = textBlockSource.match(
+  /const renderHighlightedText = React\.useCallback\(\n[\s\S]*?\n {4}\[ignoreTagsRegex\]/
+);
+assert.ok(highlightRenderer, "The highlight layer renderer must exist");
+assert.ok(
+  !/parseMarkdownRuns|renderMarkdownText/.test(highlightRenderer[0]),
+  "The highlight layer must render raw characters: stripping markdown markers makes it wrap before the textarea"
+);
+
 console.log("markdown convert tests passed");
