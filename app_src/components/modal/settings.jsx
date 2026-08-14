@@ -43,7 +43,15 @@ const LAYOUT_BLOCK_ELEMENTS = {
   preview: ["previewCreateButton", "previewAlignButton", "previewSizeControls", "previewNav", "previewWidget"],
   text: ["tabBar"],
   styles: [],
-  footer: ["footerHelp", "footerRepo", "footerModeToggles"],
+  footer: ["footerHelp", "footerSettings", "footerRepo", "footerTextShapeR", "footerMultiBubble"],
+};
+// Footer element -> per-button size key stored in uiLayout.sizes.footer
+const FOOTER_SIZE_KEYS = {
+  footerHelp: "help",
+  footerSettings: "settings",
+  footerRepo: "repo",
+  footerTextShapeR: "textShapeR",
+  footerMultiBubble: "multiBubble",
 };
 
 const SettingsModal = React.memo(function SettingsModal() {
@@ -179,6 +187,9 @@ const SettingsModal = React.memo(function SettingsModal() {
     String(readStorage("bottomHeight") || 70)
   );
   const initialStylesHeight = React.useRef(String(readStorage("bottomHeight") || 70));
+  const [footerSizes, setFooterSizes] = React.useState(
+    () => ({ ...normalizeUiLayout(context.state.uiLayout).sizes.footer })
+  );
 
   // Interactive layout canvas (appearance tab)
   const [selectedLayoutBlock, setSelectedLayoutBlock] = React.useState("preview");
@@ -608,6 +619,7 @@ const SettingsModal = React.memo(function SettingsModal() {
     setPreviewHeight(String(defaultUiLayout.sizes.previewHeight));
     setUiScale(String(defaultUiLayout.sizes.uiScale));
     setStylesHeight("70");
+    setFooterSizes({ ...defaultUiLayout.sizes.footer });
     setEdited(true);
   };
 
@@ -616,6 +628,7 @@ const SettingsModal = React.memo(function SettingsModal() {
     sizes: {
       previewHeight: previewHeight === "" ? defaultUiLayout.sizes.previewHeight : previewHeight,
       uiScale: uiScale === "" ? defaultUiLayout.sizes.uiScale : uiScale,
+      footer: footerSizes,
     },
   });
 
@@ -1080,7 +1093,7 @@ const SettingsModal = React.memo(function SettingsModal() {
   // Shared markup for a toggle row (checkbox + label + optional hint)
   const renderToggle = (checked, onChange, label, hint) => (
     <div className="settings-checkbox-item">
-      <label className="settings-checkbox-label">
+      <label className="settings-checkbox-label" onMouseDown={(e) => e.preventDefault()}>
         <input type="checkbox" checked={checked} onChange={onChange} />
         <div className="settings-checkbox-custom"></div>
         <div className="settings-checkbox-content">
@@ -1266,8 +1279,10 @@ const SettingsModal = React.memo(function SettingsModal() {
           previewNav: locale.settingsLayoutElNav || "Line navigation arrows",
           previewWidget: locale.settingsLayoutElWidget || "Line preview / TextShapeR",
           footerHelp: locale.settingsLayoutElFooterHelp || "Footer: Help link",
+          footerSettings: locale.settingsLayoutElFooterSettings || "Footer: Settings link",
           footerRepo: locale.settingsLayoutElFooterRepo || "Footer: Repository link",
-          footerModeToggles: locale.settingsLayoutElFooterModes || "Footer: mode toggles",
+          footerTextShapeR: locale.settingsLayoutElFooterTextShapeR || "Footer: TextShapeR toggle",
+          footerMultiBubble: locale.settingsLayoutElFooterMultiBubble || "Footer: Multi-bubble toggle",
         };
         const previewMockHeight = Math.max(26, Math.round((parseInt(previewHeight, 10) || 130) * LAYOUT_CANVAS_SCALE));
         const stylesMockHeight = Math.max(14, Math.round((parseInt(stylesHeight, 10) || 70) * LAYOUT_CANVAS_SCALE));
@@ -1555,11 +1570,17 @@ const SettingsModal = React.memo(function SettingsModal() {
                       onClick={() => setSelectedLayoutBlock("footer")}
                     >
                       {vis.footerHelp && <span className={"mk-f" + hl("footerHelp")} {...mockElementProps("footerHelp")} />}
-                      <span className="mk-f m-on" />
+                      {vis.footerSettings && <span className={"mk-f m-on" + hl("footerSettings")} {...mockElementProps("footerSettings")} />}
                       {vis.footerRepo && <span className={"mk-f" + hl("footerRepo")} {...mockElementProps("footerRepo")} />}
                       <span className="mk-fspacer" />
-                      {vis.footerModeToggles && (
-                        <span className={"mk-fdots" + hl("footerModeToggles")} {...mockElementProps("footerModeToggles")}>
+                      {vis.footerTextShapeR && (
+                        <span className={"mk-fdots" + hl("footerTextShapeR")} {...mockElementProps("footerTextShapeR")}>
+                          <i />
+                          <i />
+                        </span>
+                      )}
+                      {vis.footerMultiBubble && (
+                        <span className={"mk-fdots m-sep" + hl("footerMultiBubble")} {...mockElementProps("footerMultiBubble")}>
                           <i />
                           <i />
                         </span>
@@ -1633,12 +1654,58 @@ const SettingsModal = React.memo(function SettingsModal() {
                       {locale.settingsLayoutTextAuto || "Fills the remaining space automatically."}
                     </div>
                   )}
-                  {selectedElements.length > 0 && (
+                  {selectedLayoutBlock === "footer" ? (
+                    <div className="settings-layout-elements">
+                      {selectedElements.map((key) => {
+                        const sizeKey = FOOTER_SIZE_KEYS[key];
+                        const size = parseInt(footerSizes[sizeKey], 10) || 12;
+                        return (
+                          <div
+                            key={key}
+                            className="settings-layout-footer-element"
+                            onMouseEnter={() => setLayoutHoverEl(key)}
+                            onMouseLeave={() => setLayoutHoverEl(null)}
+                          >
+                            <label className="settings-layout-element" onMouseDown={(e) => e.preventDefault()}>
+                              <input type="checkbox" checked={vis[key] !== false} onChange={() => toggleUiElement(key)} />
+                              <div className="settings-checkbox-custom"></div>
+                              <span>{elementLabels[key]}</span>
+                            </label>
+                            <input
+                              type="range"
+                              min="8"
+                              max="20"
+                              title={((locale.settingsLayoutFooterSize || "Button size (px)") + ": ") + elementLabels[key]}
+                              value={Math.min(20, Math.max(8, size))}
+                              onChange={(e) => {
+                                setFooterSizes((current) => ({ ...current, [sizeKey]: e.target.value }));
+                                setEdited(true);
+                              }}
+                            />
+                            <input
+                              type="number"
+                              min="8"
+                              max="20"
+                              value={footerSizes[sizeKey]}
+                              className="settings-layout-footer-size-input"
+                              onChange={(e) => {
+                                if (e.target.value === "" || /^[0-9]+$/.test(e.target.value)) {
+                                  setFooterSizes((current) => ({ ...current, [sizeKey]: e.target.value }));
+                                  setEdited(true);
+                                }
+                              }}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : selectedElements.length > 0 ? (
                     <div className="settings-layout-elements">
                       {selectedElements.map((key) => (
                         <label
                           key={key}
                           className="settings-layout-element"
+                          onMouseDown={(e) => e.preventDefault()}
                           onMouseEnter={() => setLayoutHoverEl(key)}
                           onMouseLeave={() => setLayoutHoverEl(null)}
                         >
@@ -1648,7 +1715,7 @@ const SettingsModal = React.memo(function SettingsModal() {
                         </label>
                       ))}
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </div>
               <div className="field-descr">

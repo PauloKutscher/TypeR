@@ -440,11 +440,15 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           try {
             const data = JSON.parse(result || "{}");
             if (!data || data.error || !data.bounds) return;
+            const geometry = textShapeREngine && textShapeREngine.getShapeProfileGeometry
+              ? textShapeREngine.getShapeProfileGeometry(data)
+              : null;
             inlineShapeKey.current = boundsHash;
             setInlineSelectionShape({
               profile: data,
               width: data.bounds.width,
               height: data.bounds.height,
+              phantomOffsetX: geometry ? geometry.offsetX * data.bounds.width : 0,
               source: "selection",
             });
           } catch (error) {}
@@ -500,12 +504,18 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           inlineShapeKey.current = bubbleKey;
           const shape = !data || data.error || !data.bounds
             ? null
-            : {
-              profile: data,
-              width: data.bounds.width,
-              height: data.bounds.height,
-              source: "bubble",
-            };
+            : (() => {
+              const geometry = textShapeREngine && textShapeREngine.getShapeProfileGeometry
+                ? textShapeREngine.getShapeProfileGeometry(data)
+                : null;
+              return {
+                profile: data,
+                width: data.bounds.width,
+                height: data.bounds.height,
+                phantomOffsetX: geometry ? geometry.offsetX * data.bounds.width : 0,
+                source: "bubble",
+              };
+            })();
           rememberBubbleShape(bubbleShapeCache.current, bubbleKey, shape);
           setInlineSelectionShape((current) => (shape || current ? shape : current));
         } catch (error) {}
@@ -1010,12 +1020,18 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   }, [line.rawIndex]);
 
   const handleAlignLayer = React.useCallback(() => {
+    const geometry = textShapeREngine && inlineSelectionShape?.profile && textShapeREngine.getShapeProfileGeometry
+      ? textShapeREngine.getShapeProfileGeometry(inlineSelectionShape.profile)
+      : null;
+    const phantomOffsetX = geometry
+      ? geometry.offsetX * (inlineSelectionShape.width || 0)
+      : (inlineSelectionShape?.phantomOffsetX || 0);
     alignTextLayerToSelection(context.state.resizeTextBoxOnCenter, context.state.internalPadding || 0, () => {
       if (context.state.multiBubbleMode && (context.state.storedSelections || []).length > 0) {
         resetStoredSelections(true);
       }
-    });
-  }, [context.state, resetStoredSelections]);
+    }, phantomOffsetX);
+  }, [context.state, inlineSelectionShape, resetStoredSelections, textShapeREngine]);
 
   const handleDecrease = React.useCallback(() => {
     changeActiveLayerTextSize(-(context.state.textSizeIncrement || 1));

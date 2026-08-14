@@ -108,6 +108,7 @@ var _hostState = {
     result: "",
     resize: false,
     padding: 0,
+    phantomOffsetX: 0,
   },
   changeActiveLayerTextSize: {
     value: 0,
@@ -799,9 +800,9 @@ function _resizeTextBoxToContent(width, currentBounds) {
   _setTextBoxSize(width, currentBounds.height + textSize + 2);
 }
 
-function _positionLayerWithinSelection(selection, bounds) {
+function _positionLayerWithinSelection(selection, bounds, phantomOffsetX) {
   if (!selection || !bounds) return;
-  var offsetX = selection.xMid - bounds.xMid;
+  var offsetX = selection.xMid - bounds.xMid + (Number(phantomOffsetX) || 0);
   var offsetY = selection.yMid - bounds.yMid;
   _moveLayer(offsetX, offsetY);
 }
@@ -1636,7 +1637,7 @@ function _createTextLayerInSelection() {
     _resizeTextBoxToContent(dimensions.width, bounds);
   }
   bounds = _getCurrentTextLayerBounds();
-  _positionLayerWithinSelection(selection, bounds);
+  _positionLayerWithinSelection(selection, bounds, state.data && state.data.phantomOffsetX);
   state.result = "";
 }
 
@@ -1645,12 +1646,22 @@ function _alignCurrentTextLayerToSelection() {
   if (!_layerIsTextLayer()) {
     return "layer";
   }
-  
+
   var selection = _checkSelection({ adaptiveOpen: true });
   if (selection.error) {
     if (selection.error === "noSelection") {
-      _createMagicWandSelection(20);
-      selection = _checkSelection({ adaptiveOpen: true });
+      // Deterministic first: center on the bubble shape layer that sits
+      // below the text layer. The magic wand (pixel sampling of the merged
+      // image) depends on fill colors, bubble tails and anti-aliasing, so it
+      // lands the text left or right of the true bubble center — it stays
+      // only as the last resort for bubbles that are not shape layers.
+      var bubbleBounds = _findShapeLayerBoundsBelowTextLayer();
+      if (bubbleBounds) {
+        selection = bubbleBounds;
+      } else {
+        _createMagicWandSelection(20);
+        selection = _checkSelection({ adaptiveOpen: true });
+      }
     }
     if (selection.error) {
       return selection.error;
@@ -1666,13 +1677,120 @@ function _alignCurrentTextLayerToSelection() {
     _resizeTextBoxToContent(dimensions.width, textBounds);
     bounds = _getCurrentTextLayerBounds();
   }
-  
+
   _deselect();
-  _positionLayerWithinSelection(selection, bounds);
+  _positionLayerWithinSelection(selection, bounds, state.phantomOffsetX);
   if (wasPoint) {
     _changeToPointText();
   }
   return "";
+}
+
+function _flattenPathPolygon(poly) {
+  var count = poly.length;
+  if (count < 3) return null;
+  var flattenSteps = count > 500 ? 1 : 6;
+  var flat = [];
+  for (var i = 0; i < count; i++) {
+    var current = poly[i];
+    var next = poly[(i + 1) % count];
+    var a = current.anchor;
+    var c1 = current.right || a;
+    var c2 = next.left || next.anchor;
+    var b = next.anchor;
+    var straight = c1[0] === a[0] && c1[1] === a[1] && c2[0] === b[0] && c2[1] === b[1];
+    var steps = straight ? 1 : flattenSteps;
+    for (var t = 0; t < steps; t++) {
+      var u = t / steps;
+      var v = 1 - u;
+      flat.push([
+        v * v * v * a[0] + 3 * v * v * u * c1[0] + 3 * v * u * u * c2[0] + u * u * u * b[0],
+        v * v * v * a[1] + 3 * v * v * u * c1[1] + 3 * v * u * u * c2[1] + u * u * u * b[1],
+      ]);
+    }
+  }
+  return flat.length >= 3 ? flat : null;
+}
+
+function _getLayerPropertyById(id, layerIndex) {
+  var ref = new ActionReference();
+  ref.putProperty(charIDToTypeID("Prpr"), id);
+  ref.putIndex(charIDToTypeID("Lyr "), layerIndex);
+  return executeActionGet(ref);
+}
+
+function _getLayerBoundsByIndex(layerIndex) {
+  try {
+    var boundsId = stringIDToTypeID("bounds");
+    var desc = _getLayerPropertyById(boundsId, layerIndex);
+    if (desc.hasKey(boundsId)) {
+      return _getBoundsFromDescriptor(desc.getObjectValue(boundsId));
+    }
+  } catch (boundsError) {}
+  return null;
+}
+
+// Look for the bubble shape layer below the active text layer and return its
+// bounds. Shape layers (kind 4) are the canonical bubbles of the workflow,
+// and their bounds are deterministic — unlike pixel sampling, they never
+// depend on fill color, anti-aliasing or the bubble tail. The walk is capped
+// so documents with huge layer stacks stay fast.
+function _findShapeLayerBoundsBelowTextLayer() {
+  try {
+    var propId = charIDToTypeID("Prpr");
+    var layerId = charIDToTypeID("Lyr ");
+    var docId = charIDToTypeID("Dcmn");
+    var ordinalId = charIDToTypeID("Ordn");
+    var targetId = charIDToTypeID("Trgt");
+    var targetLayersId = stringIDToTypeID("targetLayers");
+    var layerKindId = stringIDToTypeID("layerKind");
+    var numberOfLayersId = stringIDToTypeID("numberOfLayers");
+    var hasBackgroundId = stringIDToTypeID("hasBackgroundLayer");
+    var shapeLayerKind = 4;
+
+    var getDocProperty = function (id) {
+      var ref = new ActionReference();
+      ref.putProperty(propId, id);
+      ref.putEnumerated(docId, ordinalId, targetId);
+      return executeActionGet(ref);
+    };
+
+    var layerCount = getDocProperty(numberOfLayersId).getInteger(numberOfLayersId);
+    var hasBackground = false;
+    try {
+      hasBackground = getDocProperty(hasBackgroundId).getBoolean(hasBackgroundId);
+    } catch (backgroundError) {}
+    var firstIndex = hasBackground ? 0 : 1;
+
+    var activeIndex = -1;
+    var selectionRef = new ActionReference();
+    selectionRef.putProperty(propId, targetLayersId);
+    selectionRef.putEnumerated(docId, ordinalId, targetId);
+    var selectionDesc = executeActionGet(selectionRef);
+    if (selectionDesc.hasKey(targetLayersId)) {
+      var list = selectionDesc.getList(targetLayersId);
+      if (list.count === 1) {
+        var backgroundRef = new ActionReference();
+        backgroundRef.putProperty(propId, charID.Background);
+        backgroundRef.putEnumerated(layerId, ordinalId, charID.Back);
+        var offset = executeActionGet(backgroundRef).getBoolean(charID.Background) ? 0 : 1;
+        activeIndex = list.getReference(0).getIndex() + offset;
+      }
+    }
+    if (activeIndex < firstIndex) return null;
+
+    var limit = Math.max(firstIndex, activeIndex - 40);
+    for (var i = activeIndex - 1; i >= limit; i--) {
+      var kind = 0;
+      try {
+        kind = _getLayerPropertyById(layerKindId, i).getInteger(layerKindId);
+      } catch (kindError) {}
+      if (kind === shapeLayerKind) {
+        return _getLayerBoundsByIndex(i);
+      }
+    }
+  } catch (walkError) {}
+  return null;
 }
 
 function _alignTextLayerToSelection() {
@@ -2258,6 +2376,7 @@ function alignTextLayerToSelection(data) {
   var state = _hostState.alignTextLayerToSelection;
   state.resize = !!data.resizeTextBox;
   state.padding = data.padding || 0;
+  state.phantomOffsetX = Number(data && data.phantomOffsetX) || 0;
   state.result = "";
   app.activeDocument.suspendHistory("TyperTools Align", "_alignTextLayerToSelection()");
   return state.result;
