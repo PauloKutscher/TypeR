@@ -2996,6 +2996,17 @@ function undoLastTyperChange() {
   }
 }
 
+// No live marquee at all: report it as its own state instead of the ambiguous
+// noChange (which also means "same selection as before") so the panel can drop
+// its stored selections, and forget the last bounds so re-selecting the very
+// same outline afterwards counts as a new selection.
+function _selectionClearedResult(monitor, shiftPressed) {
+  monitor.lastBounds = null;
+  monitor.lastBoundsKey = null;
+  monitor.multiWarnBounds = null;
+  return jamJSON.stringify({ cleared: true, shiftKey: shiftPressed });
+}
+
 function getSelectionChanged() {
   try {
     var monitor = _hostState.selectionMonitor;
@@ -3004,8 +3015,7 @@ function getSelectionChanged() {
 
     var rawSelection = _getCurrentSelectionBounds();
     if (!rawSelection) {
-      monitor.multiWarnBounds = null;
-      return jamJSON.stringify({ noChange: true, shiftKey: shiftPressed });
+      return _selectionClearedResult(monitor, shiftPressed);
     }
 
     var selectionArray = Object.prototype.toString.call(rawSelection) === "[object Array]" ? rawSelection : [rawSelection];
@@ -3080,7 +3090,7 @@ function getSelectionChanged() {
     }
 
     if (merged.length === 0) {
-      return jamJSON.stringify({ noChange: true, shiftKey: shiftPressed });
+      return _selectionClearedResult(monitor, shiftPressed);
     }
 
     var isSame = false;

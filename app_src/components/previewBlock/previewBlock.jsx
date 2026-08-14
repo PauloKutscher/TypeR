@@ -858,6 +858,14 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     getSelectionChanged((selection) => {
       selectionCheckPending.current = false;
       if (selection) {
+        // Photoshop has no live selection any more (Ctrl+D, click outside):
+        // multi-bubble starts over instead of counting on from the old batch
+        if (selection.cleared) {
+          if ((context.state.storedSelections || []).length > 0) {
+            context.dispatch({ type: "clearSelections" });
+          }
+          return;
+        }
         notePanelActivity();
         // The host detected a Shift-add growing the previous selection:
         // multi-bubble needs one selection at a time, so warn instead of

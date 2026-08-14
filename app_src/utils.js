@@ -776,9 +776,15 @@ const stopSelectionMonitoring = () => {
 // runs calls in queue order, so once the deselect callback fires every later
 // poll reflects the post-deselect document.
 let selectionResultsSuppressedUntil = 0;
+// A deselect the panel itself performed (clear button, remove-last, paste) must
+// not read back as "the user cleared the selection": stay quiet about the empty
+// document until a real selection shows up again, otherwise removing the last
+// stored selection would wipe the ones before it too.
+let ignoreClearedUntilSelection = false;
 
 const deselectDocument = (callback = () => {}) => {
   selectionResultsSuppressedUntil = Date.now() + 5000;
+  ignoreClearedUntilSelection = true;
   csInterface.evalScript("deselectDocumentSelection()", () => {
     selectionResultsSuppressedUntil = Date.now();
     callback();
@@ -817,13 +823,19 @@ const getSelectionChanged = (callback = () => {}) => {
     const data = safeJsonParse(result);
     if (Date.now() < selectionResultsSuppressedUntil || data.noChange || data.error) {
       callback(null);
+    } else if (data.cleared) {
+      // The document has no selection at all: a real user deselect resets the
+      // multi-bubble counter, one of our own deselects stays silent
+      callback(ignoreClearedUntilSelection ? null : { cleared: true });
     } else if (data.multipleSelections) {
       // The host saw one selection grow around the previous one (Shift-add):
       // no bounds are usable, the panel should only warn the user
+      ignoreClearedUntilSelection = false;
       callback({ multipleSelections: true });
     } else if (typeof data.width !== "number") {
       callback(null);
     } else {
+      ignoreClearedUntilSelection = false;
       callback(data);
     }
   });
