@@ -28,16 +28,23 @@ const defaultConfig = {
         path: __dirname + '/app/',
         filename: 'index.js',
         chunkFilename: '[name].index.js',
-        publicPath: './'
+        publicPath: './',
+        hashFunction: 'xxhash64'
     },
     resolve: {
         extensions: ['.js', '.jsx', '.jsxinc']
+    },
+    cache: {
+        type: 'filesystem',
+        buildDependencies: {
+            config: [__filename]
+        }
     }
 };
 
 const devConfig = {
     mode: 'development',
-    devtool: 'source-map',
+    devtool: 'eval-cheap-module-source-map',
     module: {
         rules: [
             {
@@ -75,7 +82,11 @@ const devConfig = {
                     }, {
                         loader: 'sass-loader',
                         options: {
-                            sourceMap: true
+                            sourceMap: true,
+                            sassOptions: {
+                                quietDeps: true,
+                                silenceDeprecations: ['legacy-js-api']
+                            }
                         }
                     }
                 ]
@@ -136,7 +147,13 @@ const prodConfig = {
                             }
                         }
                     }, {
-                        loader: 'sass-loader'
+                        loader: 'sass-loader',
+                        options: {
+                            sassOptions: {
+                                quietDeps: true,
+                                silenceDeprecations: ['legacy-js-api']
+                            }
+                        }
                     }
                 ]
             }, {
@@ -147,6 +164,9 @@ const prodConfig = {
                 loader: 'base64-inline-loader'
             }
         ]
+    },
+    optimization: {
+        minimize: true
     },
     plugins: [
         new HtmlWebpackPlugin({

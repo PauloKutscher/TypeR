@@ -109,6 +109,7 @@ var _hostState = {
     resize: false,
     padding: 0,
     phantomOffsetX: 0,
+    phantomOffsetY: 0,
   },
   changeActiveLayerTextSize: {
     value: 0,
@@ -800,11 +801,35 @@ function _resizeTextBoxToContent(width, currentBounds) {
   _setTextBoxSize(width, currentBounds.height + textSize + 2);
 }
 
-function _positionLayerWithinSelection(selection, bounds, phantomOffsetX) {
+function _positionLayerWithinSelection(selection, bounds, phantomOffsetX, phantomOffsetY) {
   if (!selection || !bounds) return;
-  var offsetX = selection.xMid - bounds.xMid + (Number(phantomOffsetX) || 0);
-  var offsetY = selection.yMid - bounds.yMid;
-  _moveLayer(offsetX, offsetY);
+
+  var targetXMid = selection.xMid + (Number(phantomOffsetX) || 0);
+  var targetYMid = selection.yMid + (Number(phantomOffsetY) || 0);
+
+  // Safety tolerance clamping: ensure the text block never spills outside the visible balloon selection
+  var marginX = Math.min(selection.width * 0.05, Math.max(0, (selection.width - bounds.width) / 2));
+  var marginY = Math.min(selection.height * 0.05, Math.max(0, (selection.height - bounds.height) / 2));
+
+  var minXMid = selection.left + marginX + bounds.width / 2;
+  var maxXMid = selection.right - marginX - bounds.width / 2;
+  if (minXMid <= maxXMid) {
+    targetXMid = Math.max(minXMid, Math.min(maxXMid, targetXMid));
+  } else {
+    targetXMid = selection.xMid;
+  }
+
+  var minYMid = selection.top + marginY + bounds.height / 2;
+  var maxYMid = selection.bottom - marginY - bounds.height / 2;
+  if (minYMid <= maxYMid) {
+    targetYMid = Math.max(minYMid, Math.min(maxYMid, targetYMid));
+  } else {
+    targetYMid = selection.yMid;
+  }
+
+  var offsetX = targetXMid - bounds.xMid;
+  var offsetY = targetYMid - bounds.yMid;
+  if (offsetX || offsetY) _moveLayer(offsetX, offsetY);
 }
 
 function _createMagicWandSelection(tolerance) {
@@ -1637,8 +1662,557 @@ function _createTextLayerInSelection() {
     _resizeTextBoxToContent(dimensions.width, bounds);
   }
   bounds = _getCurrentTextLayerBounds();
-  _positionLayerWithinSelection(selection, bounds, state.data && state.data.phantomOffsetX);
+
+  var phantomOffsetX = state.data && Number(state.data.phantomOffsetX) || 0;
+  var phantomOffsetY = state.data && Number(state.data.phantomOffsetY) || 0;
+  if (phantomOffsetX === 0 && phantomOffsetY === 0) {
+    try {
+      var shape = _sampleSelectionShapeViaPath(selection, 17, false);
+      if (shape) {
+        var phantom = _fitPhantomEllipseForSelection(shape);
+        if (phantom) {
+          phantomOffsetX = phantom.pixelOffsetX;
+          phantomOffsetY = phantom.pixelOffsetY;
+        }
+      }
+    } catch (createPhantomError) {}
+  }
+
+  _positionLayerWithinSelection(
+    selection,
+    bounds,
+    phantomOffsetX,
+    phantomOffsetY
+  );
   state.result = "";
+}
+
+
+
+function _analyzeMangaBalloonGeometryES3(shapeData) {
+  if (!shapeData || !shapeData.bounds) return null;
+  var bounds = shapeData.bounds;
+  var width = bounds.width;
+  var height = bounds.height;
+  if (width <= 0 || height <= 0) return null;
+
+  var rows = shapeData.rows;
+  var polygons = shapeData.polygons;
+
+  if ((!rows || rows.length < 5) && polygons && polygons.length > 0) {
+    rows = [];
+    var poly = polygons[0];
+    var sampleCount = 21;
+    for (var r = 0; r < sampleCount; r++) {
+      var yRatio = r / (sampleCount - 1);
+      var y = bounds.top + height * yRatio;
+      var minX = null, maxX = null;
+      for (var i = 0; i < poly.length; i++) {
+        var a = poly[i];
+        var b = poly[(i + 1) % poly.length];
+        if ((a[1] <= y && b[1] > y) || (b[1] <= y && a[1] > y)) {
+          var x = a[0] + ((y - a[1]) / (b[1] - a[1])) * (b[0] - a[0]);
+          if (minX === null || x < minX) minX = x;
+          if (maxX === null || x > maxX) maxX = x;
+        }
+      }
+      if (minX !== null && maxX > minX) {
+        rows.push({
+          y: yRatio,
+          left: Math.max(0, Math.min(1, (minX - bounds.left) / width)),
+          right: Math.max(0, Math.min(1, (maxX - bounds.left) / width)),
+          width: Math.max(0, Math.min(1, (maxX - minX) / width)),
+        });
+      } else {
+        rows.push({ y: yRatio, left: 0.5, right: 0.5, width: 0 });
+      }
+    }
+  }
+
+  if (!rows || rows.length < 5) return null;
+
+  var n = rows.length;
+  var midpoints = [];
+  var widths = [];
+  var lefts = [];
+  var rights = [];
+  var totalWeight = 0;
+  var weightedYSum = 0;
+  var weightedXSum = 0;
+  var maxRowWidth = 0;
+
+  for (var i = 0; i < n; i++) {
+    var r = rows[i];
+    var w = Math.max(0, r.right - r.left);
+    var mid = (r.left + r.right) / 2;
+
+    widths.push(w);
+    lefts.push(r.left);
+    rights.push(r.right);
+    midpoints.push(mid);
+
+    if (w > maxRowWidth) maxRowWidth = w;
+
+    if (w > 0.05) {
+      var weight = Math.pow(w, 1.5);
+      totalWeight += weight;
+      weightedYSum += r.y * weight;
+      weightedXSum += mid * weight;
+    }
+  }
+
+  if (totalWeight <= 0) return null;
+
+  var visualCentroidX = weightedXSum / totalWeight;
+  var visualCentroidY = weightedYSum / totalWeight;
+
+  var validIndices = [];
+  for (var i = 1; i < n - 1; i++) {
+    if (widths[i] > 0.2) validIndices.push(i);
+  }
+
+  var leftFlatCount = 0;
+  var rightFlatCount = 0;
+  var minLeft = 1, maxRight = 0;
+
+  for (var k = 0; k < validIndices.length; k++) {
+    var idx = validIndices[k];
+    if (lefts[idx] < minLeft) minLeft = lefts[idx];
+    if (rights[idx] > maxRight) maxRight = rights[idx];
+  }
+
+  for (var k = 0; k < validIndices.length; k++) {
+    var idx = validIndices[k];
+    if (Math.abs(lefts[idx] - minLeft) < 0.035) leftFlatCount++;
+    if (Math.abs(rights[idx] - maxRight) < 0.035) rightFlatCount++;
+  }
+
+  var leftCutRatio = validIndices.length ? leftFlatCount / validIndices.length : 0;
+  var rightCutRatio = validIndices.length ? rightFlatCount / validIndices.length : 0;
+
+  var isLeftCut = leftCutRatio >= 0.55 && rightCutRatio < 0.4;
+  var isRightCut = rightCutRatio >= 0.55 && leftCutRatio < 0.4;
+
+  var topWidth = widths[0] || 0;
+  var bottomWidth = widths[n - 1] || 0;
+  var isTopCut = topWidth > maxRowWidth * 0.65;
+  var isBottomCut = bottomWidth > maxRowWidth * 0.65;
+
+  var targetNormX = visualCentroidX;
+  var targetNormY = visualCentroidY;
+
+  if (isLeftCut && !isRightCut) {
+    var estimatedHalfW = maxRight - minLeft;
+    targetNormX = Math.max(0.15, maxRight - estimatedHalfW * 0.85);
+  } else if (isRightCut && !isLeftCut) {
+    var estimatedHalfW = maxRight - minLeft;
+    targetNormX = Math.min(0.85, minLeft + estimatedHalfW * 0.85);
+  } else {
+    var sortedMids = midpoints.slice(0).sort(function(a, b) { return a - b; });
+    var medianMid = sortedMids[Math.floor(sortedMids.length / 2)];
+    targetNormX = visualCentroidX * 0.6 + medianMid * 0.4;
+  }
+
+  if (isBottomCut && !isTopCut) {
+    targetNormY = Math.min(0.7, visualCentroidY * 0.75 + 0.5 * 0.25 + 0.15);
+  } else if (isTopCut && !isBottomCut) {
+    targetNormY = Math.max(0.3, visualCentroidY * 0.75 + 0.5 * 0.25 - 0.15);
+  } else {
+    targetNormY = visualCentroidY;
+  }
+
+  var rawOffsetX = targetNormX - 0.5;
+  var rawOffsetY = targetNormY - 0.5;
+
+  var maxShiftX = 0.35;
+  var maxShiftY = 0.35;
+  var offsetX = Math.max(-maxShiftX, Math.min(maxShiftX, rawOffsetX));
+  var offsetY = Math.max(-maxShiftY, Math.min(maxShiftY, rawOffsetY));
+
+  return {
+    pixelOffsetX: offsetX * width,
+    pixelOffsetY: offsetY * height,
+    isCut: isLeftCut || isRightCut || isTopCut || isBottomCut,
+  };
+}
+
+
+
+function _invert3x3(m) {
+  var a00 = m[0], a01 = m[1], a02 = m[2];
+  var a10 = m[3], a11 = m[4], a12 = m[5];
+  var a20 = m[6], a21 = m[7], a22 = m[8];
+
+  var b01 = a22 * a11 - a12 * a21;
+  var b11 = -a22 * a10 + a12 * a20;
+  var b21 = a21 * a10 - a11 * a20;
+
+  var det = a00 * b01 + a01 * b11 + a02 * b21;
+  if (Math.abs(det) < 1e-15) return null;
+
+  var invDet = 1.0 / det;
+  return [
+    b01 * invDet,
+    (-a22 * a01 + a02 * a21) * invDet,
+    (a12 * a01 - a02 * a11) * invDet,
+    b11 * invDet,
+    (a22 * a00 - a02 * a20) * invDet,
+    (-a12 * a00 + a02 * a10) * invDet,
+    b21 * invDet,
+    (-a21 * a00 + a01 * a20) * invDet,
+    (a11 * a00 - a01 * a10) * invDet,
+  ];
+}
+
+function _multiply3x3(A, B) {
+  var out = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  for (var row = 0; row < 3; row++) {
+    for (var col = 0; col < 3; col++) {
+      out[row * 3 + col] =
+        A[row * 3 + 0] * B[0 * 3 + col] +
+        A[row * 3 + 1] * B[1 * 3 + col] +
+        A[row * 3 + 2] * B[2 * 3 + col];
+    }
+  }
+  return out;
+}
+
+function _solveCubicRoots(a, b, c, d) {
+  if (Math.abs(a) < 1e-12) return [];
+  var b_ = b / a;
+  var c_ = c / a;
+  var d_ = d / a;
+
+  var p = (3 * c_ - b_ * b_) / 3;
+  var q = (2 * b_ * b_ * b_ - 9 * b_ * c_ + 27 * d_) / 27;
+
+  var disc = (q * q) / 4 + (p * p * p) / 27;
+  var roots = [];
+
+  function cbrt(x) {
+    return x < 0 ? -Math.pow(-x, 1 / 3) : Math.pow(x, 1 / 3);
+  }
+
+  if (disc > 1e-12) {
+    var sqrtD = Math.sqrt(disc);
+    var u = cbrt(-q / 2 + sqrtD);
+    var v = cbrt(-q / 2 - sqrtD);
+    roots.push(u + v - b_ / 3);
+  } else if (Math.abs(disc) <= 1e-12) {
+    var u2 = cbrt(-q / 2);
+    roots.push(2 * u2 - b_ / 3);
+    roots.push(-u2 - b_ / 3);
+  } else {
+    var r = Math.sqrt(-(p * p * p) / 27);
+    var phi = Math.acos(Math.max(-1, Math.min(1, -q / (2 * r))));
+    var s = 2 * Math.sqrt(-p / 3);
+    roots.push(s * Math.cos(phi / 3) - b_ / 3);
+    roots.push(s * Math.cos((phi + 2 * Math.PI) / 3) - b_ / 3);
+    roots.push(s * Math.cos((phi + 4 * Math.PI) / 3) - b_ / 3);
+  }
+  return roots;
+}
+
+function _eigen3x3(M) {
+  var m00 = M[0], m01 = M[1], m02 = M[2];
+  var m10 = M[3], m11 = M[4], m12 = M[5];
+  var m20 = M[6], m21 = M[7], m22 = M[8];
+
+  var c2 = -(m00 + m11 + m22);
+  var c1 =
+    m00 * m11 - m01 * m10 +
+    m00 * m22 - m02 * m20 +
+    m11 * m22 - m12 * m21;
+  var c0 = -(
+    m00 * (m11 * m22 - m12 * m21) -
+    m01 * (m10 * m22 - m12 * m20) +
+    m02 * (m10 * m21 - m11 * m20)
+  );
+
+  var roots = _solveCubicRoots(1, c2, c1, c0);
+  var eigens = [];
+
+  for (var i = 0; i < roots.length; i++) {
+    var lambda = roots[i];
+    var B = [
+      m00 - lambda, m01, m02,
+      m10, m11 - lambda, m12,
+      m20, m21, m22 - lambda,
+    ];
+
+    var cross01 = [
+      B[1] * B[5] - B[2] * B[4],
+      B[2] * B[3] - B[0] * B[5],
+      B[0] * B[4] - B[1] * B[3],
+    ];
+    var cross02 = [
+      B[1] * B[8] - B[2] * B[7],
+      B[2] * B[6] - B[0] * B[8],
+      B[0] * B[7] - B[1] * B[6],
+    ];
+    var cross12 = [
+      B[4] * B[8] - B[5] * B[7],
+      B[5] * B[6] - B[3] * B[8],
+      B[3] * B[7] - B[4] * B[6],
+    ];
+
+    var v = cross01;
+    var norm = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    var norm02 = Math.sqrt(cross02[0] * cross02[0] + cross02[1] * cross02[1] + cross02[2] * cross02[2]);
+    var norm12 = Math.sqrt(cross12[0] * cross12[0] + cross12[1] * cross12[1] + cross12[2] * cross12[2]);
+
+    if (norm02 > norm) { v = cross02; norm = norm02; }
+    if (norm12 > norm) { v = cross12; norm = norm12; }
+
+    if (norm > 1e-10) {
+      eigens.push({
+        value: lambda,
+        vector: [v[0] / norm, v[1] / norm, v[2] / norm],
+      });
+    }
+  }
+  return eigens;
+}
+
+function _fitEllipseDirectES3(points) {
+  if (!points || points.length < 5) return null;
+
+  var meanX = 0, meanY = 0;
+  for (var i = 0; i < points.length; i++) {
+    meanX += points[i][0];
+    meanY += points[i][1];
+  }
+  meanX /= points.length;
+  meanY /= points.length;
+
+  var scale = 0;
+  for (var i = 0; i < points.length; i++) {
+    var dx = points[i][0] - meanX;
+    var dy = points[i][1] - meanY;
+    scale += Math.sqrt(dx * dx + dy * dy);
+  }
+  scale = scale / points.length || 1;
+
+  var S1 = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  var S2 = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  var S3 = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+  for (var i = 0; i < points.length; i++) {
+    var x = (points[i][0] - meanX) / scale;
+    var y = (points[i][1] - meanY) / scale;
+
+    var x2 = x * x;
+    var xy = x * y;
+    var y2 = y * y;
+
+    S1[0] += x2 * x2; S1[1] += x2 * xy; S1[2] += x2 * y2;
+    S1[3] += xy * x2; S1[4] += xy * xy; S1[5] += xy * y2;
+    S1[6] += y2 * x2; S1[7] += y2 * xy; S1[8] += y2 * y2;
+
+    S2[0] += x2 * x;  S2[1] += x2 * y;  S2[2] += x2;
+    S2[3] += xy * x;  S2[4] += xy * y;  S2[5] += xy;
+    S2[6] += y2 * x;  S2[7] += y2 * y;  S2[8] += y2;
+
+    S3[0] += x * x;   S3[1] += x * y;   S3[2] += x;
+    S3[3] += y * x;   S3[4] += y * y;   S3[5] += y;
+    S3[6] += 1 * x;   S3[7] += 1 * y;   S3[8] += 1;
+  }
+
+  var invS3 = _invert3x3(S3);
+  if (!invS3) return null;
+
+  var S2T = [
+    S2[0], S2[3], S2[6],
+    S2[1], S2[4], S2[7],
+    S2[2], S2[5], S2[8],
+  ];
+  var T = _multiply3x3(invS3, S2T);
+  for (var i = 0; i < 9; i++) T[i] = -T[i];
+
+  var S2_T = _multiply3x3(S2, T);
+  var Q = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  for (var i = 0; i < 9; i++) Q[i] = S1[i] + S2_T[i];
+
+  var M = [
+    0.5 * Q[6], 0.5 * Q[7], 0.5 * Q[8],
+    -Q[3],     -Q[4],     -Q[5],
+    0.5 * Q[0], 0.5 * Q[1], 0.5 * Q[2],
+  ];
+
+  var eigens = _eigen3x3(M);
+  if (!eigens.length) return null;
+
+  var bestA1 = null;
+  for (var i = 0; i < eigens.length; i++) {
+    var A = eigens[i].vector[0], B = eigens[i].vector[1], C = eigens[i].vector[2];
+    var cond = 4 * A * C - B * B;
+    if (cond > 1e-12) {
+      var scaleFactor = 1 / Math.sqrt(cond);
+      bestA1 = [A * scaleFactor, B * scaleFactor, C * scaleFactor];
+      break;
+    }
+  }
+
+  if (!bestA1) {
+    for (var i = 0; i < eigens.length; i++) {
+      var A = eigens[i].vector[0], B = eigens[i].vector[1], C = eigens[i].vector[2];
+      var cond = 4 * (-A) * (-C) - (-B) * (-B);
+      if (cond > 1e-12) {
+        var scaleFactor = 1 / Math.sqrt(cond);
+        bestA1 = [-A * scaleFactor, -B * scaleFactor, -C * scaleFactor];
+        break;
+      }
+    }
+  }
+
+  if (!bestA1) return null;
+
+  var a2 = [
+    T[0] * bestA1[0] + T[1] * bestA1[1] + T[2] * bestA1[2],
+    T[3] * bestA1[0] + T[4] * bestA1[1] + T[5] * bestA1[2],
+    T[6] * bestA1[0] + T[7] * bestA1[1] + T[8] * bestA1[2],
+  ];
+
+  var A = bestA1[0], B = bestA1[1], C = bestA1[2];
+  var D = a2[0], E = a2[1], F = a2[2];
+
+  var denom = 4 * A * C - B * B;
+  if (denom <= 1e-12) return null;
+
+  var cxScaled = (B * E - 2 * C * D) / denom;
+  var cyScaled = (B * D - 2 * A * E) / denom;
+
+  var centerX = cxScaled * scale + meanX;
+  var centerY = cyScaled * scale + meanY;
+
+  var K = (2 * (A * E * E + C * D * D - B * D * E - denom * F)) / denom;
+  var term = Math.sqrt((A - C) * (A - C) + B * B);
+
+  var denomA = A + C - term;
+  var denomB = A + C + term;
+
+  if (denomA <= 0 || denomB <= 0) return null;
+
+  var semiMajorScaled = Math.sqrt(Math.abs(K / denomA));
+  var semiMinorScaled = Math.sqrt(Math.abs(K / denomB));
+
+  var a = semiMajorScaled * scale;
+  var b = semiMinorScaled * scale;
+
+  return {
+    centerX: centerX,
+    centerY: centerY,
+    a: Math.max(a, b),
+    b: Math.min(a, b),
+  };
+}
+
+function _extractIntactArcPointsES3(points) {
+  if (!points || points.length < 6) return points || [];
+  var n = points.length;
+
+  var shoelace = 0;
+  for (var i = 0; i < n; i++) {
+    var nextIdx = (i + 1) % n;
+    shoelace += points[i][0] * points[nextIdx][1] - points[nextIdx][0] * points[i][1];
+  }
+  var winding = shoelace >= 0 ? 1 : -1;
+
+  var inliers = [];
+  for (var i = 0; i < n; i++) {
+    var prev = points[(i - 1 + n) % n];
+    var curr = points[i];
+    var next = points[(i + 1) % n];
+
+    var v1x = curr[0] - prev[0];
+    var v1y = curr[1] - prev[1];
+    var v2x = next[0] - curr[0];
+    var v2y = next[1] - curr[1];
+
+    var len1 = Math.sqrt(v1x * v1x + v1y * v1y) || 1e-6;
+    var len2 = Math.sqrt(v2x * v2x + v2y * v2y) || 1e-6;
+
+    var cross = ((v1x * v2y - v1y * v2x) / (len1 * len2)) * winding;
+    var dot = (v1x * v2x + v1y * v2y) / (len1 * len2);
+
+    var isStraight = Math.abs(cross) < 0.08 && dot > 0.96;
+    var isConcave = cross < -0.05;
+
+    if (!isStraight && !isConcave) {
+      inliers.push(curr);
+    }
+  }
+
+  return inliers.length >= 6 ? inliers : points;
+}
+
+function _fitPhantomEllipseForSelection(shapeData) {
+  if (!shapeData || !shapeData.bounds) return null;
+  var bounds = shapeData.bounds;
+  var width = bounds.width;
+  var height = bounds.height;
+  if (width <= 0 || height <= 0) return null;
+
+  if (_isRectangularShapeES3(shapeData)) {
+    return {
+      pixelOffsetX: 0,
+      pixelOffsetY: 0,
+      isCut: false,
+    };
+  }
+
+  var robust = _analyzeMangaBalloonGeometryES3(shapeData);
+  if (!robust) return null;
+
+  var polygons = shapeData.polygons || [];
+  var points = [];
+
+  if (polygons.length > 0) {
+    for (var p = 0; p < polygons.length; p++) {
+      if (polygons[p].length >= points.length) {
+        points = polygons[p];
+      }
+    }
+  } else if (shapeData.rows && shapeData.rows.length >= 6) {
+    var rows = shapeData.rows;
+    for (var i = 0; i < rows.length; i++) {
+      points.push([bounds.left + bounds.width * rows[i].left, bounds.top + bounds.height * rows[i].y]);
+    }
+    for (var i = rows.length - 1; i >= 0; i--) {
+      points.push([bounds.left + bounds.width * rows[i].right, bounds.top + bounds.height * rows[i].y]);
+    }
+  }
+
+  var ellipse = null;
+  if (points.length >= 6) {
+    var intact = _extractIntactArcPointsES3(points);
+    if (intact.length >= 5) {
+      ellipse = _fitEllipseDirectES3(intact);
+    }
+  }
+
+  var finalOffsetX = robust.pixelOffsetX / width;
+  var finalOffsetY = robust.pixelOffsetY / height;
+
+  if (ellipse) {
+    var maxSpan = Math.max(width, height);
+    var dx = ellipse.centerX - bounds.xMid;
+    var dy = ellipse.centerY - bounds.yMid;
+    var distFromCenter = Math.sqrt(dx * dx + dy * dy);
+    var aspectRatio = ellipse.a / (ellipse.b || 1);
+    if (distFromCenter < maxSpan * 1.2 && aspectRatio <= 3.5 && aspectRatio >= 0.28) {
+      var ellOffsetX = Math.max(-0.35, Math.min(0.35, dx / width));
+      var ellOffsetY = Math.max(-0.35, Math.min(0.35, dy / height));
+      finalOffsetX = ellOffsetX;
+      finalOffsetY = ellOffsetY;
+    }
+  }
+
+  return {
+    pixelOffsetX: finalOffsetX * width,
+    pixelOffsetY: finalOffsetY * height,
+    isCut: robust.isCut,
+  };
 }
 
 function _alignCurrentTextLayerToSelection() {
@@ -1647,42 +2221,82 @@ function _alignCurrentTextLayerToSelection() {
     return "layer";
   }
 
-  var selection = _checkSelection({ adaptiveOpen: true });
-  if (selection.error) {
-    if (selection.error === "noSelection") {
-      // Deterministic first: center on the bubble shape layer that sits
-      // below the text layer. The magic wand (pixel sampling of the merged
-      // image) depends on fill colors, bubble tails and anti-aliasing, so it
-      // lands the text left or right of the true bubble center — it stays
-      // only as the last resort for bubbles that are not shape layers.
-      var bubbleBounds = _findShapeLayerBoundsBelowTextLayer();
-      if (bubbleBounds) {
-        selection = bubbleBounds;
-      } else {
-        _createMagicWandSelection(20);
-        selection = _checkSelection({ adaptiveOpen: true });
+  var activeLayer = null;
+  var wasVisible = true;
+  try {
+    activeLayer = app.activeDocument.activeLayer;
+    wasVisible = activeLayer.visible;
+  } catch (visReadErr) {}
+
+  var selection = null;
+  try {
+    // 1. Temporarily hide the text layer so pixel wand and shape sampling sees ONLY
+    // the clean balloon without any text glyphs inside interfering with the selection/shape!
+    if (activeLayer && wasVisible) {
+      try {
+        activeLayer.visible = false;
+      } catch (hideErr) {}
+    }
+
+    selection = _checkSelection({ adaptiveOpen: true });
+    if (selection.error) {
+      if (selection.error === "noSelection") {
+        var bubbleBounds = _findShapeLayerBoundsBelowTextLayer();
+        if (bubbleBounds) {
+          selection = bubbleBounds;
+        } else {
+          _createMagicWandSelection(20);
+          selection = _checkSelection({ adaptiveOpen: true });
+        }
+      }
+      if (selection.error) {
+        if (activeLayer && wasVisible) {
+          try { activeLayer.visible = true; } catch (restoreVisErr) {}
+        }
+        return selection.error;
       }
     }
-    if (selection.error) {
-      return selection.error;
+
+    var wasPoint = _textLayerIsPointText();
+    var bounds = _getCurrentTextLayerBounds();
+
+    if (state.resize && !wasPoint) {
+      var dimensions = _calculateSelectionDimensions(selection, state.padding);
+      _setTextBoxSize(dimensions.width, dimensions.height);
+      var textBounds = _getCurrentTextLayerBounds();
+      _resizeTextBoxToContent(dimensions.width, textBounds);
+      bounds = _getCurrentTextLayerBounds();
+    }
+
+    var phantomOffsetX = Number(state.phantomOffsetX) || 0;
+    var phantomOffsetY = Number(state.phantomOffsetY) || 0;
+    if (phantomOffsetX === 0 && phantomOffsetY === 0) {
+      try {
+        var shape = _sampleSelectionShapeViaPath(selection, 17, false);
+        if (shape) {
+          var phantom = _fitPhantomEllipseForSelection(shape);
+          if (phantom) {
+            phantomOffsetX = phantom.pixelOffsetX;
+            phantomOffsetY = phantom.pixelOffsetY;
+          }
+        }
+      } catch (alignPhantomError) {}
+    }
+
+    _deselect();
+    _positionLayerWithinSelection(selection, bounds, phantomOffsetX, phantomOffsetY);
+    if (wasPoint) {
+      _changeToPointText();
+    }
+  } finally {
+    // 2. Restore layer visibility
+    if (activeLayer && wasVisible) {
+      try {
+        activeLayer.visible = true;
+      } catch (restoreVisErr) {}
     }
   }
-  var wasPoint = _textLayerIsPointText();
-  var bounds = _getCurrentTextLayerBounds();
 
-  if (state.resize && !wasPoint) {
-    var dimensions = _calculateSelectionDimensions(selection, state.padding);
-    _setTextBoxSize(dimensions.width, dimensions.height);
-    var textBounds = _getCurrentTextLayerBounds();
-    _resizeTextBoxToContent(dimensions.width, textBounds);
-    bounds = _getCurrentTextLayerBounds();
-  }
-
-  _deselect();
-  _positionLayerWithinSelection(selection, bounds, state.phantomOffsetX);
-  if (wasPoint) {
-    _changeToPointText();
-  }
   return "";
 }
 
@@ -2374,6 +2988,7 @@ function alignTextLayerToSelection(data) {
   state.resize = !!data.resizeTextBox;
   state.padding = data.padding || 0;
   state.phantomOffsetX = Number(data && data.phantomOffsetX) || 0;
+  state.phantomOffsetY = Number(data && data.phantomOffsetY) || 0;
   state.result = "";
   app.activeDocument.suspendHistory("TyperTools Align", "_alignTextLayerToSelection()");
   return state.result;
@@ -2515,7 +3130,7 @@ function _readPathPolygons(pathItem) {
     if (count < 3) continue;
     // On noisy outlines (wand caught screentone) the point count explodes:
     // skip curve flattening there, the anchors alone are dense enough
-    var flattenSteps = count > 500 ? 1 : 6;
+    var flattenSteps = count > 300 ? 1 : 2;
     var poly = [];
     for (var i = 0; i < count; i++) {
       var current = points[i];
@@ -2691,18 +3306,21 @@ function _sampleSelectionShapeViaPath(bounds, sampleCount, restoreSelection) {
   if ((_hostState.pathScanFails || 0) >= 3) {
     var now = new Date().getTime();
     if (now - (_hostState.pathScanBackoffAt || 0) < _PATH_SCAN_RETRY_MS) return null;
-    // Cooldown elapsed: allow one probe. A failure re-arms the back-off.
     _hostState.pathScanFails = 2;
   }
   var doc = app.activeDocument;
-  // Never clobber a work path the user is keeping around
   if (_findWorkPath(doc)) return null;
-  var tempChannel = _createTempSelectionChannel(doc);
-  if (!tempChannel) return null;
+
+  var tempChannel = null;
+  if (restoreSelection) {
+    tempChannel = _createTempSelectionChannel(doc);
+    if (!tempChannel) return null;
+  }
+
   var polygons = null;
   var failure = "";
   try {
-    _makeWorkPathFromSelection(2.0);
+    _makeWorkPathFromSelection(3.0);
   } catch (makeError) {
     failure = "make:" + String(makeError.message || makeError);
   }
@@ -2732,16 +3350,18 @@ function _sampleSelectionShapeViaPath(bounds, sampleCount, restoreSelection) {
   } else if (!failure) {
     failure = "noPolygons";
   }
-  // The conversion consumed the selection: bring it back whenever the caller
-  // wants it or the legacy fallback is about to need it
-  if (restoreSelection || !rows) {
+
+  if (tempChannel) {
+    if (restoreSelection || !rows) {
+      try {
+        doc.selection.load(tempChannel);
+      } catch (loadError) {}
+    }
     try {
-      doc.selection.load(tempChannel);
-    } catch (loadError) {}
+      tempChannel.remove();
+    } catch (removeError) {}
   }
-  try {
-    tempChannel.remove();
-  } catch (removeError) {}
+
   if (!rows) {
     _hostState.pathScanFails = (_hostState.pathScanFails || 0) + 1;
     if (_hostState.pathScanFails >= 3) {
@@ -2756,6 +3376,7 @@ function _sampleSelectionShapeViaPath(bounds, sampleCount, restoreSelection) {
     scan: "path",
     bounds: bounds,
     rows: rows,
+    polygons: polygons,
     fallback: false,
   };
 }
@@ -2785,6 +3406,7 @@ function getCurrentSelectionShape(data) {
   }
   out.bounds = shape.bounds;
   out.rows = shape.rows;
+  out.polygons = shape.polygons;
   out.fallback = shape.fallback;
   return jamJSON.stringify(out);
 }
@@ -2795,6 +3417,16 @@ function getCurrentSelectionShape(data) {
 function _scanActiveLayerBubble(tolerance, sampleCount) {
   return _withDialogsSuppressed(function () {
     var scanResult = null;
+    var activeLayer = null;
+    var wasVisible = true;
+    try {
+      activeLayer = app.activeDocument.activeLayer;
+      wasVisible = activeLayer.visible;
+      if (activeLayer && wasVisible) {
+        activeLayer.visible = false;
+      }
+    } catch (visErr) {}
+
     try {
       var textBounds = _getCurrentTextLayerBounds();
       _createMagicWandSelection(tolerance);
@@ -2826,6 +3458,12 @@ function _scanActiveLayerBubble(tolerance, sampleCount) {
         _sampleCurrentSelectionShape(bounds, sampleCount);
     } catch (bubbleError) {
       scanResult = null;
+    } finally {
+      if (activeLayer && wasVisible) {
+        try {
+          activeLayer.visible = true;
+        } catch (restoreVisErr) {}
+      }
     }
     try {
       _deselect();
@@ -2870,6 +3508,7 @@ function getActiveLayerBubbleShape(data) {
   }
   out.bounds = result.bounds;
   out.rows = result.rows;
+  out.polygons = result.polygons;
   out.fallback = result.fallback;
   return jamJSON.stringify(out);
 }

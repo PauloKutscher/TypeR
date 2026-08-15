@@ -449,6 +449,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
               width: data.bounds.width,
               height: data.bounds.height,
               phantomOffsetX: geometry ? geometry.offsetX * data.bounds.width : 0,
+              phantomOffsetY: geometry ? geometry.offsetY * data.bounds.height : 0,
               source: "selection",
             });
           } catch (error) {}
@@ -513,6 +514,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                 width: data.bounds.width,
                 height: data.bounds.height,
                 phantomOffsetX: geometry ? geometry.offsetX * data.bounds.width : 0,
+                phantomOffsetY: geometry ? geometry.offsetY * data.bounds.height : 0,
                 source: "bubble",
               };
             })();
@@ -1026,11 +1028,14 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     const phantomOffsetX = geometry
       ? geometry.offsetX * (inlineSelectionShape.width || 0)
       : (inlineSelectionShape?.phantomOffsetX || 0);
+    const phantomOffsetY = geometry
+      ? (geometry.offsetY || 0) * (inlineSelectionShape.height || 0)
+      : (inlineSelectionShape?.phantomOffsetY || 0);
     alignTextLayerToSelection(context.state.resizeTextBoxOnCenter, context.state.internalPadding || 0, () => {
       if (context.state.multiBubbleMode && (context.state.storedSelections || []).length > 0) {
         resetStoredSelections(true);
       }
-    }, phantomOffsetX);
+    }, phantomOffsetX, phantomOffsetY);
   }, [context.state, inlineSelectionShape, resetStoredSelections, textShapeREngine]);
 
   const handleDecrease = React.useCallback(() => {

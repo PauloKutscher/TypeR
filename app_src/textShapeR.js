@@ -1,4 +1,5 @@
 import defaultTextShapeRTuning from "./textShapeRDefaultTuning.json";
+import { reconstructPhantomBalloon } from "./phantomEllipse";
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const VOWELS = "aeiouyAEIOUY\u00e0\u00e2\u00e4\u00e9\u00e8\u00ea\u00eb\u00ee\u00ef\u00f4\u00f6\u00f9\u00fb\u00fc\u00c0\u00c2\u00c4\u00c9\u00c8\u00ca\u00cb\u00ce\u00cf\u00d4\u00d6\u00d9\u00db\u00dc";
@@ -1298,8 +1299,30 @@ const detectCutRun = (rows, side, minRun = 4, minR2 = 0.985) => {
 
 const getShapeProfileGeometry = (shapeProfile) => {
   const rows = normalizeShapeRows(shapeProfile);
-  if (!rows.length) return { rows, phantomRows: rows, centerX: 0.5, offsetX: 0, hasCompletion: false };
+  if (!rows.length) {
+    return { rows, phantomRows: rows, centerX: 0.5, centerY: 0.5, offsetX: 0, offsetY: 0, hasCompletion: false };
+  }
 
+  // 1. Attempt full 2D phantom ellipse reconstruction if polygon / bounds data permits
+  if (shapeProfile && (shapeProfile.polygons || shapeProfile.bounds)) {
+    const phantom = reconstructPhantomBalloon(shapeProfile);
+    if (phantom && phantom.hasCompletion) {
+      return {
+        rows,
+        phantomRows: phantom.phantomRows || rows,
+        centerX: phantom.centerX,
+        centerY: phantom.centerY,
+        offsetX: phantom.offsetX,
+        offsetY: phantom.offsetY,
+        phantomWidth: phantom.phantomWidth,
+        phantomHeight: phantom.phantomHeight,
+        ellipse: phantom.ellipse,
+        hasCompletion: true,
+      };
+    }
+  }
+
+  // 2. Fallback to classic 1D scanline symmetry fit
   const cutLeft = detectCutRun(rows, "left");
   const cutRight = detectCutRun(rows, "right");
   const cutYs = new Set([
@@ -1310,7 +1333,7 @@ const getShapeProfileGeometry = (shapeProfile) => {
   // One healthy side is required for a mirror. If both sides are straight,
   // there is no reliable information with which to invent the hidden shape.
   if (!healthy.length || (!!cutLeft === !!cutRight)) {
-    return { rows, phantomRows: rows, centerX: 0.5, offsetX: 0, hasCompletion: false };
+    return { rows, phantomRows: rows, centerX: 0.5, centerY: 0.5, offsetX: 0, offsetY: 0, hasCompletion: false };
   }
 
   const centers = healthy.map((row) => (row.left + row.right) / 2).sort((a, b) => a - b);
@@ -1326,7 +1349,9 @@ const getShapeProfileGeometry = (shapeProfile) => {
     rows,
     phantomRows,
     centerX,
+    centerY: 0.5,
     offsetX: centerX - 0.5,
+    offsetY: 0,
     hasCompletion: true,
   };
 };
