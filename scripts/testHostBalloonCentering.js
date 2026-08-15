@@ -77,8 +77,14 @@ assert.match(
 );
 assert.match(
   hostSource,
-  /function _getCurrentRenderedTextBounds\(\)[\s\S]*?rasterize\(RasterizeType\.TEXTCONTENTS\)/,
-  "Positioning must prefer exact rasterized ink bounds for wrapped glyphs"
+  /function _createTextLayersInStoredSelections\(\)[\s\S]*?phantomOffsetX[\s\S]*?phantomOffsetY[\s\S]*?useSafetyMargin[\s\S]*?_positionLayerWithinSelection\(selection, bounds, phantomOffsetX, phantomOffsetY, useSafetyMargin\)/,
+  "Multi-bubble batch paste must apply geometric offsets and strict safety margin checks"
+);
+assert.match(
+  hostSource,
+  /function getSelectionChanged\(\)[\s\S]*?phantomOffsetX[\s\S]*?phantomOffsetY[\s\S]*?isCut[\s\S]*?isRectangular/,
+  "Selection capture must sample and store geometric analysis for each selection"
 );
 
 console.log("host balloon centering tests passed");
+

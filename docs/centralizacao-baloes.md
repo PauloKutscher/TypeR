@@ -324,7 +324,6 @@ Esses testes não substituem um teste visual dentro do Photoshop. Eles confirmam
 | Prioridade | Limitação | Efeito provável |
 |---|---|---|
 | Média | A rota de criação direta de novo layer (`_createTextLayerInSelection`) usa abertura adaptativa padrão em vez da geometria já pré-calculada pelo painel. | O quadro usado para criar o texto a partir do zero pode diferir ligeiramente da geometria amostrada antes. |
-| Média | A rota de múltiplas seleções armazenadas (batch) ainda não transporta os contornos individuais por seleção. | No modo batch, balões cortados são posicionados pelo centro geométrico retangular da seleção. |
 | Baixa | Host e painel mantêm implementações paralelas da análise geométrica (JS moderno vs ExtendScript ES3). | Exige que qualquer nova fórmula seja mantida sincronizada nos dois arquivos (`phantomEllipse.js` e `host.js`). |
 
 ### 11.3 Status das melhorias
@@ -334,6 +333,7 @@ Esses testes não substituem um teste visual dentro do Photoshop. Eles confirmam
 - **Diagnóstico em tempo real (antigo P2):** Implementado no componente `BalloonCenteringDebug.jsx`, ativado nas preferências e alimentado tanto pelo botão quanto pelo atalho `WIN + ALT`.
 - **Desacoplamento e blindagem de balões intactos:** Ajuste dos limiares de corte (35% de linhas, largura substancial e desacoplamento de eixos horizontal/vertical).
 - **Margem de segurança condicionada:** `useSafetyMargin = false` ($0\text{ px}$) em balões intactos e retângulos.
+- **Geometria e centralização no modo batch / Multi-Bubble:** O monitor de seleções agora analisa e armazena a geometria, offset de corte e identificação de retângulos/intactos para cada balão do lote (`_createTextLayersInStoredSelections`), aplicando a mesma precisão geométrica em massa.
 - **Eliminação de bloqueios de inicialização e loops de histórico:** WorkPaths limpos preventivamente e histórico restaurado após os scans.
 
 #### Itens descartados / não necessários
@@ -344,9 +344,8 @@ Esses testes não substituem um teste visual dentro do Photoshop. Eles confirmam
 #### Próximos passos e melhorias futuras recomendadas
 
 - **P0 — Validação prática no fluxo de trabalho:** Uso diário no Photoshop com páginas reais de mangás/quadrinhos para avaliar o resultado visual em balões ovais, caudas, cortes na borda e caixas de narração.
-- **P1 — Levar a geometria para o modo batch:** Fazer o armazenamento de seleções salvar também o contorno amostrado de cada seleção para que a criação em lote também aplique a reconstrução de corte.
 - **P1 — Unificar o contrato na criação direta de layer:** Fazer a criação de um novo texto a partir do zero consultar a mesma geometria já detectada pelo painel.
 
 ## 12. Conclusão
 
-A centralização atual alcançou estabilidade, robustez matemática e transparência diagnóstica. Balões intactos e caixas retangulares mantêm alinhamento exato pelo centro literal sem margem artificial, balões cortados são corrigidos com segurança e o atalho de teclado opera com a mesma precisão do painel. As melhorias futuras concentram-se na expansão dessa precisão para a rota de criação em lote (batch).
+A centralização atual alcançou estabilidade, robustez matemática, paridade no modo Multi-Bubble em lote e transparência diagnóstica. Balões intactos e caixas retangulares mantêm alinhamento exato pelo centro literal sem margem artificial, balões cortados são corrigidos com segurança e o atalho de teclado opera com a mesma precisão do painel.

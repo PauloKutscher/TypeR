@@ -940,8 +940,8 @@ function _positionLayerWithinSelection(selection, bounds, phantomOffsetX, phanto
 
   // Only incomplete/cut balloons need a safety margin. Rectangular and intact
   // balloons must use the literal geometric center, without an artificial inset.
-  var marginX = useSafetyMargin === false ? 0 : Math.min(selection.width * 0.05, Math.max(0, (selection.width - bounds.width) / 2));
-  var marginY = useSafetyMargin === false ? 0 : Math.min(selection.height * 0.05, Math.max(0, (selection.height - bounds.height) / 2));
+  var marginX = useSafetyMargin === true ? Math.min(selection.width * 0.05, Math.max(0, (selection.width - bounds.width) / 2)) : 0;
+  var marginY = useSafetyMargin === true ? Math.min(selection.height * 0.05, Math.max(0, (selection.height - bounds.height) / 2)) : 0;
 
   var minXMid = selection.left + marginX + bounds.width / 2;
   var maxXMid = selection.right - marginX - bounds.width / 2;
@@ -1798,14 +1798,19 @@ function _createTextLayerInSelection() {
 
   var phantomOffsetX = state.data && Number(state.data.phantomOffsetX) || 0;
   var phantomOffsetY = state.data && Number(state.data.phantomOffsetY) || 0;
+  var useSafetyMargin = false;
   if (phantomOffsetX === 0 && phantomOffsetY === 0) {
     try {
       var shape = _sampleSelectionShapeViaPath(selection, 21, false);
       if (shape) {
-        var phantom = _fitPhantomEllipseForSelection(shape);
-        if (phantom) {
-          phantomOffsetX = phantom.pixelOffsetX;
-          phantomOffsetY = phantom.pixelOffsetY;
+        var isRect = _isRectangularShapeES3(shape);
+        if (!isRect) {
+          var phantom = _fitPhantomEllipseForSelection(shape);
+          if (phantom && phantom.isCut === true) {
+            phantomOffsetX = phantom.pixelOffsetX;
+            phantomOffsetY = phantom.pixelOffsetY;
+            useSafetyMargin = true;
+          }
         }
       }
     } catch (createPhantomError) {}
@@ -1815,7 +1820,8 @@ function _createTextLayerInSelection() {
     selection,
     bounds,
     phantomOffsetX,
-    phantomOffsetY
+    phantomOffsetY,
+    useSafetyMargin
   );
   state.result = "";
 }
@@ -4236,16 +4242,44 @@ function getSelectionChanged() {
 
     var multiResults = [];
     for (var payloadIndex = 0; payloadIndex < payloadBounds.length; payloadIndex++) {
+      var currentPayload = payloadBounds[payloadIndex];
+      var phantomOffsetX = 0;
+      var phantomOffsetY = 0;
+      var isCut = false;
+      var isRectangular = false;
+      try {
+        var sampled = _sampleSelectionShapeViaPath(currentPayload, 21, true);
+        if (sampled && sampled.rows && sampled.rows.length > 0) {
+          isRectangular = _isRectangularShapeES3({ bounds: currentPayload, rows: sampled.rows, polygons: sampled.polygons });
+          if (!isRectangular) {
+            var phantom = _fitPhantomEllipseForSelection({
+              bounds: currentPayload,
+              rows: sampled.rows,
+              polygons: sampled.polygons,
+            });
+            if (phantom && phantom.isCut === true) {
+              phantomOffsetX = phantom.pixelOffsetX || 0;
+              phantomOffsetY = phantom.pixelOffsetY || 0;
+              isCut = true;
+            }
+          }
+        }
+      } catch (err) {}
+
       multiResults.push({
         shiftKey: shiftPressed,
-        top: payloadBounds[payloadIndex].top,
-        left: payloadBounds[payloadIndex].left,
-        right: payloadBounds[payloadIndex].right,
-        bottom: payloadBounds[payloadIndex].bottom,
-        width: payloadBounds[payloadIndex].width,
-        height: payloadBounds[payloadIndex].height,
-        xMid: payloadBounds[payloadIndex].xMid,
-        yMid: payloadBounds[payloadIndex].yMid,
+        top: currentPayload.top,
+        left: currentPayload.left,
+        right: currentPayload.right,
+        bottom: currentPayload.bottom,
+        width: currentPayload.width,
+        height: currentPayload.height,
+        xMid: currentPayload.xMid,
+        yMid: currentPayload.yMid,
+        phantomOffsetX: phantomOffsetX,
+        phantomOffsetY: phantomOffsetY,
+        isCut: isCut,
+        isRectangular: isRectangular,
       });
     }
 
@@ -4321,8 +4355,13 @@ function _createTextLayersInStoredSelections() {
       bounds = _getCurrentTextLayerBounds();
       bounds = _getCurrentRenderedTextBounds() || bounds;
 
-      // Position the layer inside the stored selection.
-      _positionLayerWithinSelection(selection, bounds);
+      // Position the layer inside the stored selection with exact centering rules.
+      var phantomOffsetX = Number(selection.phantomOffsetX) || 0;
+      var phantomOffsetY = Number(selection.phantomOffsetY) || 0;
+      var isRect = selection.isRectangular === true;
+      var isCut = selection.isCut === true || selection.hasCompletion === true;
+      var useSafetyMargin = !isRect && isCut;
+      _positionLayerWithinSelection(selection, bounds, phantomOffsetX, phantomOffsetY, useSafetyMargin);
     } catch (e) {
       state.result = "scriptError: " + (e && e.message ? e.message : e);
       return;
