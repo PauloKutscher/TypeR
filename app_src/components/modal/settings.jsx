@@ -92,9 +92,13 @@ const SettingsModal = React.memo(function SettingsModal() {
     tabs: state.tabs,
     textShapeRTuning: state.textShapeRTuning,
     styles: state.styles,
+    balloonCenteringDebug: state.balloonCenteringDebug,
   }));
   const [activeTab, setActiveTab] = React.useState("general");
   const [perfDebug, setPerfDebug] = React.useState(isPerfDebugEnabled);
+  const [balloonCenteringDebug, setBalloonCenteringDebug] = React.useState(
+    context.state.balloonCenteringDebug === true
+  );
   const [pastePointText, setPastePointText] = React.useState(context.state.pastePointText ? "1" : "");
   const [ignoreLinePrefixes, setIgnoreLinePrefixes] = React.useState(
     context.state.ignoreLinePrefixes.join("\n")
@@ -803,6 +807,9 @@ const SettingsModal = React.memo(function SettingsModal() {
     if (multiTabEnabled !== (context.state.multiTabEnabled !== false)) {
       context.dispatch({ type: "setMultiTabEnabled", value: multiTabEnabled });
     }
+    if (balloonCenteringDebug !== (context.state.balloonCenteringDebug === true)) {
+      context.dispatch({ type: "setBalloonCenteringDebug", value: balloonCenteringDebug });
+    }
     // Themes, background image and page line color are not part of the draft:
     // they are applied and persisted as soon as they change.
     const layoutToSave = buildUiLayoutToSave();
@@ -1061,6 +1068,13 @@ const SettingsModal = React.memo(function SettingsModal() {
   // storage, so it can be switched on even to diagnose the storage itself
   const changePerfDebug = (e) => {
     setPerfDebug(setPerfDebugEnabled(e.target.checked));
+  };
+
+  const changeBalloonCenteringDebug = (e) => {
+    const val = !!e.target.checked;
+    setBalloonCenteringDebug(val);
+    setEdited(true);
+    context.dispatch({ type: "setBalloonCenteringDebug", value: val });
   };
 
   const showPerfReport = () => {
@@ -1981,6 +1995,13 @@ const SettingsModal = React.memo(function SettingsModal() {
             <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupDiagnostics || "Diagnostics"}</div>
               <div className="settings-checkbox-grid">
+                {renderToggle(
+                  balloonCenteringDebug,
+                  changeBalloonCenteringDebug,
+                  locale.settingsBalloonCenteringDebugLabel || "Diagnóstico de centralização",
+                  locale.settingsBalloonCenteringDebugHint ||
+                    "Exibe o painel de diagnóstico com limites, 21 scans, análise geométrica e medição de texto."
+                )}
                 {renderToggle(
                   perfDebug,
                   changePerfDebug,

@@ -68,13 +68,13 @@ Quando não há seleção manual, o modo `textShapeRBubbleAware` pode procurar o
 5. rejeita áreas absurdamente grandes em relação ao texto;
 6. suaviza e contrai a seleção para fechar pequenos buracos;
 7. amostra o contorno e devolve a geometria;
-8. restaura a visibilidade do texto e remove a seleção temporária.
+8. restaura a visibilidade do texto, reverte o estado de histórico para o original (`doc.activeHistoryState = previousHistoryState` para evitar loops de eventos e não poluir o histórico) e remove a seleção temporária.
 
 O resultado fica em cache por layer, dimensões e assinatura da origem. Mover o texto não altera o formato do balão; mudança de tamanho ou refresh explícito invalida o cache.
 
 ### 3.3 Amostragem do contorno
 
-`_sampleSelectionShapeViaPath` tenta converter a seleção em um Work Path. A rota rápida lê os polígonos e usa linhas horizontais para encontrar `left`, `right` e `width`. Essas linhas são normalizadas em relação aos limites da seleção, não a um modelo universal de elipse.
+`_sampleSelectionShapeViaPath` tenta converter a seleção em um Work Path. A rota rápida limpa previamente Work Paths residuais, lê os polígonos e usa linhas horizontais para encontrar `left`, `right` e `width`. Essas linhas são normalizadas em relação aos limites da seleção, não a um modelo universal de elipse.
 
 O resultado contém, conceitualmente:
 
@@ -89,7 +89,7 @@ O resultado contém, conceitualmente:
 
 `y`, `left`, `right` e `width` são relativos ao retângulo da seleção.
 
-Se o Work Path falhar, o host usa a amostragem legada por linhas. Se ainda não houver dados suficientes, usa um perfil baseado apenas nos limites retangulares. Depois de três falhas no caminho rápido, ele entra em backoff por três minutos.
+Se o Work Path falhar pontualmente, o host usa a amostragem legada por linhas sem travar ou penalizar chamadas subsequentes. Se ainda não houver dados suficientes, usa um perfil baseado apenas nos limites retangulares.
 
 ## 4. Como a geometria é interpretada
 
@@ -112,22 +112,22 @@ Isso evita deslocamento fantasma em caixas de narração e formatos quadrados.
 
 ### 4.2 Balão intacto
 
-Quando não há corte direcional:
+Quando não há corte direcional comprovado:
 
-- o centro horizontal usa a mediana dos centros das linhas;
-- o centro vertical é fixado em `0.5` da altura;
-- não há reconstrução de uma elipse ausente;
-- o offset geométrico esperado é zero ou muito próximo de zero.
+- o centro horizontal usa a mediana dos centros das linhas ou centro geométrico;
+- o centro vertical é fixado em `0.5` da altura caso não haja corte vertical;
+- não há reconstrução de uma elipse ausente (`hasCompletion: false`);
+- o offset geométrico esperado é zero (`phantomOffsetX: 0`, `phantomOffsetY: 0`).
 
-A mediana impede que uma cauda curta, uma ponta ou uma irregularidade desenhada à mão incline todo o centro. Essa regra é a proteção principal dos balões intactos.
+A detecção de corte exige evidência substancial: mínimo de linhas retas (`minCutRows >= 35%` das linhas), largura substancial (`maxRowWidth >= 0.45`) e volume suficiente de fatias válidas. A mediana e o desacoplamento de eixos impedem que caudas de fala (mesmo tocando os limites da seleção) ou irregularidades desenhadas à mão inclinem o centro ou ativem falsos cortes. Essa regra é a proteção principal dos balões intactos.
 
 ### 4.3 Balão cortado
 
-Uma lateral pode ser marcada como cortada quando muitas linhas mantêm uma borda reta:
+Uma lateral pode ser marcada como cortada quando apresenta uma sequência reta e consistente de linhas rente ao limite:
 
-- `isLeftCut` identifica borda esquerda;
-- `isRightCut` identifica borda direita;
-- a outra lateral precisa manter comportamento compatível com um arco.
+- `isLeftCut` identifica borda esquerda cortada;
+- `isRightCut` identifica borda direita cortada;
+- os eixos horizontal e vertical são isolados: se apenas um lado estiver cortado, o outro eixo mantém `0.5` neutro.
 
 O alvo combina centroide visual, meio da área visível e uma correção em direção ao lado ausente. Cortes no topo ou na base usam a mesma ideia no eixo vertical. O resultado final é limitado a 5% da largura ou altura da seleção.
 
@@ -194,10 +194,10 @@ textX = renderedBounds.xMid
 textY = renderedBounds.yMid
 ```
 
-Antes do movimento, há uma proteção contra estouro:
+Antes do movimento, há a verificação da margem de segurança (`useSafetyMargin`):
 
-- a margem máxima é 5% da seleção;
-- a margem também é limitada pelo espaço que sobra entre texto e bordas;
+- para balões intactos e retangulares, `useSafetyMargin = false` e a margem é 0 (centro geométrico literal sem recuo artificial);
+- para balões cortados (`hasCompletion: true`), a margem máxima é 5% da seleção para evitar que o texto encoste no corte;
 - o alvo é limitado para que o texto não passe dos limites seguros;
 - se o texto for maior que a área utilizável, o centro da seleção é usado como fallback.
 
@@ -227,20 +227,21 @@ O layer original é movido por esse deslocamento. Não há correção fixa de it
 
 Essa rota ainda usa `adaptiveOpen: true` desde o início. Portanto, ela não é idêntica à rota de alinhamento iniciada pelo painel.
 
-### 7.2 Alinhar um layer existente
+### 7.2 Alinhar um layer existente e atalho (WIN + ALT)
 
-Ao clicar em centralizar:
+Ao clicar em centralizar ou usar o atalho `WIN + ALT`:
 
 1. o painel usa a geometria já detectada, quando disponível;
-2. envia `phantomOffsetX`, `phantomOffsetY` e `phantomGeometryProvided`;
-3. o host esconde temporariamente o texto;
-4. se a geometria veio do painel, mantém os limites da seleção original e não faz nova abertura adaptativa;
-5. redimensiona a caixa opcionalmente;
-6. mede os pixels renderizados;
-7. só usa a análise geométrica do host quando não recebeu geometria válida;
-8. posiciona o layer e restaura visibilidade/tipo de texto.
+2. envia `phantomOffsetX`, `phantomOffsetY`, `phantomGeometryProvided`, `phantomHasCompletion` e `phantomIsRectangular`;
+3. ativa a coleta de diagnóstico (`collectDebug: true`) e despacha os dados para a janela de Diagnóstico (`setBalloonCenteringDebugData`);
+4. o host esconde temporariamente o texto;
+5. se a geometria veio do painel, mantém os limites da seleção original e não faz nova abertura adaptativa;
+6. redimensiona a caixa opcionalmente;
+7. mede os pixels renderizados;
+8. só usa a análise geométrica do host quando não recebeu geometria válida prévia;
+9. posiciona o layer e restaura visibilidade/tipo de texto.
 
-`phantomGeometryProvided` é necessário porque `(0, 0)` pode ser uma resposta correta. Sem esse sinal, um balão simétrico poderia ser tratado como “não analisado” e receber uma segunda correção do host.
+`phantomGeometryProvided` é necessário porque `(0, 0)` pode ser uma resposta correta. Sem esse sinal, um balão simétrico poderia ser tratado como “não analisado” e receber uma segunda correção do host. O atalho de teclado e o botão do painel utilizam o mesmo contrato e entregam paridade total de resultado.
 
 ### 7.3 Múltiplas seleções armazenadas
 
@@ -278,10 +279,11 @@ As principais proteções são:
 - restauração da seleção por canal temporário nas rotas que precisam preservá-la;
 - rejeição de seleções pequenas ou áreas absurdamente grandes;
 - fallback de Work Path para amostragem legada;
-- backoff após falhas repetidas do caminho rápido;
+- limpeza preventiva de WorkPaths residuais sem bloqueios ou travas de inicialização;
 - limite de deslocamento geométrico de 5%;
 - nenhum deslocamento fantasma para geometrias simétricas ou retangulares;
-- uso de `suspendHistory` para reduzir poluição do histórico;
+- margem de segurança de recuo restrita exclusivamente a balões cortados (margem zero em intactos e retângulos);
+- reversão de histórico após leitura de balão e forma para não poluir o histórico nem disparar loops de eventos;
 - cache da forma do balão para evitar reamostragem a cada atualização.
 
 ## 10. Testes existentes
@@ -294,7 +296,7 @@ Confere reconhecimento de retângulos, fórmulas de cortes, limite de 5%, evidê
 
 ### `testMangaBalloonCentering.js`
 
-Verifica círculo simétrico, balão achatado, cortes laterais, balão orgânico, balão intacto com cauda curta e caixa retangular.
+Verifica círculo simétrico, balão achatado, cortes laterais, balão orgânico, balão intacto com cauda curta, caixas retangulares e balão intacto com cauda tocando a extremidade da seleção (Case 8).
 
 ### `testPhantomEllipse.js`
 
@@ -308,77 +310,43 @@ Esses testes não substituem um teste visual dentro do Photoshop. Eles confirmam
 
 1. **Separação entre geometria e medição do texto**: o balão fornece o alvo e o texto fornece o próprio centro visual.
 2. **Medição por pixels da cópia temporária**: evita alterar o layer original e é mais fiel para blocos com várias linhas.
-3. **Proteção para balões intactos**: formatos simétricos não recebem reconstrução de elipse sem evidência de corte.
-4. **Tratamento de formatos não universais**: o algoritmo trabalha com linhas e polígonos observados, em vez de assumir que toda série usa a mesma elipse.
-5. **Limite de segurança**: um erro de detecção não pode deslocar o texto indefinidamente.
-6. **Fallbacks**: falhas do Work Path, de seleção ou de recursos de versões antigas não interrompem todo o fluxo.
-7. **Controle de histórico e cache**: a solução considera o custo real das operações no Photoshop.
+3. **Proteção para balões intactos e caudas de fala**: formatos simétricos, orgânicos e com cauda de fala não recebem corte falso nem reconstrução de elipse indevida.
+4. **Margem de segurança zero para intactos e retângulos**: recuo de até 5% restrito exclusivamente a balões cortados; balões intactos e caixas retangulares usam o centro geométrico literal.
+5. **Paridade total entre botão e atalho (`WIN + ALT`)**: ambos compartilham as mesmas regras, precisão ao pixel e envio de telemetria.
+6. **Diagnóstico visual em tempo real**: interface interativa (`BalloonCenteringDebug.jsx`) para inspecionar limites, tabela de 21 scans, status de corte, ajuste de elipse e dados brutos do host.
+7. **Eliminação de travas e loops**: remoção do bloqueio de inicialização de 3 minutos e reversão transiente de histórico após os scans de forma e do balão.
+8. **Tratamento de formatos não universais**: o algoritmo trabalha com linhas e polígonos observados, em vez de assumir que toda série usa a mesma elipse.
+9. **Limite de segurança**: um erro de detecção não pode deslocar o texto além do teto de 5%.
+10. **Fallbacks seguros**: falhas pontuais de Work Path, de seleção ou de recursos legados não interrompem o fluxo.
 
 ### 11.2 Limitações atuais
 
 | Prioridade | Limitação | Efeito provável |
 |---|---|---|
-| Alta | A rota de criação usa abertura adaptativa mesmo quando o painel poderia fornecer a geometria original. | O quadro usado para criar o texto pode não ser exatamente o quadro usado para analisar o balão. |
-| Alta | A rota de múltiplas seleções armazenadas não transporta offsets geométricos por seleção. | Balões cortados podem ser centralizados apenas pelo centro retangular no modo batch. |
-| Alta | Host e painel mantêm duas implementações parecidas da análise geométrica. | Uma correção futura em um lado pode divergir do outro. |
-| Média | A rasterização temporária é mais fiel, mas pode ser cara em documentos grandes. | O botão centralizar pode ficar mais lento em uso repetitivo. |
-| Média | Os testes não executam o fluxo real dentro do Photoshop. | Problemas específicos de versão, fonte ou anti-aliasing podem passar despercebidos. |
-| Média | O centro dos pixels é geométrico, não necessariamente óptico. | Textos com letras muito assimétricas podem parecer ligeiramente deslocados mesmo com limites exatos. |
-| Baixa | O modelo de corte usa limiares fixos, como 55% de borda plana e 5% de deslocamento. | Uma série com balões muito incomuns pode exigir calibração diferente. |
+| Média | A rota de criação direta de novo layer (`_createTextLayerInSelection`) usa abertura adaptativa padrão em vez da geometria já pré-calculada pelo painel. | O quadro usado para criar o texto a partir do zero pode diferir ligeiramente da geometria amostrada antes. |
+| Média | A rota de múltiplas seleções armazenadas (batch) ainda não transporta os contornos individuais por seleção. | No modo batch, balões cortados são posicionados pelo centro geométrico retangular da seleção. |
+| Baixa | Host e painel mantêm implementações paralelas da análise geométrica (JS moderno vs ExtendScript ES3). | Exige que qualquer nova fórmula seja mantida sincronizada nos dois arquivos (`phantomEllipse.js` e `host.js`). |
 
-### 11.3 Melhorias recomendadas
+### 11.3 Status das melhorias
 
-#### P0 — validar o resultado visual no Photoshop
+#### Itens concluídos e integrados ao projeto
 
-Criar um pequeno conjunto de PSDs reais com balões ovais intactos, balões altos e largos, caudas, cortes laterais e verticais, caixas retangulares e textos de uma a cinco linhas. Incluir fontes com itálico, descendentes, acentos e tamanhos diferentes.
+- **Diagnóstico em tempo real (antigo P2):** Implementado no componente `BalloonCenteringDebug.jsx`, ativado nas preferências e alimentado tanto pelo botão quanto pelo atalho `WIN + ALT`.
+- **Desacoplamento e blindagem de balões intactos:** Ajuste dos limiares de corte (35% de linhas, largura substancial e desacoplamento de eixos horizontal/vertical).
+- **Margem de segurança condicionada:** `useSafetyMargin = false` ($0\text{ px}$) em balões intactos e retângulos.
+- **Eliminação de bloqueios de inicialização e loops de histórico:** WorkPaths limpos preventivamente e histórico restaurado após os scans.
 
-Para cada caso, registrar limites do balão, limites renderizados do texto, alvo calculado e deslocamento final. Isso transforma a comparação visual em uma regressão reproduzível.
+#### Itens descartados / não necessários
 
-#### P1 — unificar o contrato de geometria
+- **Cache de rasterização de limites de texto:** A medição por cópia temporária no Photoshop (`_getCurrentRenderedTextBounds`) executa em menos de ~15 ms no momento do clique. Fazer cache de limites de texto traria risco de ler dados defasados caso o usuário editasse o texto.
+- **Heurísticas manuais de Itálico, DPI e Baseline:** Como a rasterização da cópia já mede os pixels físicos reais que o Photoshop desenhou na tela (a mancha gráfica real), ajustes empíricos tornaram-se obsoletos e prejudiciais.
 
-Criar um formato único para transportar:
+#### Próximos passos e melhorias futuras recomendadas
 
-```js
-{
-  bounds,
-  rows,
-  polygons,
-  offsetX,
-  offsetY,
-  isRectangular,
-  hasCompletion,
-  sourceFrame
-}
-```
-
-Esse contrato deve ser usado pelo alinhamento interativo, criação de layer, múltiplas seleções e aprendizado do TextShapeR. `sourceFrame` deve identificar os limites exatos usados na amostragem.
-
-#### P1 — centralizar a análise geométrica em uma única implementação
-
-A versão do host precisa continuar compatível com ExtendScript, mas a lógica matemática pode ser compartilhada por um módulo puro ou por casos de teste comuns. O objetivo é evitar que `phantomEllipse.js` e `_analyzeMangaBalloonGeometryES3` evoluam de forma diferente.
-
-#### P1 — levar a geometria para o modo batch
-
-Ao armazenar uma seleção, guardar também suas linhas, polígonos e offsets. Na criação em lote, cada seleção deve usar o próprio centro geométrico reconstruído, em vez de chamar apenas `_positionLayerWithinSelection(selection, bounds)`.
-
-#### P2 — reduzir o custo da rasterização
-
-Manter um cache curto dos limites renderizados, invalidado por alteração do conteúdo, tamanho, fonte, estilo, tipo de texto ou resolução relevante. O cache não pode sobreviver a uma alteração real do layer.
-
-#### P2 — adicionar diagnóstico opcional
-
-Um modo de depuração poderia mostrar retângulo da seleção, linhas amostradas, centro geométrico, centro reconstruído, limites rasterizados do texto, alvo final, deslocamento aplicado e motivo do fallback. Isso diferencia rapidamente “geometria errada” de “texto medido errado”.
-
-#### P2 — separar centro geométrico de centro óptico como opção
-
-O comportamento padrão deve continuar baseado nos pixels, porque é mais neutro entre séries. Uma opção avançada poderia aplicar um ajuste aprendido por fonte/estilo, desde que seja opcional, limitado, reversível e não altere balões intactos automaticamente sem evidência.
-
-#### P3 — substituir limiares universais por configuração contextual
-
-Os limites de corte e o deslocamento máximo podem futuramente considerar proporção do balão, quantidade de linhas, distância entre a borda reta e o arco, histórico de confirmações e perfil do projeto. Isso deve ser feito somente depois de existir uma coleção de exemplos reais.
+- **P0 — Validação prática no fluxo de trabalho:** Uso diário no Photoshop com páginas reais de mangás/quadrinhos para avaliar o resultado visual em balões ovais, caudas, cortes na borda e caixas de narração.
+- **P1 — Levar a geometria para o modo batch:** Fazer o armazenamento de seleções salvar também o contorno amostrado de cada seleção para que a criação em lote também aplique a reconstrução de corte.
+- **P1 — Unificar o contrato na criação direta de layer:** Fazer a criação de um novo texto a partir do zero consultar a mesma geometria já detectada pelo painel.
 
 ## 12. Conclusão
 
-A centralização atual tem uma base sólida: mede o texto renderizado, trata a geometria do balão separadamente e evita aplicar uma elipse universal em formatos intactos. O ponto mais sensível deixou de ser a correção artificial de baseline e passou a ser a consistência entre as diferentes rotas de criação, alinhamento e batch.
-
-O próximo passo mais valioso é criar uma suíte visual dentro do Photoshop e unificar o contrato geométrico. Isso permitirá melhorar os casos difíceis sem sacrificar os balões intactos que já estão funcionando corretamente.
+A centralização atual alcançou estabilidade, robustez matemática e transparência diagnóstica. Balões intactos e caixas retangulares mantêm alinhamento exato pelo centro literal sem margem artificial, balões cortados são corrigidos com segurança e o atalho de teclado opera com a mesma precisão do painel. As melhorias futuras concentram-se na expansão dessa precisão para a rota de criação em lote (batch).

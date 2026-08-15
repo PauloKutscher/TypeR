@@ -124,7 +124,6 @@ const defaultUiLayout = {
     footerRepo: true,
     footerTextShapeR: true,
     footerMultiBubble: true,
-    footerBalloonDebug: true,
   },
   sizes: {
     previewHeight: 130,

@@ -1321,6 +1321,21 @@ const getShapeProfileGeometry = (shapeProfile) => {
         isRectangular: true,
       };
     }
+    if (phantom && !phantom.hasCompletion) {
+      return {
+        rows,
+        phantomRows: phantom.phantomRows || rows,
+        centerX: 0.5,
+        centerY: 0.5,
+        offsetX: 0,
+        offsetY: 0,
+        phantomWidth: phantom.phantomWidth || (shapeProfile.bounds && shapeProfile.bounds.width),
+        phantomHeight: phantom.phantomHeight || (shapeProfile.bounds && shapeProfile.bounds.height),
+        ellipse: phantom.ellipse,
+        hasCompletion: false,
+        isRectangular: false,
+      };
+    }
     if (phantom && phantom.hasCompletion) {
       return {
         rows,

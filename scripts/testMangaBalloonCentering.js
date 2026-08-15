@@ -149,4 +149,40 @@ assert.strictEqual(malformedRectRes.offsetY, 0, "Malformed rectangle must not re
 assert.strictEqual(malformedRectRes.isCut, false, "Malformed rectangle must not be treated as cut");
 console.log("✓ Case 7: Malformed rectangular path profile passed");
 
+// Case 8: Intact vertical manga balloon with a speech tail (diagnostics regression case)
+// An intact speech balloon with speech tail must never trigger isCut, hasCompletion,
+// or non-zero offsets.
+const userReportedRows = [
+  { y: 0.0000, left: 0.4478, right: 0.4495, width: 0.0017 },
+  { y: 0.0625, left: 0.4498, right: 0.4535, width: 0.0037 },
+  { y: 0.1250, left: 0.4538, right: 0.4575, width: 0.0037 },
+  { y: 0.1875, left: 0.3798, right: 0.4577, width: 0.0779 },
+  { y: 0.2500, left: 0.2286, right: 0.3709, width: 0.1424 },
+  { y: 0.3125, left: 0.0000, right: 0.2197, width: 0.2210 },
+  { y: 0.3750, left: 0.0000, right: 0.0684, width: 0.1111 },
+  { y: 0.4375, left: 0.0000, right: 0.2009, width: 0.2429 },
+  { y: 0.5000, left: 0.0000, right: 0.3750, width: 0.4043 },
+  { y: 0.5625, left: 0.3853, right: 0.5368, width: 0.1515 },
+  { y: 0.6250, left: 0.5391, right: 0.5771, width: 0.0380 },
+  { y: 0.6875, left: 0.5795, right: 0.6175, width: 0.0380 },
+  { y: 0.7500, left: 0.6198, right: 0.6578, width: 0.0380 },
+  { y: 0.8125, left: 0.6602, right: 0.6982, width: 0.0380 },
+  { y: 0.8750, left: 0.7005, right: 0.7385, width: 0.0380 },
+  { y: 0.9375, left: 0.7409, right: 0.7599, width: 0.0190 },
+  { y: 1.0000, left: 0.5000, right: 0.5000, width: 0.0000 },
+];
+const userReportedShape = {
+  bounds: { left: 660, top: 46, right: 812, bottom: 255, width: 152, height: 209, xMid: 736, yMid: 150.5 },
+  rows: userReportedRows,
+};
+const userReportedGeo = analyzeMangaBalloonGeometry(userReportedShape);
+assert.strictEqual(userReportedGeo.isCut, false, "Speech tail must not trigger isCut");
+assert.strictEqual(userReportedGeo.offsetX, 0, "Intact balloon with tail must have offsetX = 0");
+assert.strictEqual(userReportedGeo.offsetY, 0, "Intact balloon with tail must have offsetY = 0");
+const userReportedRecon = reconstructPhantomBalloon(userReportedShape);
+assert.strictEqual(userReportedRecon.hasCompletion, false, "Intact balloon with tail must have hasCompletion = false");
+assert.strictEqual(userReportedRecon.offsetX, 0, "Intact balloon with tail must have recon offsetX = 0");
+assert.strictEqual(userReportedRecon.offsetY, 0, "Intact balloon with tail must have recon offsetY = 0");
+console.log("✓ Case 8: User diagnostic speech tail balloon passed");
+
 console.log("All manga balloon centering cases passed with 100% precision!");

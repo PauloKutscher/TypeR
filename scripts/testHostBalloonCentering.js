@@ -34,7 +34,7 @@ assert.match(
 );
 assert.match(
   hostSource,
-  /var partialArcEvidence = angleCoverage < Math\.PI \* 1\.85;/,
+  /var partialArcEvidence = polygons\.length > 0 && angleCoverage < Math\.PI \* 1\.85;/,
   "Ellipse fitting must require evidence of a partial arc"
 );
 

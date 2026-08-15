@@ -385,6 +385,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   }, []);
 
   const bubbleAware = context.state.textShapeRBubbleAware === true;
+  const bubbleAwareRef = React.useRef(bubbleAware);
+  bubbleAwareRef.current = bubbleAware;
 
   const clearInlineShapeSettle = React.useCallback(() => {
     if (inlineShapeSettle.current.timer) {
@@ -462,11 +464,10 @@ const PreviewBlock = React.memo(function PreviewBlock() {
 
       // No manual selection anymore: forget any pending settle re-check
       clearInlineShapeSettle();
-
       // While several layers are selected (batch being lined up) the wand
       // would fire on an ambiguous target and churn the document: hold off
       const multiSelecting = batchSelectionRef.current.length > 1 && !batchRunRef.current;
-      if (!bubbleAware || !inlineSourceKey.current || multiSelecting) {
+      if (!bubbleAwareRef.current || !inlineSourceKey.current || multiSelecting) {
         inlineShapePending.current = false;
         inlineShapeKey.current = "";
         setInlineSelectionShape((current) => (current ? null : current));
@@ -526,7 +527,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         } catch (error) {}
       });
     });
-  }, [bubbleAware, clearInlineShapeSettle]);
+  }, [clearInlineShapeSettle]);
 
   // A Photoshop 'move' action changes history but not the text or style. Read
   // only the active layer's ID/bounds/history signature, then acknowledge that
@@ -766,7 +767,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   // Re-detect the bubble when the active layer changes or the mode toggles
   React.useEffect(() => {
     if (!context.state.inlineTextShapeR) return;
-    refreshInlineSelectionShape();
+    refreshInlineSelectionShape(true);
   }, [context.state.inlineTextShapeR, inlineLayerSource.key, bubbleAware, refreshInlineSelectionShape]);
 
   const toggleBubbleAware = React.useCallback(() => {
@@ -1357,7 +1358,12 @@ const handleAlignLayer = React.useCallback(() => {
           </button>
         </div>
         )}
-        {uiVisible.previewWidget === false ? null : context.state.inlineTextShapeR && textShapeRLearning ? (
+        {uiVisible.previewWidget === false ? null : context.state.balloonCenteringDebug && context.state.balloonCenteringDebugData ? (
+          <BalloonCenteringDebug
+            data={context.state.balloonCenteringDebugData}
+            onClose={() => context.dispatch({ type: "setBalloonCenteringDebugData", data: null })}
+          />
+        ) : context.state.inlineTextShapeR && textShapeRLearning ? (
           <div className="preview-textshaper-learning hostBgdDark" role="status" aria-live="polite">
             <span className="preview-textshaper-learning-label">
               {locale.textShapeRLearning || "Learning text shape..."}
@@ -1534,12 +1540,6 @@ const handleAlignLayer = React.useCallback(() => {
           </div>
         )}
       </div>
-      )}
-      {context.state.balloonCenteringDebug && context.state.balloonCenteringDebugData && (
-        <BalloonCenteringDebug
-          data={context.state.balloonCenteringDebugData}
-          onClose={() => context.dispatch({ type: "setBalloonCenteringDebug", value: false })}
-        />
       )}
     </React.Fragment>
   );

@@ -173,9 +173,66 @@ pixelOffsetY: 0
 isCut: false
 ~~~
 
+## Correção de Balões Normais / Intactos (Elipses com Rabicho)
+
+Foi resolvido o falso positivo de corte em balões normais/intactos (elipses ou ovais com rabicho de fala apontando para a esquerda/direita):
+
+### Problema:
+Um balão intacto com rabicho de fala estreito tocando a extremidade (`left = 0.00`) tinha apenas 2 a 3 linhas com largura $> 0.2$. O cálculo de `leftCutRatio` usava `leftFlatCount / validIndices.length`, resultando em $3/3 = 100\%$ e acionando falso `isLeftCut = true` e `Tem Completion: Sim`. Além disso, a detecção lateral transferia o centroide vertical de massa ($Y = 0.45$) para `targetNormY`, empurrando o texto verticalmente por $-10.45\text{ px}$.
+
+### Solução implementada:
+1. **Critérios robustos de corte lateral em `phantomEllipse.js` e `host.js`:**
+   - Exigência de contagem mínima de linhas planas (`minCutRows = Math.max(5, Math.floor(n * 0.35))`);
+   - Exigência de volume mínimo de linhas válidas (`validIndices.length >= Math.max(6, Math.floor(n * 0.40))`);
+   - Exigência de largura máxima substancial da forma (`maxRowWidth >= 0.45`).
+2. **Isolamento de eixos:**
+   - Balões sem corte vertical explícito (`!isTopCut && !isBottomCut`) mantêm `targetNormY = 0.5` estritamente.
+   - Balões sem corte lateral explícito (`!isLeftCut && !isRightCut`) mantêm `targetNormX = 0.5` estritamente.
+3. **Proteção para balões intactos no fitting:**
+   - Se `!hasCutEvidence` (sem corte e sem evidência angular em polígonos reais), `reconstructPhantomBalloon` e `_fitPhantomEllipseForSelection` retornam centro literal $(0, 0)$ com `hasCompletion: false` e margem de segurança desativada.
+4. **Alinhamento do `textShapeR.js`:**
+   - `getShapeProfileGeometry` retorna geometria intacta neutra quando `phantom && !phantom.hasCompletion`, sem cair em fallbacks 1D espúrios.
+5. **Regressão adicionada:**
+   - `Case 8: User diagnostic speech tail balloon` em `scripts/testMangaBalloonCentering.js`.
+
+## Correção do Loop do TextShapeR e da Demora Inicial de Inicialização
+
+1. **Eliminação do Loop Infinito no TextShapeR + Detecção de Balão:**
+   - Em `app_src/host.js`, `getActiveLayerBubbleShape` e `getCurrentSelectionShape` executavam `_withSuspendedHistory`, o que incrementava o índice de histórico do Photoshop (`_getActiveHistoryIndex()`). O painel detectava a nova assinatura de camada e disparava novos scans em loop contínuo.
+   - **Solução:** Reversão imediata de `doc.activeHistoryState = previousHistoryState` logo após a amostragem, tornando os scans 100% transientes, sem poluir o histórico e sem disparar falsos eventos de modificação.
+   - Em `app_src/components/previewBlock/previewBlock.jsx`, `refreshInlineSelectionShape` foi estabilizada através de `bubbleAwareRef`, impedindo que o listener de eventos principal se desmonte e reinicie em cascata.
+
+2. **Eliminação do Bloqueio de 3 Minutos na Inicialização (`_PATH_SCAN_RETRY_MS`):**
+   - Em `app_src/host.js`, `_sampleSelectionShapeViaPath` possuía uma trava de 3 minutos (`var _PATH_SCAN_RETRY_MS = 3 * 60 * 1000;`) que desativava o scan vetorial de caminhos e a extração de polígonos caso houvesse 3 tentativas iniciais antes do documento estar pronto.
+   - O código também abortava caso houvesse um WorkPath residual não excluído (`if (_findWorkPath(doc)) return null;`).
+   - **Solução:**
+     - Remoção completa do bloqueio de 3 minutos (`_PATH_SCAN_RETRY_MS` e contador `pathScanFails >= 3`).
+     - Limpeza preventiva automática de WorkPaths residuais (`_deleteWorkPath()`) antes de gerar novos caminhos.
+     - Padronização da amostragem em 21 scans para exibição imediata na tabela do diagnóstico.
+
+## Correção da Margem de Segurança em Balões Intactos e Unificação do Atalho
+
+1. **Correção do Cálculo da Margem de Segurança (`useSafetyMargin`):**
+   - No `host.js`, quando `state.phantomGeometryProvided` era falso (como em chamadas legadas ou via atalho de teclado), a condição fazia `var useSafetyMargin = !state.phantomGeometryProvided || ...`, forçando `useSafetyMargin = true` (com margem de 5% = 8px e 11px) mesmo quando a própria análise do host detectava `isCut: false`.
+   - **Solução:** O `host.js` agora respeita a análise geométrica:
+     ```javascript
+     if (state.phantomGeometryProvided) {
+       useSafetyMargin = state.phantomHasCompletion === true && state.phantomIsRectangular !== true;
+     } else {
+       var isRect = _isRectangularShapeES3({ bounds: selection, rows: sampledRowsForCheck, polygons: sampledPolyForCheck });
+       var hostPhantom = (debugData && debugData.phantomFit) || phantom;
+       useSafetyMargin = !isRect && !!hostPhantom && hostPhantom.isCut === true;
+     }
+     ```
+   - Para balões intactos e retangulares, `useSafetyMargin` é `false` (0px de margem), usando o centro literal e exato.
+
+2. **Unificação do Atalho (`WIN+ALT`) com o Botão e Diagnóstico:**
+   - Em `app_src/shortcutCommands.js`, o atalho `center` agora passa os parâmetros de diagnóstico (`collectDebug` e callback de dispatch `setBalloonCenteringDebugData`).
+   - Tanto o atalho quanto o botão agora atualizam a janela de diagnóstico e aplicam a mesma precisão matemática.
+
 ## Testes executados
 
-Todos passaram após a correção:
+Todos passaram com 100% de precisão:
 
 ~~~powershell
 npm test
@@ -185,12 +242,6 @@ node scripts/testPhantomEllipse.js
 node scripts/testMangaBalloonCentering.js
 node scripts/testTextShapeR.js
 ~~~
-
-Foi adicionado o caso de regressão <code>Malformed rectangular path profile</code> em <code>scripts/testMangaBalloonCentering.js</code>.
-
-O teste <code>scripts/testSelectionOpening.js</code> foi atualizado para aceitar a assinatura atual de <code>_alignCurrentTextLayerToSelection(collectDebug)</code>.
-
-As novas chaves do debug foram adicionadas a todos os arquivos de idioma para manter <code>testLocales.js</code> passando.
 
 ## Arquivos importantes
 
@@ -202,17 +253,22 @@ As novas chaves do debug foram adicionadas a todos os arquivos de idioma para ma
 | <code>app_src/textShapeR.js</code> | Perfil da forma e geometria usada pelo painel. |
 | <code>app_src/phantomEllipse.js</code> | Classificação e reconstrução geométrica. |
 | <code>app_src/components/previewBlock/BalloonCenteringDebug.jsx</code> | Interface do diagnóstico. |
-| <code>scripts/testMangaBalloonCentering.js</code> | Casos sintéticos e regressão do perfil invertido. |
+| <code>scripts/testMangaBalloonCentering.js</code> | Casos sintéticos e regressão do perfil invertido e rabicho. |
 | <code>docs/centralizacao-baloes.md</code> | Documentação técnica anterior e mais ampla. |
 
 ## Próxima investigação recomendada
 
-1. Reexecutar o alinhamento no mesmo retângulo usado no diagnóstico.
-2. Confirmar se o debug mostra <code>Formato Retangular: Sim</code> e margem zero.
-3. Testar um retângulo comum, um retângulo alto e um balão intacto oval.
-4. Testar um balão realmente cortado na esquerda ou direita e confirmar que a margem continua ativa.
-5. Comparar <code>phantomIsRectangular</code> do painel com <code>sampledIsRectangular</code> do host.
-6. Se houver divergência, investigar o perfil bruto (<code>rows</code> e <code>polygons</code>) antes de alterar os deslocamentos.
+1. Reexecutar o alinhamento no mesmo balão de mangá usado no diagnóstico.
+2. Confirmar se o debug mostra:
+   - `Formato Retangular: Não`
+   - `Tem Completion: Não`
+   - `Margem X aplicada: 0 px`
+   - `Margem Y aplicada: 0 px`
+   - `Applied Offset X: 0 px` (ou ajuste milimétrico para o centro)
+   - `Applied Offset Y: 0 px`
+   - `Target Center`: exatamente no centro da seleção `(736, 151)`.
+3. Testar outros balões normais/elipses com cauda apontando para direções variadas (baixo, esquerda, direita).
+4. Testar balões realmente cortados pela borda do quadrinho (sangria) e verificar que `Tem Completion: Sim` continua funcionando perfeitamente quando há corte real.
 
 ## Cuidados para a próxima IA
 

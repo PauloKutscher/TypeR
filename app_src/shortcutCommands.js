@@ -162,10 +162,23 @@ const shortcutCommands = [
     label: "shortcut_center",
     defaultKeys: ["WIN", "ALT"],
     repeatDelay: 0,
-    handler: (ctx) => alignTextLayerToSelection(
-      ctx.state.resizeTextBoxOnCenter,
-      ctx.state.internalPadding || 0
-    ),
+    handler: (ctx) => {
+      const collectDebug = ctx.state.balloonCenteringDebug === true;
+      alignTextLayerToSelection(
+        ctx.state.resizeTextBoxOnCenter,
+        ctx.state.internalPadding || 0,
+        () => {},
+        0,
+        0,
+        false,
+        null,
+        null,
+        collectDebug,
+        (debugData) => {
+          ctx.dispatch({ type: "setBalloonCenteringDebugData", data: debugData });
+        }
+      );
+    },
   },
   {
     id: "applyStyle",

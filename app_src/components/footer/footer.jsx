@@ -12,7 +12,6 @@ const AppFooter = React.memo(function AppFooter() {
     multiBubbleMode: state.multiBubbleMode,
     inlineTextShapeR: state.inlineTextShapeR,
     uiLayout: state.uiLayout,
-    balloonCenteringDebug: state.balloonCenteringDebug,
   }));
   const openSettings = () => {
     context.dispatch({
@@ -42,10 +41,6 @@ const AppFooter = React.memo(function AppFooter() {
 
   const toggleInlineTextShapeR = () => {
     context.dispatch({ type: "setInlineTextShapeR", value: !context.state.inlineTextShapeR });
-  };
-
-  const toggleBalloonCenteringDebug = () => {
-    context.dispatch({ type: "setBalloonCenteringDebug", value: !context.state.balloonCenteringDebug });
   };
 
   const uiVisible = context.state.uiLayout?.visible || {};
@@ -97,20 +92,6 @@ const AppFooter = React.memo(function AppFooter() {
         <span className="footer-mode-label">Multi-bubble</span>
         <span className="footer-mode-status">
           {context.state.multiBubbleMode ? (locale.multiBubbleModeOn || "ON") : (locale.multiBubbleModeOff || "OFF")}
-        </span>
-      </span>
-      )}
-      {uiVisible.footerBalloonDebug !== false && (
-      <span
-        className="link footer-mode-indicator"
-        style={{ fontSize: footerSize("balloonDebug") }}
-        onClick={toggleBalloonCenteringDebug}
-        title={locale.balloonDebugHint || "Show diagnostic panel for balloon centering geometry and text measurement"}
-      >
-        <span className={`footer-mode-dot ${context.state.balloonCenteringDebug ? "is-on" : ""}`} />
-        <span className="footer-mode-label">{locale.balloonDebugTitle || "Balloon Debug"}</span>
-        <span className="footer-mode-status">
-          {context.state.balloonCenteringDebug ? (locale.multiBubbleModeOn || "ON") : (locale.multiBubbleModeOff || "OFF")}
         </span>
       </span>
       )}

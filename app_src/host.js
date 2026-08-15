@@ -140,7 +140,6 @@ createTextLayerInSelection: {
 };
 
 // How long the fast path-based shape scan stays disabled after 3 failures
-var _PATH_SCAN_RETRY_MS = 3 * 60 * 1000;
 
 // Bubble detection and outline sampling fire dozens of selection, channel
 // and modify operations, and Photoshop records every one of them as a
@@ -1801,7 +1800,7 @@ function _createTextLayerInSelection() {
   var phantomOffsetY = state.data && Number(state.data.phantomOffsetY) || 0;
   if (phantomOffsetX === 0 && phantomOffsetY === 0) {
     try {
-      var shape = _sampleSelectionShapeViaPath(selection, 17, false);
+      var shape = _sampleSelectionShapeViaPath(selection, 21, false);
       if (shape) {
         var phantom = _fitPhantomEllipseForSelection(shape);
         if (phantom) {
@@ -1921,23 +1920,27 @@ function _analyzeMangaBalloonGeometryES3(shapeData) {
     if (Math.abs(rights[idx] - maxRight) < 0.035) rightFlatCount++;
   }
 
+  var minCutRows = Math.max(5, Math.floor(n * 0.35));
+  var hasSubstantialWidth = maxRowWidth >= 0.45;
+  var hasSubstantialValidRows = validIndices.length >= Math.max(6, Math.floor(n * 0.40));
+
   var leftCutRatio = validIndices.length ? leftFlatCount / validIndices.length : 0;
   var rightCutRatio = validIndices.length ? rightFlatCount / validIndices.length : 0;
 
-  var isLeftCut = leftCutRatio >= 0.55 && rightCutRatio < 0.4;
-  var isRightCut = rightCutRatio >= 0.55 && leftCutRatio < 0.4;
+  var isLeftCut = hasSubstantialWidth && hasSubstantialValidRows && leftFlatCount >= minCutRows && leftCutRatio >= 0.55 && rightCutRatio < 0.4;
+  var isRightCut = hasSubstantialWidth && hasSubstantialValidRows && rightFlatCount >= minCutRows && rightCutRatio >= 0.55 && leftCutRatio < 0.4;
 
   var topWidth = widths[0] || 0;
   var bottomWidth = widths[n - 1] || 0;
-  var isTopCut = topWidth > maxRowWidth * 0.65;
-  var isBottomCut = bottomWidth > maxRowWidth * 0.65;
+  var isTopCut = hasSubstantialWidth && topWidth > maxRowWidth * 0.65;
+  var isBottomCut = hasSubstantialWidth && bottomWidth > maxRowWidth * 0.65;
+  var isCut = isLeftCut || isRightCut || isTopCut || isBottomCut;
 
-  var targetNormX = visualCentroidX;
-  var targetNormY = visualCentroidY;
+  var targetNormX = 0.5;
+  var targetNormY = 0.5;
 
   var sortedMids = midpoints.slice(0).sort(function(a, b) { return a - b; });
   var medianMid = sortedMids[Math.floor(sortedMids.length / 2)];
-  var hasDirectionalCut = isLeftCut || isRightCut || isTopCut || isBottomCut;
   var visibleMidX = (minLeft + maxRight) / 2;
   if (isLeftCut && !isRightCut) {
     var cutShift = Math.min(0.12, (maxRight - minLeft) * 0.15);
@@ -1945,12 +1948,10 @@ function _analyzeMangaBalloonGeometryES3(shapeData) {
   } else if (isRightCut && !isLeftCut) {
     var cutShift = Math.min(0.12, (maxRight - minLeft) * 0.15);
     targetNormX = visualCentroidX * 0.4 + visibleMidX * 0.6 + cutShift;
-  } else if (!hasDirectionalCut) {
-    // A speech tail or small hand-drawn wobble is not a scene cut. Use the
-    // median row center so local protrusions do not tilt the whole text block.
-    targetNormX = medianMid;
-  } else {
+  } else if (isTopCut || isBottomCut) {
     targetNormX = visualCentroidX * 0.6 + medianMid * 0.4;
+  } else {
+    targetNormX = 0.5;
   }
 
   if (isBottomCut && !isTopCut) {
@@ -1958,7 +1959,7 @@ function _analyzeMangaBalloonGeometryES3(shapeData) {
   } else if (isTopCut && !isBottomCut) {
     targetNormY = visualCentroidY * 0.6 + 0.5 * 0.4 - 0.06;
   } else {
-    targetNormY = hasDirectionalCut ? visualCentroidY : 0.5;
+    targetNormY = 0.5;
   }
 
   var rawOffsetX = targetNormX - 0.5;
@@ -1966,13 +1967,13 @@ function _analyzeMangaBalloonGeometryES3(shapeData) {
 
   var maxShiftX = 0.05;
   var maxShiftY = 0.05;
-  var offsetX = Math.max(-maxShiftX, Math.min(maxShiftX, rawOffsetX));
-  var offsetY = Math.max(-maxShiftY, Math.min(maxShiftY, rawOffsetY));
+  var offsetX = isCut ? Math.max(-maxShiftX, Math.min(maxShiftX, rawOffsetX)) : 0;
+  var offsetY = isCut ? Math.max(-maxShiftY, Math.min(maxShiftY, rawOffsetY)) : 0;
 
   return {
     pixelOffsetX: offsetX * width,
     pixelOffsetY: offsetY * height,
-    isCut: isLeftCut || isRightCut || isTopCut || isBottomCut,
+    isCut: isCut,
   };
 }
 
@@ -2334,6 +2335,7 @@ function _fitPhantomEllipseForSelection(shapeData) {
 
   var finalOffsetX = robust.pixelOffsetX / width;
   var finalOffsetY = robust.pixelOffsetY / height;
+  var hasCutEvidence = robust.isCut;
 
   if (ellipse && intact.length >= 6) {
     var maxSpan = Math.max(width, height);
@@ -2355,7 +2357,7 @@ function _fitPhantomEllipseForSelection(shapeData) {
     }
     var angleCoverage = 2 * Math.PI - maxGap;
 
-    var partialArcEvidence = angleCoverage < Math.PI * 1.85;
+    var partialArcEvidence = polygons.length > 0 && angleCoverage < Math.PI * 1.85;
     if (
       distFromCenter < maxSpan * 0.8 &&
       aspectRatio <= 3.0 &&
@@ -2363,6 +2365,7 @@ function _fitPhantomEllipseForSelection(shapeData) {
       angleCoverage >= Math.PI * 0.95 &&
       (robust.isCut || partialArcEvidence)
     ) {
+      hasCutEvidence = true;
       var ellOffsetX = Math.max(-0.05, Math.min(0.05, dx / width));
       var ellOffsetY = Math.max(-0.05, Math.min(0.05, dy / height));
       finalOffsetX = robust.pixelOffsetX / width * 0.35 + ellOffsetX * 0.65;
@@ -2370,10 +2373,18 @@ function _fitPhantomEllipseForSelection(shapeData) {
     }
   }
 
+  if (!hasCutEvidence) {
+    return {
+      pixelOffsetX: 0,
+      pixelOffsetY: 0,
+      isCut: false,
+    };
+  }
+
   return {
     pixelOffsetX: finalOffsetX * width,
     pixelOffsetY: finalOffsetY * height,
-    isCut: robust.isCut,
+    isCut: true,
   };
 }
 
@@ -2456,14 +2467,16 @@ function _alignCurrentTextLayerToSelection(collectDebug) {
     // valid zero result gets silently replaced.
     var hostSampledPhantom = false;
     var sampledShape = null;
+    var phantom = null;
     if (!state.phantomGeometryProvided && phantomOffsetX === 0 && phantomOffsetY === 0) {
       try {
-        sampledShape = _sampleSelectionShapeViaPath(selection, 17, false);
+        sampledShape = _sampleSelectionShapeViaPath(selection, 21, false) ||
+                       _sampleCurrentSelectionShape(selection, 21);
         if (sampledShape) {
           if (debugData) {
             debugData.sampledShape = sampledShape;
           }
-          var phantom = _fitPhantomEllipseForSelection(sampledShape);
+          phantom = _fitPhantomEllipseForSelection(sampledShape);
           if (phantom) {
             if (debugData) {
               debugData.phantomFit = phantom;
@@ -2479,11 +2492,11 @@ function _alignCurrentTextLayerToSelection(collectDebug) {
       // correctly report isRectangular, cut detection, etc. in the debug panel.
       // Mirror getCurrentSelectionShape: try path first, then legacy row sampling.
       try {
-        sampledShape = _sampleSelectionShapeViaPath(selection, 17, false) ||
-                       _sampleCurrentSelectionShape(selection, 17);
+        sampledShape = _sampleSelectionShapeViaPath(selection, 21, false) ||
+                       _sampleCurrentSelectionShape(selection, 21);
         if (sampledShape) {
           debugData.sampledShape = sampledShape;
-          var phantom = _fitPhantomEllipseForSelection(sampledShape);
+          phantom = _fitPhantomEllipseForSelection(sampledShape);
           if (phantom) {
             debugData.phantomFit = phantom;
           }
@@ -2498,12 +2511,18 @@ function _alignCurrentTextLayerToSelection(collectDebug) {
       debugData.phantomGeometryProvided = state.phantomGeometryProvided;
     }
 
-    // A panel-provided geometry explicitly tells us whether the balloon is
-    // incomplete. For rectangles and intact balloons, remove the safety inset;
-    // retain it only when a cut/completion is actually present. Legacy callers
-    // without geometry keep the previous conservative behavior.
-    var useSafetyMargin = !state.phantomGeometryProvided ||
-      (state.phantomHasCompletion === true && state.phantomIsRectangular !== true);
+    // For rectangles and intact balloons, remove the safety inset;
+    // retain it only when a cut/completion is actually present.
+    var useSafetyMargin = false;
+    if (state.phantomGeometryProvided) {
+      useSafetyMargin = state.phantomHasCompletion === true && state.phantomIsRectangular !== true;
+    } else {
+      var sampledRowsForCheck = (debugData && debugData.sampledShape && debugData.sampledShape.rows) || (sampledShape && sampledShape.rows);
+      var sampledPolyForCheck = (debugData && debugData.sampledShape && debugData.sampledShape.polygons) || (sampledShape && sampledShape.polygons);
+      var isRect = _isRectangularShapeES3({ bounds: selection, rows: sampledRowsForCheck, polygons: sampledPolyForCheck });
+      var hostPhantom = (debugData && debugData.phantomFit) || phantom;
+      useSafetyMargin = !isRect && !!hostPhantom && hostPhantom.isCut === true;
+    }
 
     var targetXMid = selection.xMid + phantomOffsetX;
     var targetYMid = selection.yMid + phantomOffsetY;
@@ -2544,7 +2563,7 @@ function _alignCurrentTextLayerToSelection(collectDebug) {
         (state.phantomIsRectangular === null && sampledIsRectangular);
       debugData.hasCompletion = state.phantomGeometryProvided && typeof state.phantomHasCompletion === "boolean"
         ? state.phantomHasCompletion
-        : Math.abs(phantomOffsetX) > selection.width * 0.015 || Math.abs(phantomOffsetY) > selection.height * 0.015;
+        : (debugData.phantomFit && debugData.phantomFit.isCut === true) || Math.abs(phantomOffsetX) > selection.width * 0.015 || Math.abs(phantomOffsetY) > selection.height * 0.015;
     }
 
     _deselect();
@@ -3591,13 +3610,17 @@ function _deleteWorkPath() {
 // costs one cheap probe and restores the fast path as soon as the host is happy
 // again.
 function _sampleSelectionShapeViaPath(bounds, sampleCount, restoreSelection) {
-  if ((_hostState.pathScanFails || 0) >= 3) {
-    var now = new Date().getTime();
-    if (now - (_hostState.pathScanBackoffAt || 0) < _PATH_SCAN_RETRY_MS) return null;
-    _hostState.pathScanFails = 2;
-  }
   var doc = app.activeDocument;
-  if (_findWorkPath(doc)) return null;
+  var existingWorkPath = _findWorkPath(doc);
+  if (existingWorkPath) {
+    try {
+      _deleteWorkPath();
+    } catch (cleanWorkPathErr) {
+      try {
+        existingWorkPath.remove();
+      } catch (domErr) {}
+    }
+  }
 
   var tempChannel = null;
   if (restoreSelection) {
@@ -3651,14 +3674,9 @@ function _sampleSelectionShapeViaPath(bounds, sampleCount, restoreSelection) {
   }
 
   if (!rows) {
-    _hostState.pathScanFails = (_hostState.pathScanFails || 0) + 1;
-    if (_hostState.pathScanFails >= 3) {
-      _hostState.pathScanBackoffAt = new Date().getTime();
-    }
     _hostState.lastPathScanError = failure;
     return null;
   }
-  _hostState.pathScanFails = 0;
   _hostState.lastPathScanError = "";
   return {
     scan: "path",
@@ -3678,6 +3696,12 @@ function getCurrentSelectionShape(data) {
     return jamJSON.stringify({ error: "noSelection" });
   }
   var sampleCount = _normalizeShapeSampleCount(data && data.samples, 17);
+  var doc = app.activeDocument;
+  var previousHistoryState = null;
+  try {
+    previousHistoryState = doc.activeHistoryState;
+  } catch (histErr) {}
+
   var shape = _withSuspendedHistory("TypeR Shape Scan", function () {
     return _withDialogsSuppressed(function () {
       return (
@@ -3686,6 +3710,13 @@ function getCurrentSelectionShape(data) {
       );
     });
   });
+
+  try {
+    if (doc && previousHistoryState && doc.activeHistoryState !== previousHistoryState) {
+      doc.activeHistoryState = previousHistoryState;
+    }
+  } catch (revertErr) {}
+
   shape = shape || _buildBoundsShapeRows(bounds, sampleCount);
   // scan/scanError lead the object so they survive the debug log preview cap
   var out = { scan: shape.scan || "legacy" };
@@ -3780,9 +3811,22 @@ function getActiveLayerBubbleShape(data) {
   if (isNaN(tolerance)) tolerance = 20;
   var sampleCount = _normalizeShapeSampleCount(data && data.samples, 21);
 
+  var doc = app.activeDocument;
+  var previousHistoryState = null;
+  try {
+    previousHistoryState = doc.activeHistoryState;
+  } catch (histErr) {}
+
   var result = _withSuspendedHistory("TypeR Bubble Scan", function () {
     return _scanActiveLayerBubble(tolerance, sampleCount);
   });
+
+  try {
+    if (doc && previousHistoryState && doc.activeHistoryState !== previousHistoryState) {
+      doc.activeHistoryState = previousHistoryState;
+    }
+  } catch (revertErr) {}
+
   if (!result) {
     return jamJSON.stringify({ error: "shape" });
   }

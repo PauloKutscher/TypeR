@@ -535,36 +535,39 @@ export function analyzeMangaBalloonGeometry(shapeData) {
     if (Math.abs(rights[idx] - maxRight) < 0.035) rightFlatCount++;
   }
 
+  const minCutRows = Math.max(5, Math.floor(n * 0.35));
+  const hasSubstantialWidth = maxRowWidth >= 0.45;
+  const hasSubstantialValidRows = validIndices.length >= Math.max(6, Math.floor(n * 0.40));
+
   const leftCutRatio = validIndices.length ? leftFlatCount / validIndices.length : 0;
   const rightCutRatio = validIndices.length ? rightFlatCount / validIndices.length : 0;
 
-  const isLeftCut = leftCutRatio >= 0.55 && rightCutRatio < 0.4;
-  const isRightCut = rightCutRatio >= 0.55 && leftCutRatio < 0.4;
+  const isLeftCut = hasSubstantialWidth && hasSubstantialValidRows && leftFlatCount >= minCutRows && leftCutRatio >= 0.55 && rightCutRatio < 0.4;
+  const isRightCut = hasSubstantialWidth && hasSubstantialValidRows && rightFlatCount >= minCutRows && rightCutRatio >= 0.55 && leftCutRatio < 0.4;
 
   const topWidth = widths[0] || 0;
   const bottomWidth = widths[n - 1] || 0;
-  const isTopCut = topWidth > maxRowWidth * 0.65;
-  const isBottomCut = bottomWidth > maxRowWidth * 0.65;
+  const isTopCut = hasSubstantialWidth && topWidth > maxRowWidth * 0.65;
+  const isBottomCut = hasSubstantialWidth && bottomWidth > maxRowWidth * 0.65;
+  const isCut = isLeftCut || isRightCut || isTopCut || isBottomCut;
 
-  let targetNormX = visualCentroidX;
-  let targetNormY = visualCentroidY;
+  let targetNormX = 0.5;
+  let targetNormY = 0.5;
 
   const sortedMids = [...midpoints].sort((a, b) => a - b);
   const medianMid = sortedMids[Math.floor(sortedMids.length / 2)];
-  const hasDirectionalCut = isLeftCut || isRightCut || isTopCut || isBottomCut;
   const visibleMidX = (minLeft + maxRight) / 2;
+
   if (isLeftCut && !isRightCut) {
     const cutShift = Math.min(0.12, (maxRight - minLeft) * 0.15);
     targetNormX = visualCentroidX * 0.4 + visibleMidX * 0.6 - cutShift;
   } else if (isRightCut && !isLeftCut) {
     const cutShift = Math.min(0.12, (maxRight - minLeft) * 0.15);
     targetNormX = visualCentroidX * 0.4 + visibleMidX * 0.6 + cutShift;
-  } else if (!hasDirectionalCut) {
-    // Ignore a speech-tail protrusion or a small local wobble when finding
-    // the body center. The median of row centers is stable against both.
-    targetNormX = medianMid;
-  } else {
+  } else if (isTopCut || isBottomCut) {
     targetNormX = visualCentroidX * 0.6 + medianMid * 0.4;
+  } else {
+    targetNormX = 0.5;
   }
 
   if (isBottomCut && !isTopCut) {
@@ -572,7 +575,7 @@ export function analyzeMangaBalloonGeometry(shapeData) {
   } else if (isTopCut && !isBottomCut) {
     targetNormY = visualCentroidY * 0.6 + 0.5 * 0.4 - 0.06;
   } else {
-    targetNormY = hasDirectionalCut ? visualCentroidY : 0.5;
+    targetNormY = 0.5;
   }
 
   const rawOffsetX = targetNormX - 0.5;
@@ -580,8 +583,8 @@ export function analyzeMangaBalloonGeometry(shapeData) {
 
   const maxShiftX = 0.05;
   const maxShiftY = 0.05;
-  const offsetX = Math.max(-maxShiftX, Math.min(maxShiftX, rawOffsetX));
-  const offsetY = Math.max(-maxShiftY, Math.min(maxShiftY, rawOffsetY));
+  const offsetX = isCut ? Math.max(-maxShiftX, Math.min(maxShiftX, rawOffsetX)) : 0;
+  const offsetY = isCut ? Math.max(-maxShiftY, Math.min(maxShiftY, rawOffsetY)) : 0;
 
   return {
     centerX: 0.5 + offsetX,
@@ -590,7 +593,7 @@ export function analyzeMangaBalloonGeometry(shapeData) {
     offsetY,
     pixelOffsetX: offsetX * width,
     pixelOffsetY: offsetY * height,
-    isCut: isLeftCut || isRightCut || isTopCut || isBottomCut,
+    isCut,
     cutType: isLeftCut ? "left" : isRightCut ? "right" : isTopCut ? "top" : isBottomCut ? "bottom" : "none",
   };
 }
@@ -681,6 +684,7 @@ export function reconstructPhantomBalloon(shapeData) {
 
   const robustAnalysis = analyzeMangaBalloonGeometry(shapeData);
   if (!robustAnalysis) return null;
+
   const polygons = shapeData.polygons || [];
   let points = [];
 
@@ -711,6 +715,7 @@ export function reconstructPhantomBalloon(shapeData) {
 
   let finalOffsetX = robustAnalysis.offsetX;
   let finalOffsetY = robustAnalysis.offsetY;
+  let hasCutEvidence = robustAnalysis.isCut;
 
   // Check angular coverage of intact arc points around the fitted center
   // If the arc is wide (covers >= 180°), direct ellipse fit is reliable.
@@ -731,7 +736,7 @@ export function reconstructPhantomBalloon(shapeData) {
     }
     const angleCoverage = 2 * Math.PI - maxGap;
 
-    const partialArcEvidence = angleCoverage < Math.PI * 1.85;
+    const partialArcEvidence = polygons.length > 0 && angleCoverage < Math.PI * 1.85;
     if (
       distFromCenter < maxSpan * 0.8 &&
       aspectRatio <= 3.0 &&
@@ -739,12 +744,30 @@ export function reconstructPhantomBalloon(shapeData) {
       angleCoverage >= Math.PI * 0.95 &&
       (robustAnalysis.isCut || partialArcEvidence)
     ) {
+      hasCutEvidence = true;
       const ellOffsetX = Math.max(-0.05, Math.min(0.05, (ellipse.centerX - bounds.xMid) / bounds.width));
       const ellOffsetY = Math.max(-0.05, Math.min(0.05, (ellipse.centerY - bounds.yMid) / bounds.height));
       // Blend ellipse center with robust analysis for smooth consistency
       finalOffsetX = robustAnalysis.offsetX * 0.35 + ellOffsetX * 0.65;
       finalOffsetY = robustAnalysis.offsetY * 0.35 + ellOffsetY * 0.65;
     }
+  }
+
+  if (!hasCutEvidence) {
+    return {
+      ellipse: null,
+      centerX: 0.5,
+      centerY: 0.5,
+      offsetX: 0,
+      offsetY: 0,
+      pixelOffsetX: 0,
+      pixelOffsetY: 0,
+      phantomWidth: bounds.width,
+      phantomHeight: bounds.height,
+      hasCompletion: false,
+      phantomRows: shapeData.rows,
+      isRectangular: false,
+    };
   }
 
   const clampedCenterX = bounds.xMid + finalOffsetX * bounds.width;
