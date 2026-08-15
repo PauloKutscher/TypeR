@@ -119,12 +119,21 @@ const defaultUiLayout = {
     previewNav: true,
     previewWidget: true,
     footerHelp: true,
+    footerSettings: true,
     footerRepo: true,
-    footerModeToggles: true,
+    footerTextShapeR: true,
+    footerMultiBubble: true,
   },
   sizes: {
     previewHeight: 130,
     uiScale: 100,
+    footer: {
+      help: 12,
+      settings: 12,
+      repo: 12,
+      textShapeR: 12,
+      multiBubble: 12,
+    },
   },
 };
 
@@ -136,6 +145,16 @@ const clampNumber = (value, min, max, fallback) => {
 
 // Merge a stored/partial layout with the defaults so missing or invalid
 // fields (older storage versions, bad imports) never break the UI
+const normalizeFooterSizes = (raw) => {
+  const sizes = { ...defaultUiLayout.sizes.footer };
+  if (raw && typeof raw === "object") {
+    for (const key in defaultUiLayout.sizes.footer) {
+      sizes[key] = clampNumber(raw[key], 8, 20, defaultUiLayout.sizes.footer[key]);
+    }
+  }
+  return sizes;
+};
+
 const normalizeUiLayout = (raw) => {
   const layout = raw && typeof raw === "object" ? raw : {};
   const visible = { ...defaultUiLayout.visible };
@@ -143,6 +162,21 @@ const normalizeUiLayout = (raw) => {
     for (const key in visible) {
       if (typeof layout.visible[key] === "boolean") visible[key] = layout.visible[key];
     }
+  }
+  // Older versions stored a single "footerModeToggles" flag covering both
+  // mode indicators; map it onto the individual toggles only when the new
+  // keys have never been persisted, so fresh settings always win
+  const legacyFooterModeToggles =
+    layout.visible && typeof layout.visible.footerModeToggles === "boolean"
+      ? layout.visible.footerModeToggles
+      : null;
+  const hasIndividualModeToggles =
+    layout.visible &&
+    (typeof layout.visible.footerTextShapeR === "boolean" ||
+      typeof layout.visible.footerMultiBubble === "boolean");
+  if (legacyFooterModeToggles !== null && !hasIndividualModeToggles) {
+    visible.footerTextShapeR = legacyFooterModeToggles;
+    visible.footerMultiBubble = legacyFooterModeToggles;
   }
   let order = Array.isArray(layout.order)
     ? layout.order.filter((id) => defaultUiLayout.order.includes(id))
@@ -153,6 +187,7 @@ const normalizeUiLayout = (raw) => {
   const sizes = {
     previewHeight: clampNumber(layout.sizes?.previewHeight, 80, 300, defaultUiLayout.sizes.previewHeight),
     uiScale: clampNumber(layout.sizes?.uiScale, 70, 150, defaultUiLayout.sizes.uiScale),
+    footer: normalizeFooterSizes(layout.sizes?.footer),
   };
   return { order, visible, sizes };
 };

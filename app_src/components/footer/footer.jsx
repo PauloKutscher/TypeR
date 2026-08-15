@@ -44,28 +44,33 @@ const AppFooter = React.memo(function AppFooter() {
   };
 
   const uiVisible = context.state.uiLayout?.visible || {};
+  const footerSizes = context.state.uiLayout?.sizes?.footer || {};
+  const footerSize = (key) => (footerSizes[key] || 12) + "px";
 
   return (
     <React.Fragment>
       {uiVisible.footerHelp !== false && (
-      <span className="link" onClick={openHelp}>
+      <span className="link" style={{ fontSize: footerSize("help") }} onClick={openHelp}>
         {locale.footerHelp}
       </span>
       )}
-      <span className="link" onClick={openSettings}>
+      {/* Always visible: this link is the only entry point to the settings
+          modal, so it must never be hidden — the toggle that re-enables it
+          lives inside the dialog itself. */}
+      <span className="link" style={{ fontSize: footerSize("settings") }} onClick={openSettings}>
         {locale.footerSettings}
       </span>
       {uiVisible.footerRepo !== false && (
-      <span className="link" onClick={openRepository}>
+      <span className="link" style={{ fontSize: footerSize("repo") }} onClick={openRepository}>
         {context.state.images.length
           ? locale.footerDesyncRepo
           : locale.footerOpenRepo}
       </span>
       )}
-      {uiVisible.footerModeToggles !== false && (
-      <React.Fragment>
+      {uiVisible.footerTextShapeR !== false && (
       <span
         className="link footer-mode-indicator footer-mode-spacer"
+        style={{ fontSize: footerSize("textShapeR") }}
         onClick={toggleInlineTextShapeR}
         title={locale.inlineTextShapeRModeHint || "Shows or hides TextShapeR suggestions directly in the main panel"}
       >
@@ -75,8 +80,11 @@ const AppFooter = React.memo(function AppFooter() {
           {context.state.inlineTextShapeR ? (locale.multiBubbleModeOn || "ON") : (locale.multiBubbleModeOff || "OFF")}
         </span>
       </span>
+      )}
+      {uiVisible.footerMultiBubble !== false && (
       <span
         className="link footer-mode-indicator footer-mode-adjacent"
+        style={{ fontSize: footerSize("multiBubble") }}
         onClick={toggleMultiBubble}
         title={locale.multiBubbleModeHint || "Allows capturing multiple selections to insert multiple texts at once"}
       >
@@ -86,7 +94,6 @@ const AppFooter = React.memo(function AppFooter() {
           {context.state.multiBubbleMode ? (locale.multiBubbleModeOn || "ON") : (locale.multiBubbleModeOff || "OFF")}
         </span>
       </span>
-      </React.Fragment>
       )}
       <HiddenFileInput ref={fileInputRef} />
     </React.Fragment>

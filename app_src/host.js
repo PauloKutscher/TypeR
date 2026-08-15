@@ -108,6 +108,7 @@ var _hostState = {
     result: "",
     resize: false,
     padding: 0,
+    phantomOffsetX: 0,
   },
   changeActiveLayerTextSize: {
     value: 0,
@@ -799,9 +800,9 @@ function _resizeTextBoxToContent(width, currentBounds) {
   _setTextBoxSize(width, currentBounds.height + textSize + 2);
 }
 
-function _positionLayerWithinSelection(selection, bounds) {
+function _positionLayerWithinSelection(selection, bounds, phantomOffsetX) {
   if (!selection || !bounds) return;
-  var offsetX = selection.xMid - bounds.xMid;
+  var offsetX = selection.xMid - bounds.xMid + (Number(phantomOffsetX) || 0);
   var offsetY = selection.yMid - bounds.yMid;
   _moveLayer(offsetX, offsetY);
 }
@@ -1636,7 +1637,7 @@ function _createTextLayerInSelection() {
     _resizeTextBoxToContent(dimensions.width, bounds);
   }
   bounds = _getCurrentTextLayerBounds();
-  _positionLayerWithinSelection(selection, bounds);
+  _positionLayerWithinSelection(selection, bounds, state.data && state.data.phantomOffsetX);
   state.result = "";
 }
 
@@ -1645,12 +1646,22 @@ function _alignCurrentTextLayerToSelection() {
   if (!_layerIsTextLayer()) {
     return "layer";
   }
-  
+
   var selection = _checkSelection({ adaptiveOpen: true });
   if (selection.error) {
     if (selection.error === "noSelection") {
-      _createMagicWandSelection(20);
-      selection = _checkSelection({ adaptiveOpen: true });
+      // Deterministic first: center on the bubble shape layer that sits
+      // below the text layer. The magic wand (pixel sampling of the merged
+      // image) depends on fill colors, bubble tails and anti-aliasing, so it
+      // lands the text left or right of the true bubble center — it stays
+      // only as the last resort for bubbles that are not shape layers.
+      var bubbleBounds = _findShapeLayerBoundsBelowTextLayer();
+      if (bubbleBounds) {
+        selection = bubbleBounds;
+      } else {
+        _createMagicWandSelection(20);
+        selection = _checkSelection({ adaptiveOpen: true });
+      }
     }
     if (selection.error) {
       return selection.error;
@@ -1666,13 +1677,117 @@ function _alignCurrentTextLayerToSelection() {
     _resizeTextBoxToContent(dimensions.width, textBounds);
     bounds = _getCurrentTextLayerBounds();
   }
-  
+
   _deselect();
-  _positionLayerWithinSelection(selection, bounds);
+  _positionLayerWithinSelection(selection, bounds, state.phantomOffsetX);
   if (wasPoint) {
     _changeToPointText();
   }
   return "";
+}
+
+function _getLayerPropertyById(id, layerIndex) {
+  var ref = new ActionReference();
+  ref.putProperty(charIDToTypeID("Prpr"), id);
+  ref.putIndex(charIDToTypeID("Lyr "), layerIndex);
+  return executeActionGet(ref);
+}
+
+function _getLayerBoundsByIndex(layerIndex) {
+  try {
+    var boundsId = stringIDToTypeID("bounds");
+    var desc = _getLayerPropertyById(boundsId, layerIndex);
+    if (desc.hasKey(boundsId)) {
+      return _getBoundsFromDescriptor(desc.getObjectValue(boundsId));
+    }
+  } catch (boundsError) {}
+  return null;
+}
+
+// Look for the bubble shape layer below the active text layer and return its
+// bounds. Shape layers (kind 4) are the canonical bubbles of the workflow,
+// and their bounds are deterministic — unlike pixel sampling, they never
+// depend on fill color, anti-aliasing or the bubble tail. The walk is capped
+// so documents with huge layer stacks stay fast, and only a shape whose
+// bounds contain the text layer is accepted: an unrelated loose shape
+// (panel frame, redraw) below the bubble would otherwise hijack the
+// centering.
+function _findShapeLayerBoundsBelowTextLayer() {
+  try {
+    var propId = charIDToTypeID("Prpr");
+    var layerId = charIDToTypeID("Lyr ");
+    var docId = charIDToTypeID("Dcmn");
+    var ordinalId = charIDToTypeID("Ordn");
+    var targetId = charIDToTypeID("Trgt");
+    var targetLayersId = stringIDToTypeID("targetLayers");
+    var layerKindId = stringIDToTypeID("layerKind");
+    var numberOfLayersId = stringIDToTypeID("numberOfLayers");
+    var hasBackgroundId = stringIDToTypeID("hasBackgroundLayer");
+    var shapeLayerKind = 4;
+
+    var getDocProperty = function (id) {
+      var ref = new ActionReference();
+      ref.putProperty(propId, id);
+      ref.putEnumerated(docId, ordinalId, targetId);
+      return executeActionGet(ref);
+    };
+
+    var layerCount = getDocProperty(numberOfLayersId).getInteger(numberOfLayersId);
+    var hasBackground = false;
+    try {
+      hasBackground = getDocProperty(hasBackgroundId).getBoolean(hasBackgroundId);
+    } catch (backgroundError) {}
+    var firstIndex = hasBackground ? 0 : 1;
+
+    var activeIndex = -1;
+    var selectionRef = new ActionReference();
+    selectionRef.putProperty(propId, targetLayersId);
+    selectionRef.putEnumerated(docId, ordinalId, targetId);
+    var selectionDesc = executeActionGet(selectionRef);
+    if (selectionDesc.hasKey(targetLayersId)) {
+      var list = selectionDesc.getList(targetLayersId);
+      if (list.count === 1) {
+        var backgroundRef = new ActionReference();
+        backgroundRef.putProperty(propId, charID.Background);
+        backgroundRef.putEnumerated(layerId, ordinalId, charID.Back);
+        var offset = executeActionGet(backgroundRef).getBoolean(charID.Background) ? 0 : 1;
+        activeIndex = list.getReference(0).getIndex() + offset;
+      }
+    }
+    if (activeIndex < firstIndex) return null;
+
+    // If the text bounds cannot be read, fall back to accepting the first
+    // shape layer so centering still works on unusual documents
+    var textBounds = null;
+    try {
+      textBounds = _getCurrentTextLayerBounds();
+    } catch (textBoundsError) {}
+
+    var limit = Math.max(firstIndex, activeIndex - 12);
+    for (var i = activeIndex - 1; i >= limit; i--) {
+      var kind = 0;
+      try {
+        kind = _getLayerPropertyById(layerKindId, i).getInteger(layerKindId);
+      } catch (kindError) {}
+      if (kind === shapeLayerKind) {
+        var shapeBounds = _getLayerBoundsByIndex(i);
+        if (!shapeBounds) continue;
+        // If the text bounds cannot be read, accept the first shape layer so
+        // centering still works on unusual documents
+        if (!textBounds) return shapeBounds;
+        // Allow 1px of float/anti-alias noise on each side
+        if (
+          shapeBounds.left <= textBounds.left + 1 &&
+          shapeBounds.top <= textBounds.top + 1 &&
+          shapeBounds.right >= textBounds.right - 1 &&
+          shapeBounds.bottom >= textBounds.bottom - 1
+        ) {
+          return shapeBounds;
+        }
+      }
+    }
+  } catch (walkError) {}
+  return null;
 }
 
 function _alignTextLayerToSelection() {
@@ -2258,6 +2373,7 @@ function alignTextLayerToSelection(data) {
   var state = _hostState.alignTextLayerToSelection;
   state.resize = !!data.resizeTextBox;
   state.padding = data.padding || 0;
+  state.phantomOffsetX = Number(data && data.phantomOffsetX) || 0;
   state.result = "";
   app.activeDocument.suspendHistory("TyperTools Align", "_alignTextLayerToSelection()");
   return state.result;

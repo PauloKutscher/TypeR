@@ -1245,6 +1245,92 @@ const normalizeShapeRows = (shapeProfile) => {
     .sort((a, b) => a.y - b.y);
 };
 
+const linearFit = (points) => {
+  if (!points || points.length < 3) return null;
+  let sumY = 0;
+  let sumX = 0;
+  let sumYY = 0;
+  let sumYX = 0;
+  points.forEach(({ y, x }) => {
+    sumY += y;
+    sumX += x;
+    sumYY += y * y;
+    sumYX += y * x;
+  });
+  const denominator = points.length * sumYY - sumY * sumY;
+  if (Math.abs(denominator) < 1e-9) return null;
+  const slope = (points.length * sumYX - sumY * sumX) / denominator;
+  const intercept = (sumX - slope * sumY) / points.length;
+  const meanX = sumX / points.length;
+  let residual = 0;
+  let total = 0;
+  points.forEach(({ y, x }) => {
+    residual += (x - (slope * y + intercept)) ** 2;
+    total += (x - meanX) ** 2;
+  });
+  return { slope, intercept, r2: total > 1e-9 ? 1 - residual / total : 1 };
+};
+
+const detectCutRun = (rows, side, minRun = 4, minR2 = 0.985) => {
+  if (!rows || rows.length < minRun + 1) return null;
+  const scan = (indices) => {
+    const points = [];
+    for (const index of indices) {
+      points.push({ y: rows[index].y, x: rows[index][side] });
+      if (points.length >= minRun) {
+        const fit = linearFit(points);
+        if (!fit || fit.r2 < minR2) {
+          points.pop();
+          break;
+        }
+      }
+    }
+    // A straight side over the complete height is a rectangle/narration box,
+    // not evidence that a curved bubble was cut by a panel gutter.
+    if (points.length >= rows.length) return null;
+    return points.length >= minRun ? { points, fit: linearFit(points) } : null;
+  };
+  const fromTop = scan(rows.map((_, index) => index));
+  const fromBottom = scan(rows.map((_, index) => rows.length - 1 - index));
+  const best = (fromTop?.points.length || 0) >= (fromBottom?.points.length || 0) ? fromTop : fromBottom;
+  return best;
+};
+
+const getShapeProfileGeometry = (shapeProfile) => {
+  const rows = normalizeShapeRows(shapeProfile);
+  if (!rows.length) return { rows, phantomRows: rows, centerX: 0.5, offsetX: 0, hasCompletion: false };
+
+  const cutLeft = detectCutRun(rows, "left");
+  const cutRight = detectCutRun(rows, "right");
+  const cutYs = new Set([
+    ...(cutLeft?.points || []),
+    ...(cutRight?.points || []),
+  ].map((point) => point.y));
+  const healthy = rows.filter((row) => !cutYs.has(row.y));
+  // One healthy side is required for a mirror. If both sides are straight,
+  // there is no reliable information with which to invent the hidden shape.
+  if (!healthy.length || (!!cutLeft === !!cutRight)) {
+    return { rows, phantomRows: rows, centerX: 0.5, offsetX: 0, hasCompletion: false };
+  }
+
+  const centers = healthy.map((row) => (row.left + row.right) / 2).sort((a, b) => a - b);
+  const centerX = centers[Math.floor(centers.length / 2)];
+  const phantomRows = rows.map((row) => {
+    let left = row.left;
+    let right = row.right;
+    if (cutYs.has(row.y) && cutLeft && !cutRight) left = clamp(2 * centerX - right, 0, 1);
+    if (cutYs.has(row.y) && cutRight && !cutLeft) right = clamp(2 * centerX - left, 0, 1);
+    return { ...row, left, right, width: Math.max(0, right - left) };
+  });
+  return {
+    rows,
+    phantomRows,
+    centerX,
+    offsetX: centerX - 0.5,
+    hasCompletion: true,
+  };
+};
+
 const getProfileWidthAt = (rows, y) => {
   if (!rows.length) return null;
   if (y <= rows[0].y) return rows[0].width;
@@ -1386,11 +1472,14 @@ const getFitLineCountBounds = (totalUnits, fit) => {
   return { min: tightest || limit, max: limit };
 };
 
-const buildManualTargets = (tokens, lineCount, settings) => {
+const buildManualTargets = (tokens, lineCount, settings, phantomRows) => {
   const shape = settings.shape || "sine";
   const softness = settings.softness || 0.6;
   const floor = settings.floor == null ? 0.15 : settings.floor;
-  const profileRows = normalizeShapeRows(settings.shapeProfile);
+  // The phantom contour is computed once by the caller: getShapeProfileGeometry
+  // re-runs the cut detection (O(n²) linear fits) on every call, and this
+  // function runs once per line count per candidate grid
+  const profileRows = phantomRows || getShapeProfileGeometry(settings.shapeProfile).phantomRows;
   const weights = Array.from({ length: lineCount }, (_, index) => {
     const y = lineCount <= 1 ? 0.5 : (index + 0.5) / lineCount;
     if (shape === "selection" && profileRows.length) {
@@ -1575,7 +1664,12 @@ const generateTextShapeRVariants = (text, options = {}) => {
   const granularityMaxLines = clamp(Math.floor(totalUnits / (widestWordUnits * 0.72)), 1, 8);
   const resultMap = new Map();
   const seenTargets = new Set();
-  const shapeRows = normalizeShapeRows(options.shapeProfile).filter((row) => row.width > 0);
+  const shapeGeometry = getShapeProfileGeometry(options.shapeProfile);
+  // The completed contour is an aesthetic/centering hint. The measured rows
+  // remain the physical safety limit so a phantom half can never place text
+  // under the panel gutter.
+  const shapeRows = shapeGeometry.phantomRows.filter((row) => row.width > 0);
+  const realShapeRows = shapeGeometry.rows.filter((row) => row.width > 0);
   // Pixel calibration measured on the live layer (rendered px per measure
   // unit, rendered px per line): turns relative shape scoring into a real
   // "does this line physically fit the bubble" constraint
@@ -1587,7 +1681,7 @@ const generateTextShapeRVariants = (text, options = {}) => {
       linePx: calibration.linePx,
       width: options.width,
       height: options.height,
-      rows: shapeRows.length > 1 ? shapeRows : null,
+      rows: realShapeRows.length > 1 ? realShapeRows : null,
     }
     : null;
   const aspect = options.width > 0 && options.height > 0
@@ -1603,6 +1697,7 @@ const generateTextShapeRVariants = (text, options = {}) => {
   const matchedExemplars = getMatchedExemplars(totalUnits, aspect, bubbleSignature);
   let scoringProfile = profile;
   let shapeTargetSettings = null;
+  let shapeTargetPhantomRows = null;
   if (aspect == null && shapeRows.length <= 1) {
     // No bubble info at all: the preset's fixed line target over-shoots
     // short texts and under-shoots long ones — adapt it to the text volume
@@ -1638,12 +1733,14 @@ const generateTextShapeRVariants = (text, options = {}) => {
       lineTargetWeight: 24,
       maxLineWidth: clamp((profile.maxLineWidth || 28) / aspectStretch, 12, 40),
     };
-    shapeTargetSettings = {
+shapeTargetSettings = {
       shape: "selection",
-      shapeProfile: options.shapeProfile,
+      shapeProfile: { ...(options.shapeProfile || {}), rows: shapeRows },
       softness: 1,
       floor: 0.14,
     };
+    // Resolve the phantom contour once for all line counts and hyphen sets
+    shapeTargetPhantomRows = getShapeProfileGeometry(shapeTargetSettings.shapeProfile).phantomRows;
   }
   const styleConfidence = getStyleConfidence();
   let learnedDensity = styleConfidence > 0 && tuning.style.density ? tuning.style.density : null;
@@ -1747,7 +1844,7 @@ const generateTextShapeRVariants = (text, options = {}) => {
       const scale = Math.min(1, total / availableTotal);
       targets = available.map((units) => Math.max(1, units * scale));
     } else {
-      targets = buildManualTargets(tokens, lineCount, shapeTargetSettings);
+      targets = buildManualTargets(tokens, lineCount, shapeTargetSettings, shapeTargetPhantomRows);
     }
     [-1, 0, 1].forEach((bias) => {
       const biasedTargets = bias === 0 ? targets : targets.map((target) => Math.max(1, target + bias));
@@ -2130,10 +2227,11 @@ const recordTextShapeRFeedback = (layerText, options = {}, currentTuning = null)
   // future requests are scored against it instead of a global average.
   // Re-validating a shape the memory already holds reinforces it (hits)
   // and refreshes its recency instead of duplicating it.
+  const feedbackShapeGeometry = getShapeProfileGeometry(options.shapeProfile);
   const exemplarAspect = options.width > 0 && options.height > 0
     ? clamp(options.height / options.width, 0.1, 10)
     : null;
-  const exemplarBubble = getBubbleSignature(normalizeShapeRows(options.shapeProfile).filter((row) => row.width > 0));
+  const exemplarBubble = getBubbleSignature(feedbackShapeGeometry.phantomRows.filter((row) => row.width > 0));
   const sameTextAndContext = (exemplar) => (
     normalizeText(exemplar.lines.join(" ")) === normalizeText(flatText)
       && exemplarStorageContextMatches(exemplar, exemplarAspect, exemplarBubble)
@@ -2172,4 +2270,4 @@ const recordTextShapeRFeedback = (layerText, options = {}, currentTuning = null)
   };
 };
 
-export { generateTextShapeRVariants, generateManualTextShapeRVariant, estimateManualLineCount, setDehyphenationEnabled, setTextShapeRTuning, sanitizeTuning as sanitizeTextShapeRTuning, recordTextShapeRFeedback, visibleLength, visibleWidth };
+export { generateTextShapeRVariants, generateManualTextShapeRVariant, estimateManualLineCount, getShapeProfileGeometry, setDehyphenationEnabled, setTextShapeRTuning, sanitizeTuning as sanitizeTextShapeRTuning, recordTextShapeRFeedback, visibleLength, visibleWidth };

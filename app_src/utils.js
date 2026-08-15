@@ -918,8 +918,12 @@ const createTextLayersInStoredSelections = (texts, styles, selections, pointText
   }));
 };
 
-const alignTextLayerToSelection = (resizeTextBox = false, padding = 0, callback = () => {}) => {
-  const data = JSON.stringify({ resizeTextBox: !!resizeTextBox, padding: padding || 0 });
+const alignTextLayerToSelection = (resizeTextBox = false, padding = 0, callback = () => {}, phantomOffsetX = 0) => {
+  const data = JSON.stringify({
+    resizeTextBox: !!resizeTextBox,
+    padding: padding || 0,
+    phantomOffsetX: Number(phantomOffsetX) || 0,
+  });
   csInterface.evalScript("alignTextLayerToSelection(" + data + ")", trackHostAction((error) => {
     if (error === "smallSelection") nativeAlert(locale.errorSmallSelection, locale.errorTitle, true);
     else if (error === "noSelection") nativeAlert(locale.errorNoSelection, locale.errorTitle, true);

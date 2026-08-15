@@ -36,6 +36,7 @@ const {
   estimateManualLineCount,
   generateManualTextShapeRVariant,
   generateTextShapeRVariants,
+  getShapeProfileGeometry,
   recordTextShapeRFeedback,
   sanitizeTextShapeRTuning,
   setTextShapeRTuning,
@@ -156,6 +157,31 @@ const selectionManual = generateManualTextShapeRVariant(manualText, {
 });
 assert.ok(selectionManual.targets[2] > selectionManual.targets[0]);
 assert.ok(selectionManual.targets[2] > selectionManual.targets[4]);
+
+// A straight run at the top of one side is treated as a panel cut. The
+// missing side is mirrored around the healthy bubble center, while a fully
+// rectangular profile remains untouched.
+const cutRows = [
+  { y: 0, left: 0.12, right: 0.92, width: 0.80 },
+  { y: 0.125, left: 0.14, right: 0.95, width: 0.81 },
+  { y: 0.25, left: 0.16, right: 0.80, width: 0.64 },
+  { y: 0.375, left: 0.18, right: 0.90, width: 0.72 },
+  { y: 0.5, left: 0.25, right: 0.75, width: 0.50 },
+  { y: 0.625, left: 0.30, right: 0.88, width: 0.58 },
+  { y: 0.75, left: 0.36, right: 0.64, width: 0.28 },
+  { y: 0.875, left: 0.43, right: 0.72, width: 0.29 },
+  { y: 1, left: 0.49, right: 0.51, width: 0.02 },
+];
+const completed = getShapeProfileGeometry({ rows: cutRows });
+assert.strictEqual(completed.hasCompletion, true);
+assert.ok(Number.isFinite(completed.offsetX));
+assert.strictEqual(completed.phantomRows.length, cutRows.length);
+assert.ok(completed.phantomRows.some((row, index) => row.left !== completed.rows[index].left));
+const rectangle = getShapeProfileGeometry({
+  rows: Array.from({ length: 9 }, (_, index) => ({ y: index / 8, left: 0, right: 1, width: 1 })),
+});
+assert.strictEqual(rectangle.hasCompletion, false);
+assert.strictEqual(rectangle.offsetX, 0);
 
 // Bubble-aware mode: a round outline plus pixel calibration must yield
 // variants that stay inside the bubble and keep a harmonious convex shape
