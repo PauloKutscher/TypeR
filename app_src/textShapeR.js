@@ -1733,7 +1733,7 @@ const generateTextShapeRVariants = (text, options = {}) => {
       lineTargetWeight: 24,
       maxLineWidth: clamp((profile.maxLineWidth || 28) / aspectStretch, 12, 40),
     };
-shapeTargetSettings = {
+    shapeTargetSettings = {
       shape: "selection",
       shapeProfile: { ...(options.shapeProfile || {}), rows: shapeRows },
       softness: 1,
