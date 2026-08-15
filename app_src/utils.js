@@ -567,13 +567,37 @@ let userFonts = null;
 let userFontsRequestPending = false;
 let userFontsCallbacks = [];
 
+try {
+  const cached = readStorage("cachedUserFonts");
+  if (Array.isArray(cached) && cached.length) {
+    userFonts = cached;
+  }
+} catch (e) {}
+
 const getUserFonts = () => {
-  return Array.isArray(userFonts) ? userFonts.concat([]) : [];
+  if (Array.isArray(userFonts) && userFonts.length) {
+    return userFonts.concat([]);
+  }
+  try {
+    const cached = readStorage("cachedUserFonts");
+    if (Array.isArray(cached) && cached.length) {
+      userFonts = cached;
+      return userFonts.concat([]);
+    }
+  } catch (e) {}
+  return [];
 };
 
 const refreshUserFonts = (callback, rescanHost) => {
   if (typeof callback === "function") userFontsCallbacks.push(callback);
   if (userFontsRequestPending) return;
+
+  if (!rescanHost && Array.isArray(userFonts) && userFonts.length) {
+    const callbacks = userFontsCallbacks;
+    userFontsCallbacks = [];
+    callbacks.forEach((fontCallback) => fontCallback(userFonts.concat([])));
+    return;
+  }
 
   userFontsRequestPending = true;
   // rescanHost runs app.refreshFonts() in Photoshop first, so fonts installed
@@ -582,12 +606,17 @@ const refreshUserFonts = (callback, rescanHost) => {
   csInterface.evalScript(rescanHost ? "reloadUserFonts()" : "getUserFonts()", (data) => {
     const dataObj = safeJsonParse(data);
     const fonts = dataObj.fonts || [];
-    userFonts = fonts;
+    if (fonts.length) {
+      userFonts = fonts;
+      try {
+        writeToStorage({ cachedUserFonts: fonts });
+      } catch (writeErr) {}
+    }
     userFontsRequestPending = false;
 
     const callbacks = userFontsCallbacks;
     userFontsCallbacks = [];
-    callbacks.forEach((fontCallback) => fontCallback(fonts.concat([])));
+    callbacks.forEach((fontCallback) => fontCallback((userFonts || []).concat([])));
   });
 };
 

@@ -359,10 +359,10 @@ export function isRectangularShape(shapeData) {
       for (let i = 0; i < poly.length; i++) {
         const x = poly[i][0];
         const y = poly[i][1];
-        const nearLeft = Math.abs(x - bounds.left) < 6;
-        const nearRight = Math.abs(x - bounds.right) < 6;
-        const nearTop = Math.abs(y - bounds.top) < 6;
-        const nearBottom = Math.abs(y - bounds.bottom) < 6;
+        const nearLeft = Math.abs(x - bounds.left) < 8;
+        const nearRight = Math.abs(x - bounds.right) < 8;
+        const nearTop = Math.abs(y - bounds.top) < 8;
+        const nearBottom = Math.abs(y - bounds.bottom) < 8;
         if (nearLeft || nearRight || nearTop || nearBottom) nearEdgeCount++;
       }
       if (nearEdgeCount >= poly.length - 1) return true;
@@ -372,11 +372,11 @@ export function isRectangularShape(shapeData) {
   if (rows && rows.length >= 5) {
     let fullWidthRows = 0;
     for (let i = 0; i < rows.length; i++) {
-      if (rows[i].left < 0.06 && rows[i].right > 0.94) {
+      if (rows[i].left < 0.08 && rows[i].right > 0.92) {
         fullWidthRows++;
       }
     }
-    if (fullWidthRows / rows.length >= 0.85) return true;
+    if (fullWidthRows / rows.length >= 0.80) return true;
   }
 
   return false;
@@ -510,12 +510,13 @@ export function analyzeMangaBalloonGeometry(shapeData) {
   let targetNormX = visualCentroidX;
   let targetNormY = visualCentroidY;
 
+  const visibleMidX = (minLeft + maxRight) / 2;
   if (isLeftCut && !isRightCut) {
-    const estimatedHalfW = maxRight - minLeft;
-    targetNormX = Math.max(0.15, maxRight - estimatedHalfW * 0.85);
+    const cutShift = Math.min(0.12, (maxRight - minLeft) * 0.15);
+    targetNormX = visualCentroidX * 0.4 + visibleMidX * 0.6 - cutShift;
   } else if (isRightCut && !isLeftCut) {
-    const estimatedHalfW = maxRight - minLeft;
-    targetNormX = Math.min(0.85, minLeft + estimatedHalfW * 0.85);
+    const cutShift = Math.min(0.12, (maxRight - minLeft) * 0.15);
+    targetNormX = visualCentroidX * 0.4 + visibleMidX * 0.6 + cutShift;
   } else {
     const sortedMids = [...midpoints].sort((a, b) => a - b);
     const medianMid = sortedMids[Math.floor(sortedMids.length / 2)];
@@ -523,9 +524,9 @@ export function analyzeMangaBalloonGeometry(shapeData) {
   }
 
   if (isBottomCut && !isTopCut) {
-    targetNormY = Math.min(0.7, visualCentroidY * 0.75 + 0.5 * 0.25 + 0.15);
+    targetNormY = visualCentroidY * 0.6 + 0.5 * 0.4 + 0.06;
   } else if (isTopCut && !isBottomCut) {
-    targetNormY = Math.max(0.3, visualCentroidY * 0.75 + 0.5 * 0.25 - 0.15);
+    targetNormY = visualCentroidY * 0.6 + 0.5 * 0.4 - 0.06;
   } else {
     targetNormY = visualCentroidY;
   }
@@ -533,8 +534,8 @@ export function analyzeMangaBalloonGeometry(shapeData) {
   const rawOffsetX = targetNormX - 0.5;
   const rawOffsetY = targetNormY - 0.5;
 
-  const maxShiftX = 0.35;
-  const maxShiftY = 0.35;
+  const maxShiftX = 0.25;
+  const maxShiftY = 0.25;
   const offsetX = Math.max(-maxShiftX, Math.min(maxShiftX, rawOffsetX));
   const offsetY = Math.max(-maxShiftY, Math.min(maxShiftY, rawOffsetY));
 
@@ -656,8 +657,9 @@ export function reconstructPhantomBalloon(shapeData) {
   }
 
   let ellipse = null;
+  let intact = [];
   if (points.length >= 6) {
-    const intact = extractIntactArcPoints(points);
+    intact = extractIntactArcPoints(points);
     if (intact.length >= 5) {
       ellipse = fitEllipseDirect(intact);
     }
@@ -666,16 +668,36 @@ export function reconstructPhantomBalloon(shapeData) {
   let finalOffsetX = robustAnalysis.offsetX;
   let finalOffsetY = robustAnalysis.offsetY;
 
-  // If clean ellipse fit with matching aspect ratio is found, use it for curved and diagonal cuts
-  if (ellipse) {
+  // Check angular coverage of intact arc points around the fitted center
+  // If the arc is wide (covers >= 180°), direct ellipse fit is reliable.
+  // If the arc is narrow (< 180°), algebraic fit can be unstable, so prioritize robustAnalysis.
+  if (ellipse && intact.length >= 6) {
     const maxSpan = Math.max(bounds.width, bounds.height);
     const distFromCenter = Math.hypot(ellipse.centerX - bounds.xMid, ellipse.centerY - bounds.yMid);
     const aspectRatio = ellipse.a / (ellipse.b || 1);
-    if (distFromCenter < maxSpan * 1.2 && aspectRatio <= 3.5 && aspectRatio >= 0.28) {
-      const ellOffsetX = Math.max(-0.35, Math.min(0.35, (ellipse.centerX - bounds.xMid) / bounds.width));
-      const ellOffsetY = Math.max(-0.35, Math.min(0.35, (ellipse.centerY - bounds.yMid) / bounds.height));
-      finalOffsetX = ellOffsetX;
-      finalOffsetY = ellOffsetY;
+
+    const angles = intact
+      .map((pt) => Math.atan2(pt[1] - ellipse.centerY, pt[0] - ellipse.centerX))
+      .sort((a, b) => a - b);
+    let maxGap = 0;
+    for (let i = 0; i < angles.length; i++) {
+      const next = (i + 1) % angles.length;
+      const diff = (angles[next] - angles[i] + 2 * Math.PI) % (2 * Math.PI);
+      if (diff > maxGap) maxGap = diff;
+    }
+    const angleCoverage = 2 * Math.PI - maxGap;
+
+    if (
+      distFromCenter < maxSpan * 0.8 &&
+      aspectRatio <= 3.0 &&
+      aspectRatio >= 0.33 &&
+      angleCoverage >= Math.PI * 0.95
+    ) {
+      const ellOffsetX = Math.max(-0.25, Math.min(0.25, (ellipse.centerX - bounds.xMid) / bounds.width));
+      const ellOffsetY = Math.max(-0.25, Math.min(0.25, (ellipse.centerY - bounds.yMid) / bounds.height));
+      // Blend ellipse center with robust analysis for smooth consistency
+      finalOffsetX = robustAnalysis.offsetX * 0.35 + ellOffsetX * 0.65;
+      finalOffsetY = robustAnalysis.offsetY * 0.35 + ellOffsetY * 0.65;
     }
   }
 

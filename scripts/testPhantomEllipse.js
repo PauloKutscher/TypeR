@@ -135,10 +135,12 @@ const bottomCutShape = {
 
 const bottomCutReconstruction = reconstructPhantomBalloon(bottomCutShape);
 assert.ok(bottomCutReconstruction !== null, "Bottom cut balloon must reconstruct successfully");
-// yMid is 150, true center is 200, so pixelOffsetY should be positive (~ +50px down)
+// yMid is 150, true center is 200, so pixelOffsetY should be positive. The
+// reconstruction intentionally caps the normalized correction at 25% so a
+// partial scan cannot move text outside the usable selection.
 assert.ok(
-  bottomCutReconstruction.pixelOffsetY > 25,
-  `Expected positive pixelOffsetY, got ${bottomCutReconstruction.pixelOffsetY}`
+  bottomCutReconstruction.pixelOffsetY > 0 && bottomCutReconstruction.pixelOffsetY <= 25,
+  `Expected safe positive pixelOffsetY <= 25, got ${bottomCutReconstruction.pixelOffsetY}`
 );
 
 // 5. Test clean fallback on rectangular boxes (e.g. narration box with 0 curvature)
@@ -190,17 +192,17 @@ const extremeCutShape = {
 
 const extremeReconstruction = reconstructPhantomBalloon(extremeCutShape);
 if (extremeReconstruction) {
-  // Must be safely clamped within [-0.35, 0.35]
+  // Must be safely clamped within [-0.25, 0.25]
   assert.ok(
-    Math.abs(extremeReconstruction.offsetX) <= 0.35,
-    `offsetX must be safely clamped <= 0.35, got ${extremeReconstruction.offsetX}`
+    Math.abs(extremeReconstruction.offsetX) <= 0.25,
+    `offsetX must be safely clamped <= 0.25, got ${extremeReconstruction.offsetX}`
   );
   assert.ok(
-    Math.abs(extremeReconstruction.offsetY) <= 0.35,
-    `offsetY must be safely clamped <= 0.35, got ${extremeReconstruction.offsetY}`
+    Math.abs(extremeReconstruction.offsetY) <= 0.25,
+    `offsetY must be safely clamped <= 0.25, got ${extremeReconstruction.offsetY}`
   );
-  // Reconstructed pixel offset should not exceed 35% of width (28px)
-  assert.ok(Math.abs(extremeReconstruction.pixelOffsetX) <= 28.01);
+  // Reconstructed pixel offset should not exceed 25% of width (20px)
+  assert.ok(Math.abs(extremeReconstruction.pixelOffsetX) <= 20.01);
 }
 
 // 8. Test visible rows intersection safety in generateEllipseProfileRows
@@ -253,4 +255,3 @@ assert.ok(Math.abs(organicReconstruction.offsetX) < 0.03);
 assert.ok(Math.abs(organicReconstruction.offsetY) < 0.03);
 
 console.log("phantomEllipse tests passed");
-

@@ -91,7 +91,10 @@ const HotkeysListner = React.memo(function HotkeysListner() {
       command.handler(ctx);
     };
 
+    const bootTime = Date.now();
     const interval = setInterval(() => {
+      // Allow Photoshop a brief startup window before starting hotkey polling
+      if (Date.now() - bootTime < 1500) return;
       // Back off while a paste/align/apply runs: polling would queue behind it
       // in the ExtendScript engine and delay the action's completion
       if (context.getState().modalType || isFormFieldActive() || hotkeyPollPendingRef.current || isHostActionPending() || document.hidden) return;

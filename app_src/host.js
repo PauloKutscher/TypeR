@@ -801,11 +801,86 @@ function _resizeTextBoxToContent(width, currentBounds) {
   _setTextBoxSize(width, currentBounds.height + textSize + 2);
 }
 
+// Keep the host-side fallback in sync with phantomEllipse.js. A rectangular
+// narration box has no missing arc to reconstruct, so its center must remain
+// the selection center.
+function _isRectangularShapeES3(shapeData) {
+  if (!shapeData || !shapeData.bounds) return false;
+  var bounds = shapeData.bounds;
+  var rows = shapeData.rows;
+  var polygons = shapeData.polygons;
+
+  if (polygons && polygons.length > 0) {
+    var poly = polygons[0];
+    if (poly.length >= 4 && poly.length <= 8) {
+      var nearEdgeCount = 0;
+      for (var i = 0; i < poly.length; i++) {
+        var x = poly[i][0];
+        var y = poly[i][1];
+        var nearLeft = Math.abs(x - bounds.left) < 8;
+        var nearRight = Math.abs(x - bounds.right) < 8;
+        var nearTop = Math.abs(y - bounds.top) < 8;
+        var nearBottom = Math.abs(y - bounds.bottom) < 8;
+        if (nearLeft || nearRight || nearTop || nearBottom) nearEdgeCount++;
+      }
+      if (nearEdgeCount >= poly.length - 1) return true;
+    }
+  }
+
+  if (rows && rows.length >= 5) {
+    var fullWidthRows = 0;
+    for (var r = 0; r < rows.length; r++) {
+      if (rows[r].left < 0.08 && rows[r].right > 0.92) fullWidthRows++;
+    }
+    if (fullWidthRows / rows.length >= 0.80) return true;
+  }
+
+  return false;
+}
+
 function _positionLayerWithinSelection(selection, bounds, phantomOffsetX, phantomOffsetY) {
   if (!selection || !bounds) return;
 
   var targetXMid = selection.xMid + (Number(phantomOffsetX) || 0);
   var targetYMid = selection.yMid + (Number(phantomOffsetY) || 0);
+
+  var textSizePt = 14;
+  try {
+    var textParams = jamText.getLayerText();
+    if (textParams && textParams.layerText && textParams.layerText.textStyleRange) {
+      var ranges = textParams.layerText.textStyleRange;
+      for (var r = 0; r < ranges.length; r++) {
+        var ts = ranges[r] && ranges[r].textStyle;
+        if (ts) {
+          if (typeof ts.size === "number" && ts.size > 0) {
+            textSizePt = ts.size;
+          } else if (typeof ts.impliedFontSize === "number" && ts.impliedFontSize > 0) {
+            textSizePt = ts.impliedFontSize;
+          }
+        }
+      }
+    }
+  } catch (textInfoErr) {}
+
+  var docRes = 72;
+  try {
+    if (app.activeDocument && app.activeDocument.resolution) {
+      docRes = Number(app.activeDocument.resolution) || 72;
+    }
+  } catch (resErr) {}
+
+  var textSizePx = textSizePt * (docRes / 72.0);
+
+  // Photoshop's rendered layer bounds already include the italic slant. A
+  // fixed font-size correction here would introduce a horizontal offset,
+  // especially in narrow narration boxes.
+  var boundXMid = bounds.xMid;
+
+  // Optical Vertical Centering (Cap-height vs Baseline):
+  // Uppercase text (manga lettering) sits on the baseline with no descenders below.
+  // The raw ink bounds top is at cap-height and bottom is at the baseline, which is missing the descender half-leading (~0.08 * textSizePx).
+  // Adding an optical baseline correction centers the text perfectly on the visual guideline!
+  var boundYMid = bounds.yMid + (textSizePx * 0.08);
 
   // Safety tolerance clamping: ensure the text block never spills outside the visible balloon selection
   var marginX = Math.min(selection.width * 0.05, Math.max(0, (selection.width - bounds.width) / 2));
@@ -827,8 +902,8 @@ function _positionLayerWithinSelection(selection, bounds, phantomOffsetX, phanto
     targetYMid = selection.yMid;
   }
 
-  var offsetX = targetXMid - bounds.xMid;
-  var offsetY = targetYMid - bounds.yMid;
+  var offsetX = targetXMid - boundXMid;
+  var offsetY = targetYMid - boundYMid;
   if (offsetX || offsetY) _moveLayer(offsetX, offsetY);
 }
 
@@ -1801,12 +1876,13 @@ function _analyzeMangaBalloonGeometryES3(shapeData) {
   var targetNormX = visualCentroidX;
   var targetNormY = visualCentroidY;
 
+  var visibleMidX = (minLeft + maxRight) / 2;
   if (isLeftCut && !isRightCut) {
-    var estimatedHalfW = maxRight - minLeft;
-    targetNormX = Math.max(0.15, maxRight - estimatedHalfW * 0.85);
+    var cutShift = Math.min(0.12, (maxRight - minLeft) * 0.15);
+    targetNormX = visualCentroidX * 0.4 + visibleMidX * 0.6 - cutShift;
   } else if (isRightCut && !isLeftCut) {
-    var estimatedHalfW = maxRight - minLeft;
-    targetNormX = Math.min(0.85, minLeft + estimatedHalfW * 0.85);
+    var cutShift = Math.min(0.12, (maxRight - minLeft) * 0.15);
+    targetNormX = visualCentroidX * 0.4 + visibleMidX * 0.6 + cutShift;
   } else {
     var sortedMids = midpoints.slice(0).sort(function(a, b) { return a - b; });
     var medianMid = sortedMids[Math.floor(sortedMids.length / 2)];
@@ -1814,9 +1890,9 @@ function _analyzeMangaBalloonGeometryES3(shapeData) {
   }
 
   if (isBottomCut && !isTopCut) {
-    targetNormY = Math.min(0.7, visualCentroidY * 0.75 + 0.5 * 0.25 + 0.15);
+    targetNormY = visualCentroidY * 0.6 + 0.5 * 0.4 + 0.06;
   } else if (isTopCut && !isBottomCut) {
-    targetNormY = Math.max(0.3, visualCentroidY * 0.75 + 0.5 * 0.25 - 0.15);
+    targetNormY = visualCentroidY * 0.6 + 0.5 * 0.4 - 0.06;
   } else {
     targetNormY = visualCentroidY;
   }
@@ -1824,8 +1900,8 @@ function _analyzeMangaBalloonGeometryES3(shapeData) {
   var rawOffsetX = targetNormX - 0.5;
   var rawOffsetY = targetNormY - 0.5;
 
-  var maxShiftX = 0.35;
-  var maxShiftY = 0.35;
+  var maxShiftX = 0.25;
+  var maxShiftY = 0.25;
   var offsetX = Math.max(-maxShiftX, Math.min(maxShiftX, rawOffsetX));
   var offsetY = Math.max(-maxShiftY, Math.min(maxShiftY, rawOffsetY));
 
@@ -2184,8 +2260,9 @@ function _fitPhantomEllipseForSelection(shapeData) {
   }
 
   var ellipse = null;
+  var intact = [];
   if (points.length >= 6) {
-    var intact = _extractIntactArcPointsES3(points);
+    intact = _extractIntactArcPointsES3(points);
     if (intact.length >= 5) {
       ellipse = _fitEllipseDirectES3(intact);
     }
@@ -2194,17 +2271,36 @@ function _fitPhantomEllipseForSelection(shapeData) {
   var finalOffsetX = robust.pixelOffsetX / width;
   var finalOffsetY = robust.pixelOffsetY / height;
 
-  if (ellipse) {
+  if (ellipse && intact.length >= 6) {
     var maxSpan = Math.max(width, height);
     var dx = ellipse.centerX - bounds.xMid;
     var dy = ellipse.centerY - bounds.yMid;
     var distFromCenter = Math.sqrt(dx * dx + dy * dy);
     var aspectRatio = ellipse.a / (ellipse.b || 1);
-    if (distFromCenter < maxSpan * 1.2 && aspectRatio <= 3.5 && aspectRatio >= 0.28) {
-      var ellOffsetX = Math.max(-0.35, Math.min(0.35, dx / width));
-      var ellOffsetY = Math.max(-0.35, Math.min(0.35, dy / height));
-      finalOffsetX = ellOffsetX;
-      finalOffsetY = ellOffsetY;
+
+    var angles = [];
+    for (var angleIndex = 0; angleIndex < intact.length; angleIndex++) {
+      angles.push(Math.atan2(intact[angleIndex][1] - ellipse.centerY, intact[angleIndex][0] - ellipse.centerX));
+    }
+    angles.sort(function(a, b) { return a - b; });
+    var maxGap = 0;
+    for (var gapIndex = 0; gapIndex < angles.length; gapIndex++) {
+      var nextIndex = (gapIndex + 1) % angles.length;
+      var angleDiff = (angles[nextIndex] - angles[gapIndex] + 2 * Math.PI) % (2 * Math.PI);
+      if (angleDiff > maxGap) maxGap = angleDiff;
+    }
+    var angleCoverage = 2 * Math.PI - maxGap;
+
+    if (
+      distFromCenter < maxSpan * 0.8 &&
+      aspectRatio <= 3.0 &&
+      aspectRatio >= 0.33 &&
+      angleCoverage >= Math.PI * 0.95
+    ) {
+      var ellOffsetX = Math.max(-0.25, Math.min(0.25, dx / width));
+      var ellOffsetY = Math.max(-0.25, Math.min(0.25, dy / height));
+      finalOffsetX = robust.pixelOffsetX / width * 0.35 + ellOffsetX * 0.65;
+      finalOffsetY = robust.pixelOffsetY / height * 0.35 + ellOffsetY * 0.65;
     }
   }
 

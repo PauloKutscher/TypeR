@@ -92,6 +92,8 @@ assert.strictEqual(rectRes.offsetY, 0, "Rectangular box must have offsetY = 0");
 const rectRecon = reconstructPhantomBalloon(rectShape);
 assert.strictEqual(rectRecon.offsetX, 0);
 assert.strictEqual(rectRecon.offsetY, 0);
+assert.strictEqual(rectRecon.isRectangular, true);
+assert.strictEqual(rectRecon.hasCompletion, false);
 console.log("✓ Case 6: Rectangular Narration Box passed");
 
 console.log("All manga balloon centering cases passed with 100% precision!");
