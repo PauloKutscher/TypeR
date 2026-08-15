@@ -34,7 +34,7 @@ assert.ok(
   "Paste must use adaptive selection opening"
 );
 assert.ok(
-  /function _alignCurrentTextLayerToSelection\(\)[\s\S]*?_checkSelection\(\{ adaptiveOpen: true \}\)/.test(hostSource),
+  /function _alignCurrentTextLayerToSelection\([^)]*\)[\s\S]*?_checkSelection\(\{ adaptiveOpen: true \}\)/.test(hostSource),
   "Align must use adaptive selection opening"
 );
 assert.ok(

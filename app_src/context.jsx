@@ -77,6 +77,7 @@ const storeFields = [
   "styleSizeTipCount",
   "styleSizeTipLastChangeAt",
   "styleSizeTipShown",
+  "balloonCenteringDebug",
   "resetLineCounterOnPage",
   "tabs",
   "currentTabId",
@@ -123,6 +124,7 @@ const defaultUiLayout = {
     footerRepo: true,
     footerTextShapeR: true,
     footerMultiBubble: true,
+    footerBalloonDebug: true,
   },
   sizes: {
     previewHeight: 130,
@@ -133,6 +135,7 @@ const defaultUiLayout = {
       repo: 12,
       textShapeR: 12,
       multiBubble: 12,
+      balloonDebug: 12,
     },
   },
 };
@@ -345,6 +348,8 @@ const initialState = {
   styleSizeTipLastChangeAt: 0,
   styleSizeTipShown: false,
   styleSizeTipVisible: false,
+  balloonCenteringDebug: storage.data?.balloonCenteringDebug === true,
+  balloonCenteringDebugData: null,
   resetLineCounterOnPage: storage.data?.resetLineCounterOnPage !== false,
   multiTabEnabled: storage.data?.multiTabEnabled !== false,
   ...storage.data,
@@ -1139,6 +1144,16 @@ const baseReducer = (state, action) => {
 
     case "setDehyphenateTextShapeR": {
       newState.dehyphenateTextShapeR = action.value === true;
+      break;
+    }
+
+    case "setBalloonCenteringDebug": {
+      newState.balloonCenteringDebug = !!action.value;
+      break;
+    }
+
+    case "setBalloonCenteringDebugData": {
+      newState.balloonCenteringDebugData = action.data || null;
       break;
     }
 

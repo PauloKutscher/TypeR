@@ -350,6 +350,39 @@ export function extractIntactArcPoints(points) {
 /**
  * Detect rectangular or square narration/thought boxes
  */
+function hasInvertedSymmetricProfile(rows) {
+  if (!rows || rows.length < 7) return false;
+
+  let maxWidth = 0;
+  for (let i = 0; i < rows.length; i++) {
+    maxWidth = Math.max(maxWidth, Number(rows[i].width) || 0);
+  }
+  if (maxWidth <= 0.65) return false;
+
+  const firstWidth = Number(rows[0].width) || 0;
+  const lastWidth = Number(rows[rows.length - 1].width) || 0;
+  const middleStart = Math.floor(rows.length * 0.30);
+  const middleEnd = Math.ceil(rows.length * 0.70);
+  let middleMaxWidth = 0;
+  let symmetryError = 0;
+
+  for (let i = middleStart; i < middleEnd; i++) {
+    middleMaxWidth = Math.max(middleMaxWidth, Number(rows[i].width) || 0);
+  }
+  for (let i = 0; i < rows.length; i++) {
+    const opposite = rows.length - 1 - i;
+    symmetryError += Math.abs((Number(rows[i].width) || 0) - (Number(rows[opposite].width) || 0));
+  }
+
+  // A valid filled rectangle cannot be almost full-width at both ends while
+  // collapsing through the middle. This is the characteristic profile of a
+  // malformed/self-intersecting path returned by Photoshop, not a scene cut.
+  return firstWidth > maxWidth * 0.75 &&
+    lastWidth > maxWidth * 0.75 &&
+    middleMaxWidth < maxWidth * 0.55 &&
+    symmetryError / rows.length < 0.12;
+}
+
 export function isRectangularShape(shapeData) {
   if (!shapeData || !shapeData.bounds) return false;
   const bounds = shapeData.bounds;
@@ -372,6 +405,8 @@ export function isRectangularShape(shapeData) {
       if (nearEdgeCount >= poly.length - 1) return true;
     }
   }
+
+  if (hasInvertedSymmetricProfile(rows)) return true;
 
   if (rows && rows.length >= 5) {
     let fullWidthRows = 0;

@@ -13,7 +13,8 @@ import { getBubbleCacheKey, haveSameLayerSize } from "../../textShapeRTracking";
 import { pasteInSelection, withShortcutHint } from "../../shortcutCommands";
 import { createFontPreviewRegistry, getFontPreviewFamily } from "../../fontPreview";
 import { notePerfRender } from "../../perfDebug";
-import TextShapeRFitPreview from "../textShapeRFitPreview";
+import TextShapeRFitPreview from "../textShapeRFitpreview";
+import BalloonCenteringDebug from "./BalloonCenteringDebug";
 
 let textShapeREnginePromise = null;
 let panelSnapshotPending = false;
@@ -144,6 +145,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     textShapeRLearnTipShown: state.textShapeRLearnTipShown,
     textShapeRLearnTipVisible: state.textShapeRLearnTipVisible,
     shortcut: state.shortcut,
+    balloonCenteringDebug: state.balloonCenteringDebug,
+    balloonCenteringDebugData: state.balloonCenteringDebugData,
   }));
   const uiVisible = context.state.uiLayout?.visible || {};
   const showPreviewMainControls =
@@ -1021,7 +1024,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     scrollToLine(line.rawIndex);
   }, [line.rawIndex]);
 
-  const handleAlignLayer = React.useCallback(() => {
+const handleAlignLayer = React.useCallback(() => {
     const geometry = textShapeREngine && inlineSelectionShape?.profile && textShapeREngine.getShapeProfileGeometry
       ? textShapeREngine.getShapeProfileGeometry(inlineSelectionShape.profile)
       : null;
@@ -1032,11 +1035,27 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       ? (geometry.offsetY || 0) * (inlineSelectionShape.height || 0)
       : (inlineSelectionShape?.phantomOffsetY || 0);
     const phantomGeometryProvided = !!geometry;
-    alignTextLayerToSelection(context.state.resizeTextBoxOnCenter, context.state.internalPadding || 0, () => {
-      if (context.state.multiBubbleMode && (context.state.storedSelections || []).length > 0) {
-        resetStoredSelections(true);
+    const phantomHasCompletion = geometry ? geometry.hasCompletion === true : null;
+    const phantomIsRectangular = geometry ? geometry.isRectangular === true : null;
+    const collectDebug = context.state.balloonCenteringDebug === true;
+    alignTextLayerToSelection(
+      context.state.resizeTextBoxOnCenter,
+      context.state.internalPadding || 0,
+      () => {
+        if (context.state.multiBubbleMode && (context.state.storedSelections || []).length > 0) {
+          resetStoredSelections(true);
+        }
+      },
+      phantomOffsetX,
+      phantomOffsetY,
+      phantomGeometryProvided,
+      phantomHasCompletion,
+      phantomIsRectangular,
+      collectDebug,
+      (debugData) => {
+        context.dispatch({ type: "setBalloonCenteringDebugData", data: debugData });
       }
-    }, phantomOffsetX, phantomOffsetY, phantomGeometryProvided);
+    );
   }, [context.state, inlineSelectionShape, resetStoredSelections, textShapeREngine]);
 
   const handleDecrease = React.useCallback(() => {
@@ -1515,6 +1534,12 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           </div>
         )}
       </div>
+      )}
+      {context.state.balloonCenteringDebug && context.state.balloonCenteringDebugData && (
+        <BalloonCenteringDebug
+          data={context.state.balloonCenteringDebugData}
+          onClose={() => context.dispatch({ type: "setBalloonCenteringDebug", value: false })}
+        />
       )}
     </React.Fragment>
   );

@@ -98,7 +98,7 @@ var _hostState = {
     result: "",
     scanBubbles: false,
   },
-  createTextLayerInSelection: {
+createTextLayerInSelection: {
     data: null,
     result: "",
     point: false,
@@ -111,6 +111,9 @@ var _hostState = {
     phantomOffsetX: 0,
     phantomOffsetY: 0,
     phantomGeometryProvided: false,
+    phantomHasCompletion: null,
+    phantomIsRectangular: null,
+    debugData: null,
   },
   changeActiveLayerTextSize: {
     value: 0,
@@ -855,6 +858,39 @@ function _resizeTextBoxToContent(width, currentBounds) {
 // Keep the host-side fallback in sync with phantomEllipse.js. A rectangular
 // narration box has no missing arc to reconstruct, so its center must remain
 // the selection center.
+function _hasInvertedSymmetricProfileES3(rows) {
+  if (!rows || rows.length < 7) return false;
+
+  var maxWidth = 0;
+  for (var i = 0; i < rows.length; i++) {
+    maxWidth = Math.max(maxWidth, Number(rows[i].width) || 0);
+  }
+  if (maxWidth <= 0.65) return false;
+
+  var firstWidth = Number(rows[0].width) || 0;
+  var lastWidth = Number(rows[rows.length - 1].width) || 0;
+  var middleStart = Math.floor(rows.length * 0.30);
+  var middleEnd = Math.ceil(rows.length * 0.70);
+  var middleMaxWidth = 0;
+  var symmetryError = 0;
+
+  for (var m = middleStart; m < middleEnd; m++) {
+    middleMaxWidth = Math.max(middleMaxWidth, Number(rows[m].width) || 0);
+  }
+  for (var r = 0; r < rows.length; r++) {
+    var opposite = rows.length - 1 - r;
+    symmetryError += Math.abs((Number(rows[r].width) || 0) - (Number(rows[opposite].width) || 0));
+  }
+
+  // A valid filled rectangle cannot be almost full-width at both ends while
+  // collapsing through the middle. Treat this malformed path profile as a
+  // neutral/rectangular shape instead of inventing a scene cut.
+  return firstWidth > maxWidth * 0.75 &&
+    lastWidth > maxWidth * 0.75 &&
+    middleMaxWidth < maxWidth * 0.55 &&
+    symmetryError / rows.length < 0.12;
+}
+
 function _isRectangularShapeES3(shapeData) {
   if (!shapeData || !shapeData.bounds) return false;
   var bounds = shapeData.bounds;
@@ -878,6 +914,8 @@ function _isRectangularShapeES3(shapeData) {
     }
   }
 
+  if (_hasInvertedSymmetricProfileES3(rows)) return true;
+
   if (rows && rows.length >= 5) {
     var fullWidthRows = 0;
     for (var r = 0; r < rows.length; r++) {
@@ -889,7 +927,7 @@ function _isRectangularShapeES3(shapeData) {
   return false;
 }
 
-function _positionLayerWithinSelection(selection, bounds, phantomOffsetX, phantomOffsetY) {
+function _positionLayerWithinSelection(selection, bounds, phantomOffsetX, phantomOffsetY, useSafetyMargin) {
   if (!selection || !bounds) return;
 
   var targetXMid = selection.xMid + (Number(phantomOffsetX) || 0);
@@ -901,9 +939,10 @@ function _positionLayerWithinSelection(selection, bounds, phantomOffsetX, phanto
   var boundXMid = bounds.xMid;
   var boundYMid = bounds.yMid;
 
-  // Safety tolerance clamping: ensure the text block never spills outside the visible balloon selection
-  var marginX = Math.min(selection.width * 0.05, Math.max(0, (selection.width - bounds.width) / 2));
-  var marginY = Math.min(selection.height * 0.05, Math.max(0, (selection.height - bounds.height) / 2));
+  // Only incomplete/cut balloons need a safety margin. Rectangular and intact
+  // balloons must use the literal geometric center, without an artificial inset.
+  var marginX = useSafetyMargin === false ? 0 : Math.min(selection.width * 0.05, Math.max(0, (selection.width - bounds.width) / 2));
+  var marginY = useSafetyMargin === false ? 0 : Math.min(selection.height * 0.05, Math.max(0, (selection.height - bounds.height) / 2));
 
   var minXMid = selection.left + marginX + bounds.width / 2;
   var maxXMid = selection.right - marginX - bounds.width / 2;
@@ -2338,7 +2377,7 @@ function _fitPhantomEllipseForSelection(shapeData) {
   };
 }
 
-function _alignCurrentTextLayerToSelection() {
+function _alignCurrentTextLayerToSelection(collectDebug) {
   var state = _hostState.alignTextLayerToSelection;
   if (!_layerIsTextLayer()) {
     return "layer";
@@ -2352,6 +2391,7 @@ function _alignCurrentTextLayerToSelection() {
   } catch (visReadErr) {}
 
   var selection = null;
+  var debugData = (collectDebug === true || state.collectDebug === true) ? {} : null;
   try {
     // 1. Temporarily hide the text layer so pixel wand and shape sampling sees ONLY
     // the clean balloon without any text glyphs inside interfering with the selection/shape!
@@ -2381,8 +2421,13 @@ function _alignCurrentTextLayerToSelection() {
         if (activeLayer && wasVisible) {
           try { activeLayer.visible = true; } catch (restoreVisErr) {}
         }
+        if (debugData) debugData.fallbackReason = "Selection error: " + selection.error;
         return selection.error;
       }
+    }
+
+    if (debugData) {
+      debugData.selectionBounds = selection;
     }
 
     var wasPoint = _textLayerIsPointText();
@@ -2395,7 +2440,13 @@ function _alignCurrentTextLayerToSelection() {
       _resizeTextBoxToContent(dimensions.width, textBounds);
       bounds = _getCurrentTextLayerBounds();
     }
+    var originalBounds = bounds;
     bounds = _getCurrentRenderedTextBounds() || bounds;
+
+    if (debugData) {
+      debugData.renderedTextBounds = bounds;
+      debugData.originalTextBounds = originalBounds;
+    }
 
     var phantomOffsetX = Number(state.phantomOffsetX) || 0;
     var phantomOffsetY = Number(state.phantomOffsetY) || 0;
@@ -2403,21 +2454,101 @@ function _alignCurrentTextLayerToSelection() {
     // balloon. Only legacy callers without geometry may trigger host-side
     // sampling; otherwise the two implementations can disagree and the
     // valid zero result gets silently replaced.
+    var hostSampledPhantom = false;
+    var sampledShape = null;
     if (!state.phantomGeometryProvided && phantomOffsetX === 0 && phantomOffsetY === 0) {
       try {
-        var shape = _sampleSelectionShapeViaPath(selection, 17, false);
-        if (shape) {
-          var phantom = _fitPhantomEllipseForSelection(shape);
+        sampledShape = _sampleSelectionShapeViaPath(selection, 17, false);
+        if (sampledShape) {
+          if (debugData) {
+            debugData.sampledShape = sampledShape;
+          }
+          var phantom = _fitPhantomEllipseForSelection(sampledShape);
           if (phantom) {
+            if (debugData) {
+              debugData.phantomFit = phantom;
+            }
             phantomOffsetX = phantom.pixelOffsetX;
             phantomOffsetY = phantom.pixelOffsetY;
+            hostSampledPhantom = true;
           }
         }
       } catch (alignPhantomError) {}
+    } else if (debugData) {
+      // Always sample for debug data when panel provided geometry, so we can
+      // correctly report isRectangular, cut detection, etc. in the debug panel.
+      // Mirror getCurrentSelectionShape: try path first, then legacy row sampling.
+      try {
+        sampledShape = _sampleSelectionShapeViaPath(selection, 17, false) ||
+                       _sampleCurrentSelectionShape(selection, 17);
+        if (sampledShape) {
+          debugData.sampledShape = sampledShape;
+          var phantom = _fitPhantomEllipseForSelection(sampledShape);
+          if (phantom) {
+            debugData.phantomFit = phantom;
+          }
+        }
+      } catch (debugSampleError) {}
+    }
+
+    if (debugData) {
+      debugData.hostSampledPhantom = hostSampledPhantom;
+      debugData.phantomOffsetX = phantomOffsetX;
+      debugData.phantomOffsetY = phantomOffsetY;
+      debugData.phantomGeometryProvided = state.phantomGeometryProvided;
+    }
+
+    // A panel-provided geometry explicitly tells us whether the balloon is
+    // incomplete. For rectangles and intact balloons, remove the safety inset;
+    // retain it only when a cut/completion is actually present. Legacy callers
+    // without geometry keep the previous conservative behavior.
+    var useSafetyMargin = !state.phantomGeometryProvided ||
+      (state.phantomHasCompletion === true && state.phantomIsRectangular !== true);
+
+    var targetXMid = selection.xMid + phantomOffsetX;
+    var targetYMid = selection.yMid + phantomOffsetY;
+
+    var marginX = useSafetyMargin ? Math.min(selection.width * 0.05, Math.max(0, (selection.width - bounds.width) / 2)) : 0;
+    var marginY = useSafetyMargin ? Math.min(selection.height * 0.05, Math.max(0, (selection.height - bounds.height) / 2)) : 0;
+
+    var minXMid = selection.left + marginX + bounds.width / 2;
+    var maxXMid = selection.right - marginX - bounds.width / 2;
+    if (minXMid <= maxXMid) {
+      targetXMid = Math.max(minXMid, Math.min(maxXMid, targetXMid));
+    } else {
+      targetXMid = selection.xMid;
+    }
+
+    var minYMid = selection.top + marginY + bounds.height / 2;
+    var maxYMid = selection.bottom - marginY - bounds.height / 2;
+    if (minYMid <= maxYMid) {
+      targetYMid = Math.max(minYMid, Math.min(maxYMid, targetYMid));
+    } else {
+      targetYMid = selection.yMid;
+    }
+
+    if (debugData) {
+      debugData.targetCenter = { x: Math.round(targetXMid), y: Math.round(targetYMid) };
+      debugData.marginX = Math.round(marginX);
+      debugData.marginY = Math.round(marginY);
+      debugData.safetyMarginApplied = useSafetyMargin;
+      debugData.appliedOffset = { x: Math.round(targetXMid - bounds.xMid), y: Math.round(targetYMid - bounds.yMid) };
+      var sampledRows = debugData.sampledShape && debugData.sampledShape.rows;
+      var sampledPolygons = debugData.sampledShape && debugData.sampledShape.polygons;
+      debugData.sampledRows = sampledRows || [];
+      debugData.polygons = sampledPolygons || [];
+      debugData.geometryAnalysis = debugData.phantomFit || null;
+      var sampledIsRectangular = _isRectangularShapeES3({ bounds: selection, rows: sampledRows, polygons: sampledPolygons });
+      debugData.sampledIsRectangular = sampledIsRectangular;
+      debugData.isRectangular = state.phantomIsRectangular === true ||
+        (state.phantomIsRectangular === null && sampledIsRectangular);
+      debugData.hasCompletion = state.phantomGeometryProvided && typeof state.phantomHasCompletion === "boolean"
+        ? state.phantomHasCompletion
+        : Math.abs(phantomOffsetX) > selection.width * 0.015 || Math.abs(phantomOffsetY) > selection.height * 0.015;
     }
 
     _deselect();
-    _positionLayerWithinSelection(selection, bounds, phantomOffsetX, phantomOffsetY);
+    _positionLayerWithinSelection(selection, bounds, phantomOffsetX, phantomOffsetY, useSafetyMargin);
     if (wasPoint) {
       _changeToPointText();
     }
@@ -2430,6 +2561,9 @@ function _alignCurrentTextLayerToSelection() {
     }
   }
 
+  if (debugData) {
+    state.debugData = debugData;
+  }
   return "";
 }
 
@@ -2547,7 +2681,7 @@ function _alignTextLayerToSelection() {
   var alignedCount = 0;
   var firstError = "";
   var selectedCount = _forEachSelectedLayer(function () {
-    var result = _alignCurrentTextLayerToSelection();
+    var result = _alignCurrentTextLayerToSelection(state.collectDebug);
     if (result) {
       if (!firstError) firstError = result;
       return;
@@ -2556,7 +2690,7 @@ function _alignTextLayerToSelection() {
   });
 
   if (!selectedCount) {
-    firstError = _alignCurrentTextLayerToSelection();
+    firstError = _alignCurrentTextLayerToSelection(state.collectDebug);
     if (!firstError) alignedCount++;
   }
 
@@ -3123,9 +3257,17 @@ function alignTextLayerToSelection(data) {
   state.phantomOffsetX = Number(data && data.phantomOffsetX) || 0;
   state.phantomOffsetY = Number(data && data.phantomOffsetY) || 0;
   state.phantomGeometryProvided = !!(data && data.phantomGeometryProvided === true);
+  state.phantomHasCompletion = data && typeof data.phantomHasCompletion === "boolean" ? data.phantomHasCompletion : null;
+  state.phantomIsRectangular = data && typeof data.phantomIsRectangular === "boolean" ? data.phantomIsRectangular : null;
+  state.collectDebug = !!(data && data.collectDebug === true);
+  state.debugData = null;
   state.result = "";
   app.activeDocument.suspendHistory("TyperTools Align", "_alignTextLayerToSelection()");
-  return state.result;
+  var result = state.result;
+  if (state.collectDebug && state.debugData) {
+    return jamJSON.stringify({ result: result, debugData: state.debugData });
+  }
+  return result;
 }
 
 function changeActiveLayerTextSize(val) {

@@ -948,7 +948,7 @@ const createTextLayersInStoredSelections = (texts, styles, selections, pointText
   }));
 };
 
-const alignTextLayerToSelection = (resizeTextBox = false, padding = 0, callback = () => {}, phantomOffsetX = 0, phantomOffsetY = 0, phantomGeometryProvided = false) => {
+const alignTextLayerToSelection = (resizeTextBox = false, padding = 0, callback = () => {}, phantomOffsetX = 0, phantomOffsetY = 0, phantomGeometryProvided = false, phantomHasCompletion = null, phantomIsRectangular = null, collectDebug = false, debugCallback = null) => {
   const data = JSON.stringify({
     resizeTextBox: !!resizeTextBox,
     padding: padding || 0,
@@ -958,12 +958,27 @@ const alignTextLayerToSelection = (resizeTextBox = false, padding = 0, callback 
     // Keep it distinct from the legacy shortcut path, which asks the host
     // to sample and infer geometry itself.
     phantomGeometryProvided: phantomGeometryProvided === true,
+    phantomHasCompletion: typeof phantomHasCompletion === "boolean" ? phantomHasCompletion : null,
+    phantomIsRectangular: typeof phantomIsRectangular === "boolean" ? phantomIsRectangular : null,
+    collectDebug: collectDebug === true,
   });
-  csInterface.evalScript("alignTextLayerToSelection(" + data + ")", trackHostAction((error) => {
+  csInterface.evalScript("alignTextLayerToSelection(" + data + ")", trackHostAction((result) => {
+    let error = result;
+    let debugData = null;
+    try {
+      const parsed = JSON.parse(result || "{}");
+      if (parsed && typeof parsed === "object" && parsed.result !== undefined) {
+        error = parsed.result;
+        debugData = parsed.debugData || null;
+      }
+    } catch (e) {
+      // Not a JSON response, treat as error string
+    }
     if (error === "smallSelection") nativeAlert(locale.errorSmallSelection, locale.errorTitle, true);
     else if (error === "noSelection") nativeAlert(locale.errorNoSelection, locale.errorTitle, true);
     else if (error) nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
     callback(!error);
+    if (debugCallback && debugData) debugCallback(debugData);
   }));
 };
 

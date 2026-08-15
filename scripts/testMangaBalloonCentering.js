@@ -118,4 +118,35 @@ assert.strictEqual(rectRecon.isRectangular, true);
 assert.strictEqual(rectRecon.hasCompletion, false);
 console.log("✓ Case 6: Rectangular Narration Box passed");
 
+// Case 7: malformed inverted path profile from a rectangular selection.
+// Photoshop can occasionally return a self-intersecting path whose top and
+// bottom spans are wide while the middle collapses. It must not become a cut.
+const malformedRectRows = [
+  { y: 0.00, left: 0.00, right: 0.99, width: 0.99 },
+  { y: 0.0625, left: 0.02, right: 0.93, width: 0.91 },
+  { y: 0.125, left: 0.05, right: 0.80, width: 0.75 },
+  { y: 0.1875, left: 0.08, right: 0.68, width: 0.60 },
+  { y: 0.25, left: 0.11, right: 0.56, width: 0.45 },
+  { y: 0.3125, left: 0.14, right: 0.17, width: 0.03 },
+  { y: 0.375, left: 0.17, right: 0.20, width: 0.03 },
+  { y: 0.50, left: 0.23, right: 0.25, width: 0.02 },
+  { y: 0.625, left: 0.17, right: 0.20, width: 0.03 },
+  { y: 0.6875, left: 0.14, right: 0.17, width: 0.03 },
+  { y: 0.75, left: 0.11, right: 0.56, width: 0.45 },
+  { y: 0.8125, left: 0.08, right: 0.68, width: 0.60 },
+  { y: 0.875, left: 0.05, right: 0.80, width: 0.75 },
+  { y: 0.9375, left: 0.02, right: 0.93, width: 0.91 },
+  { y: 1.00, left: 0.00, right: 0.99, width: 0.99 },
+];
+const malformedRect = {
+  bounds: { left: 0, right: 160, top: 0, bottom: 263, width: 160, height: 263, xMid: 80, yMid: 131.5 },
+  rows: malformedRectRows,
+};
+assert.ok(isRectangularShape(malformedRect), "Malformed rectangle profile must be neutralized");
+const malformedRectRes = analyzeMangaBalloonGeometry(malformedRect);
+assert.strictEqual(malformedRectRes.offsetX, 0, "Malformed rectangle must not receive horizontal cut offset");
+assert.strictEqual(malformedRectRes.offsetY, 0, "Malformed rectangle must not receive vertical cut offset");
+assert.strictEqual(malformedRectRes.isCut, false, "Malformed rectangle must not be treated as cut");
+console.log("✓ Case 7: Malformed rectangular path profile passed");
+
 console.log("All manga balloon centering cases passed with 100% precision!");
