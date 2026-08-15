@@ -54,11 +54,12 @@ const AppFooter = React.memo(function AppFooter() {
         {locale.footerHelp}
       </span>
       )}
-      {uiVisible.footerSettings !== false && (
+      {/* Always visible: this link is the only entry point to the settings
+          modal, so it must never be hidden — the toggle that re-enables it
+          lives inside the dialog itself. */}
       <span className="link" style={{ fontSize: footerSize("settings") }} onClick={openSettings}>
         {locale.footerSettings}
       </span>
-      )}
       {uiVisible.footerRepo !== false && (
       <span className="link" style={{ fontSize: footerSize("repo") }} onClick={openRepository}>
         {context.state.images.length

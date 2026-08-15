@@ -1472,11 +1472,14 @@ const getFitLineCountBounds = (totalUnits, fit) => {
   return { min: tightest || limit, max: limit };
 };
 
-const buildManualTargets = (tokens, lineCount, settings) => {
+const buildManualTargets = (tokens, lineCount, settings, phantomRows) => {
   const shape = settings.shape || "sine";
   const softness = settings.softness || 0.6;
   const floor = settings.floor == null ? 0.15 : settings.floor;
-  const profileRows = getShapeProfileGeometry(settings.shapeProfile).phantomRows;
+  // The phantom contour is computed once by the caller: getShapeProfileGeometry
+  // re-runs the cut detection (O(n²) linear fits) on every call, and this
+  // function runs once per line count per candidate grid
+  const profileRows = phantomRows || getShapeProfileGeometry(settings.shapeProfile).phantomRows;
   const weights = Array.from({ length: lineCount }, (_, index) => {
     const y = lineCount <= 1 ? 0.5 : (index + 0.5) / lineCount;
     if (shape === "selection" && profileRows.length) {
@@ -1694,6 +1697,7 @@ const generateTextShapeRVariants = (text, options = {}) => {
   const matchedExemplars = getMatchedExemplars(totalUnits, aspect, bubbleSignature);
   let scoringProfile = profile;
   let shapeTargetSettings = null;
+  let shapeTargetPhantomRows = null;
   if (aspect == null && shapeRows.length <= 1) {
     // No bubble info at all: the preset's fixed line target over-shoots
     // short texts and under-shoots long ones — adapt it to the text volume
@@ -1729,12 +1733,14 @@ const generateTextShapeRVariants = (text, options = {}) => {
       lineTargetWeight: 24,
       maxLineWidth: clamp((profile.maxLineWidth || 28) / aspectStretch, 12, 40),
     };
-    shapeTargetSettings = {
+shapeTargetSettings = {
       shape: "selection",
       shapeProfile: { ...(options.shapeProfile || {}), rows: shapeRows },
       softness: 1,
       floor: 0.14,
     };
+    // Resolve the phantom contour once for all line counts and hyphen sets
+    shapeTargetPhantomRows = getShapeProfileGeometry(shapeTargetSettings.shapeProfile).phantomRows;
   }
   const styleConfidence = getStyleConfidence();
   let learnedDensity = styleConfidence > 0 && tuning.style.density ? tuning.style.density : null;
@@ -1838,7 +1844,7 @@ const generateTextShapeRVariants = (text, options = {}) => {
       const scale = Math.min(1, total / availableTotal);
       targets = available.map((units) => Math.max(1, units * scale));
     } else {
-      targets = buildManualTargets(tokens, lineCount, shapeTargetSettings);
+      targets = buildManualTargets(tokens, lineCount, shapeTargetSettings, shapeTargetPhantomRows);
     }
     [-1, 0, 1].forEach((bias) => {
       const biasedTargets = bias === 0 ? targets : targets.map((target) => Math.max(1, target + bias));

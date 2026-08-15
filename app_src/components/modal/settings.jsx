@@ -43,8 +43,12 @@ const LAYOUT_BLOCK_ELEMENTS = {
   preview: ["previewCreateButton", "previewAlignButton", "previewSizeControls", "previewNav", "previewWidget"],
   text: ["tabBar"],
   styles: [],
-  footer: ["footerHelp", "footerSettings", "footerRepo", "footerTextShapeR", "footerMultiBubble"],
+  footer: ["footerHelp", "footerRepo", "footerTextShapeR", "footerMultiBubble"],
 };
+// Footer links that are always visible: their size stays editable but they
+// cannot be hidden. The Settings link is the only way back into this dialog,
+// so hiding it would lock the user out of the configuration.
+const FOOTER_ALWAYS_VISIBLE_KEYS = ["footerSettings"];
 // Footer element -> per-button size key stored in uiLayout.sizes.footer
 const FOOTER_SIZE_KEYS = {
   footerHelp: "help",
@@ -1570,7 +1574,13 @@ const SettingsModal = React.memo(function SettingsModal() {
                       onClick={() => setSelectedLayoutBlock("footer")}
                     >
                       {vis.footerHelp && <span className={"mk-f" + hl("footerHelp")} {...mockElementProps("footerHelp")} />}
-                      {vis.footerSettings && <span className={"mk-f m-on" + hl("footerSettings")} {...mockElementProps("footerSettings")} />}
+                      <span
+                        className={"mk-f m-on" + hl("footerSettings")}
+                        onMouseDown={stopMouse}
+                        onMouseEnter={() => setLayoutHoverEl("footerSettings")}
+                        onMouseLeave={() => setLayoutHoverEl(null)}
+                        title={elementLabels.footerSettings}
+                      />
                       {vis.footerRepo && <span className={"mk-f" + hl("footerRepo")} {...mockElementProps("footerRepo")} />}
                       <span className="mk-fspacer" />
                       {vis.footerTextShapeR && (
@@ -1656,6 +1666,46 @@ const SettingsModal = React.memo(function SettingsModal() {
                   )}
                   {selectedLayoutBlock === "footer" ? (
                     <div className="settings-layout-elements">
+                      {FOOTER_ALWAYS_VISIBLE_KEYS.map((key) => {
+                        const sizeKey = FOOTER_SIZE_KEYS[key];
+                        const size = parseInt(footerSizes[sizeKey], 10) || 12;
+                        return (
+                          <div
+                            key={key}
+                            className="settings-layout-footer-element"
+                            onMouseEnter={() => setLayoutHoverEl(key)}
+                            onMouseLeave={() => setLayoutHoverEl(null)}
+                          >
+                            <label className="settings-layout-element" onMouseDown={(e) => e.preventDefault()}>
+                              <span>{elementLabels[key]}</span>
+                            </label>
+                            <input
+                              type="range"
+                              min="8"
+                              max="20"
+                              title={((locale.settingsLayoutFooterSize || "Button size (px)") + ": ") + elementLabels[key]}
+                              value={Math.min(20, Math.max(8, size))}
+                              onChange={(e) => {
+                                setFooterSizes((current) => ({ ...current, [sizeKey]: e.target.value }));
+                                setEdited(true);
+                              }}
+                            />
+                            <input
+                              type="number"
+                              min="8"
+                              max="20"
+                              value={footerSizes[sizeKey]}
+                              className="settings-layout-footer-size-input"
+                              onChange={(e) => {
+                                if (e.target.value === "" || /^[0-9]+$/.test(e.target.value)) {
+                                  setFooterSizes((current) => ({ ...current, [sizeKey]: e.target.value }));
+                                  setEdited(true);
+                                }
+                              }}
+                            />
+                          </div>
+                        );
+                      })}
                       {selectedElements.map((key) => {
                         const sizeKey = FOOTER_SIZE_KEYS[key];
                         const size = parseInt(footerSizes[sizeKey], 10) || 12;

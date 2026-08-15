@@ -1686,32 +1686,6 @@ function _alignCurrentTextLayerToSelection() {
   return "";
 }
 
-function _flattenPathPolygon(poly) {
-  var count = poly.length;
-  if (count < 3) return null;
-  var flattenSteps = count > 500 ? 1 : 6;
-  var flat = [];
-  for (var i = 0; i < count; i++) {
-    var current = poly[i];
-    var next = poly[(i + 1) % count];
-    var a = current.anchor;
-    var c1 = current.right || a;
-    var c2 = next.left || next.anchor;
-    var b = next.anchor;
-    var straight = c1[0] === a[0] && c1[1] === a[1] && c2[0] === b[0] && c2[1] === b[1];
-    var steps = straight ? 1 : flattenSteps;
-    for (var t = 0; t < steps; t++) {
-      var u = t / steps;
-      var v = 1 - u;
-      flat.push([
-        v * v * v * a[0] + 3 * v * v * u * c1[0] + 3 * v * u * u * c2[0] + u * u * u * b[0],
-        v * v * v * a[1] + 3 * v * v * u * c1[1] + 3 * v * u * u * c2[1] + u * u * u * b[1],
-      ]);
-    }
-  }
-  return flat.length >= 3 ? flat : null;
-}
-
 function _getLayerPropertyById(id, layerIndex) {
   var ref = new ActionReference();
   ref.putProperty(charIDToTypeID("Prpr"), id);
@@ -1734,7 +1708,10 @@ function _getLayerBoundsByIndex(layerIndex) {
 // bounds. Shape layers (kind 4) are the canonical bubbles of the workflow,
 // and their bounds are deterministic — unlike pixel sampling, they never
 // depend on fill color, anti-aliasing or the bubble tail. The walk is capped
-// so documents with huge layer stacks stay fast.
+// so documents with huge layer stacks stay fast, and only a shape whose
+// bounds contain the text layer is accepted: an unrelated loose shape
+// (panel frame, redraw) below the bubble would otherwise hijack the
+// centering.
 function _findShapeLayerBoundsBelowTextLayer() {
   try {
     var propId = charIDToTypeID("Prpr");
@@ -1779,14 +1756,34 @@ function _findShapeLayerBoundsBelowTextLayer() {
     }
     if (activeIndex < firstIndex) return null;
 
-    var limit = Math.max(firstIndex, activeIndex - 40);
+    // If the text bounds cannot be read, fall back to accepting the first
+    // shape layer so centering still works on unusual documents
+    var textBounds = null;
+    try {
+      textBounds = _getCurrentTextLayerBounds();
+    } catch (textBoundsError) {}
+
+    var limit = Math.max(firstIndex, activeIndex - 12);
     for (var i = activeIndex - 1; i >= limit; i--) {
       var kind = 0;
       try {
         kind = _getLayerPropertyById(layerKindId, i).getInteger(layerKindId);
       } catch (kindError) {}
       if (kind === shapeLayerKind) {
-        return _getLayerBoundsByIndex(i);
+        var shapeBounds = _getLayerBoundsByIndex(i);
+        if (!shapeBounds) continue;
+        // If the text bounds cannot be read, accept the first shape layer so
+        // centering still works on unusual documents
+        if (!textBounds) return shapeBounds;
+        // Allow 1px of float/anti-alias noise on each side
+        if (
+          shapeBounds.left <= textBounds.left + 1 &&
+          shapeBounds.top <= textBounds.top + 1 &&
+          shapeBounds.right >= textBounds.right - 1 &&
+          shapeBounds.bottom >= textBounds.bottom - 1
+        ) {
+          return shapeBounds;
+        }
       }
     }
   } catch (walkError) {}
