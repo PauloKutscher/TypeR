@@ -110,6 +110,7 @@ var _hostState = {
     padding: 0,
     phantomOffsetX: 0,
     phantomOffsetY: 0,
+    phantomGeometryProvided: false,
   },
   changeActiveLayerTextSize: {
     value: 0,
@@ -594,6 +595,56 @@ function _getCurrentTextLayerBounds() {
   return _getBoundsFromDescriptor(bounds);
 }
 
+// Paragraph-text layer bounds can describe the text box (and point-text bounds
+// can include font metrics) rather than the pixels occupied by the wrapped
+// glyphs. Measure a throwaway copy after Photoshop has rendered it. Rasterizing
+// the copy gives us the exact ink bounds, including automatic paragraph wraps;
+// conversion to point text remains the compatibility fallback for Photoshop
+// versions that do not expose the text-content rasterizer. The original layer,
+// content and text type are never changed.
+function _getCurrentRenderedTextBounds() {
+  var originalId = null;
+  var duplicated = false;
+  try {
+    originalId = _getActiveLayerId();
+    _duplicateActiveLayer();
+    duplicated = true;
+
+    var measured = false;
+    try {
+      if (app.activeDocument && app.activeDocument.activeLayer &&
+          app.activeDocument.activeLayer.rasterize && typeof RasterizeType !== "undefined") {
+        app.activeDocument.activeLayer.rasterize(RasterizeType.TEXTCONTENTS);
+        measured = true;
+      }
+    } catch (rasterizeError) {}
+
+    if (measured) {
+      return _getCurrentTextLayerBounds();
+    }
+
+    // Older Photoshop builds can lack RasterizeType.TEXTCONTENTS. The point
+    // conversion still exposes automatic wraps on the duplicate and is safer
+    // than centering a paragraph layer from its oversized text box.
+    if (!_textLayerIsPointText()) _changeToPointText();
+    try { jamText.getLayerText(); } catch (flushError) {}
+    return _getCurrentTextLayerBounds();
+  } catch (renderedBoundsError) {
+    return null;
+  } finally {
+    if (duplicated) {
+      try {
+        _deleteActiveLayer();
+      } catch (deleteRenderedBoundsError) {}
+    }
+    if (originalId !== null) {
+      try {
+        _selectLayerById(originalId);
+      } catch (restoreRenderedBoundsError) {}
+    }
+  }
+}
+
 function _modifySelectionBounds(amount) {
   if (amount == 0) return;
   var size = new ActionDescriptor();
@@ -844,43 +895,11 @@ function _positionLayerWithinSelection(selection, bounds, phantomOffsetX, phanto
   var targetXMid = selection.xMid + (Number(phantomOffsetX) || 0);
   var targetYMid = selection.yMid + (Number(phantomOffsetY) || 0);
 
-  var textSizePt = 14;
-  try {
-    var textParams = jamText.getLayerText();
-    if (textParams && textParams.layerText && textParams.layerText.textStyleRange) {
-      var ranges = textParams.layerText.textStyleRange;
-      for (var r = 0; r < ranges.length; r++) {
-        var ts = ranges[r] && ranges[r].textStyle;
-        if (ts) {
-          if (typeof ts.size === "number" && ts.size > 0) {
-            textSizePt = ts.size;
-          } else if (typeof ts.impliedFontSize === "number" && ts.impliedFontSize > 0) {
-            textSizePt = ts.impliedFontSize;
-          }
-        }
-      }
-    }
-  } catch (textInfoErr) {}
-
-  var docRes = 72;
-  try {
-    if (app.activeDocument && app.activeDocument.resolution) {
-      docRes = Number(app.activeDocument.resolution) || 72;
-    }
-  } catch (resErr) {}
-
-  var textSizePx = textSizePt * (docRes / 72.0);
-
-  // Photoshop's rendered layer bounds already include the italic slant. A
-  // fixed font-size correction here would introduce a horizontal offset,
-  // especially in narrow narration boxes.
+  // Center the rendered layer bounds directly. Font style, DPI and baseline
+  // are not geometric translations: applying fixed corrections for them made
+  // square narration boxes visibly drift even when the target was exact.
   var boundXMid = bounds.xMid;
-
-  // Optical Vertical Centering (Cap-height vs Baseline):
-  // Uppercase text (manga lettering) sits on the baseline with no descenders below.
-  // The raw ink bounds top is at cap-height and bottom is at the baseline, which is missing the descender half-leading (~0.08 * textSizePx).
-  // Adding an optical baseline correction centers the text perfectly on the visual guideline!
-  var boundYMid = bounds.yMid + (textSizePx * 0.08);
+  var boundYMid = bounds.yMid;
 
   // Safety tolerance clamping: ensure the text block never spills outside the visible balloon selection
   var marginX = Math.min(selection.width * 0.05, Math.max(0, (selection.width - bounds.width) / 2));
@@ -1737,6 +1756,7 @@ function _createTextLayerInSelection() {
     _resizeTextBoxToContent(dimensions.width, bounds);
   }
   bounds = _getCurrentTextLayerBounds();
+  bounds = _getCurrentRenderedTextBounds() || bounds;
 
   var phantomOffsetX = state.data && Number(state.data.phantomOffsetX) || 0;
   var phantomOffsetY = state.data && Number(state.data.phantomOffsetY) || 0;
@@ -1876,6 +1896,9 @@ function _analyzeMangaBalloonGeometryES3(shapeData) {
   var targetNormX = visualCentroidX;
   var targetNormY = visualCentroidY;
 
+  var sortedMids = midpoints.slice(0).sort(function(a, b) { return a - b; });
+  var medianMid = sortedMids[Math.floor(sortedMids.length / 2)];
+  var hasDirectionalCut = isLeftCut || isRightCut || isTopCut || isBottomCut;
   var visibleMidX = (minLeft + maxRight) / 2;
   if (isLeftCut && !isRightCut) {
     var cutShift = Math.min(0.12, (maxRight - minLeft) * 0.15);
@@ -1883,9 +1906,11 @@ function _analyzeMangaBalloonGeometryES3(shapeData) {
   } else if (isRightCut && !isLeftCut) {
     var cutShift = Math.min(0.12, (maxRight - minLeft) * 0.15);
     targetNormX = visualCentroidX * 0.4 + visibleMidX * 0.6 + cutShift;
+  } else if (!hasDirectionalCut) {
+    // A speech tail or small hand-drawn wobble is not a scene cut. Use the
+    // median row center so local protrusions do not tilt the whole text block.
+    targetNormX = medianMid;
   } else {
-    var sortedMids = midpoints.slice(0).sort(function(a, b) { return a - b; });
-    var medianMid = sortedMids[Math.floor(sortedMids.length / 2)];
     targetNormX = visualCentroidX * 0.6 + medianMid * 0.4;
   }
 
@@ -1894,14 +1919,14 @@ function _analyzeMangaBalloonGeometryES3(shapeData) {
   } else if (isTopCut && !isBottomCut) {
     targetNormY = visualCentroidY * 0.6 + 0.5 * 0.4 - 0.06;
   } else {
-    targetNormY = visualCentroidY;
+    targetNormY = hasDirectionalCut ? visualCentroidY : 0.5;
   }
 
   var rawOffsetX = targetNormX - 0.5;
   var rawOffsetY = targetNormY - 0.5;
 
-  var maxShiftX = 0.25;
-  var maxShiftY = 0.25;
+  var maxShiftX = 0.05;
+  var maxShiftY = 0.05;
   var offsetX = Math.max(-maxShiftX, Math.min(maxShiftX, rawOffsetX));
   var offsetY = Math.max(-maxShiftY, Math.min(maxShiftY, rawOffsetY));
 
@@ -2291,14 +2316,16 @@ function _fitPhantomEllipseForSelection(shapeData) {
     }
     var angleCoverage = 2 * Math.PI - maxGap;
 
+    var partialArcEvidence = angleCoverage < Math.PI * 1.85;
     if (
       distFromCenter < maxSpan * 0.8 &&
       aspectRatio <= 3.0 &&
       aspectRatio >= 0.33 &&
-      angleCoverage >= Math.PI * 0.95
+      angleCoverage >= Math.PI * 0.95 &&
+      (robust.isCut || partialArcEvidence)
     ) {
-      var ellOffsetX = Math.max(-0.25, Math.min(0.25, dx / width));
-      var ellOffsetY = Math.max(-0.25, Math.min(0.25, dy / height));
+      var ellOffsetX = Math.max(-0.05, Math.min(0.05, dx / width));
+      var ellOffsetY = Math.max(-0.05, Math.min(0.05, dy / height));
       finalOffsetX = robust.pixelOffsetX / width * 0.35 + ellOffsetX * 0.65;
       finalOffsetY = robust.pixelOffsetY / height * 0.35 + ellOffsetY * 0.65;
     }
@@ -2334,7 +2361,12 @@ function _alignCurrentTextLayerToSelection() {
       } catch (hideErr) {}
     }
 
-    selection = _checkSelection({ adaptiveOpen: true });
+    // The panel's sampled geometry and pixel offsets were calculated from
+    // the original selection bounds. Re-opening that selection here changes
+    // its anti-aliased edges and can move the target center a second time.
+    // Keep the original frame when geometry was explicitly supplied; retain
+    // the adaptive opening only for legacy shortcut callers.
+    selection = _checkSelection({ adaptiveOpen: !state.phantomGeometryProvided });
     if (selection.error) {
       if (selection.error === "noSelection") {
         var bubbleBounds = _findShapeLayerBoundsBelowTextLayer();
@@ -2363,10 +2395,15 @@ function _alignCurrentTextLayerToSelection() {
       _resizeTextBoxToContent(dimensions.width, textBounds);
       bounds = _getCurrentTextLayerBounds();
     }
+    bounds = _getCurrentRenderedTextBounds() || bounds;
 
     var phantomOffsetX = Number(state.phantomOffsetX) || 0;
     var phantomOffsetY = Number(state.phantomOffsetY) || 0;
-    if (phantomOffsetX === 0 && phantomOffsetY === 0) {
+    // A supplied (0, 0) is intentional for a rectangle or a symmetric
+    // balloon. Only legacy callers without geometry may trigger host-side
+    // sampling; otherwise the two implementations can disagree and the
+    // valid zero result gets silently replaced.
+    if (!state.phantomGeometryProvided && phantomOffsetX === 0 && phantomOffsetY === 0) {
       try {
         var shape = _sampleSelectionShapeViaPath(selection, 17, false);
         if (shape) {
@@ -3085,6 +3122,7 @@ function alignTextLayerToSelection(data) {
   state.padding = data.padding || 0;
   state.phantomOffsetX = Number(data && data.phantomOffsetX) || 0;
   state.phantomOffsetY = Number(data && data.phantomOffsetY) || 0;
+  state.phantomGeometryProvided = !!(data && data.phantomGeometryProvided === true);
   state.result = "";
   app.activeDocument.suspendHistory("TyperTools Align", "_alignTextLayerToSelection()");
   return state.result;
@@ -3270,7 +3308,7 @@ function _polygonScanlineSpan(polygons, y) {
   return minX === null ? null : { left: minX, right: maxX };
 }
 
-function _buildPathShapeRows(polygons, sampleCount) {
+function _buildPathShapeRows(polygons, sampleCount, referenceBounds) {
   var minX = Infinity;
   var minY = Infinity;
   var maxX = -Infinity;
@@ -3284,15 +3322,27 @@ function _buildPathShapeRows(polygons, sampleCount) {
       if (point[1] > maxY) maxY = point[1];
     }
   }
-  var width = maxX - minX;
-  var height = maxY - minY;
+  // Rows are consumed together with the caller's bounds. Normalizing them
+  // against the path's own bbox and later attaching the selection bbox mixes
+  // coordinate frames whenever path tolerance/anti-aliasing changes either
+  // edge. Keep one frame for y sampling and both x endpoints.
+  var frameLeft = referenceBounds && typeof referenceBounds.left === "number"
+    ? referenceBounds.left : minX;
+  var frameTop = referenceBounds && typeof referenceBounds.top === "number"
+    ? referenceBounds.top : minY;
+  var frameRight = referenceBounds && typeof referenceBounds.right === "number"
+    ? referenceBounds.right : maxX;
+  var frameBottom = referenceBounds && typeof referenceBounds.bottom === "number"
+    ? referenceBounds.bottom : maxY;
+  var width = frameRight - frameLeft;
+  var height = frameBottom - frameTop;
   if (!(width > 0) || !(height > 0)) return null;
   var sliceHeight = height / sampleCount;
   var rows = [];
   var covered = 0;
   for (var r = 0; r < sampleCount; r++) {
     var yRatio = sampleCount <= 1 ? 0.5 : r / (sampleCount - 1);
-    var yMid = minY + height * yRatio;
+    var yMid = frameTop + height * yRatio;
     var left = null;
     var right = null;
     // The legacy sampler measured the widest extent inside each band: probe
@@ -3300,8 +3350,8 @@ function _buildPathShapeRows(polygons, sampleCount) {
     var offsets = [-sliceHeight / 2, 0, sliceHeight / 2];
     for (var k = 0; k < offsets.length; k++) {
       var y = yMid + offsets[k];
-      if (y <= minY) y = minY + height * 0.002;
-      if (y >= maxY) y = maxY - height * 0.002;
+      if (y <= frameTop) y = frameTop + height * 0.002;
+      if (y >= frameBottom) y = frameBottom - height * 0.002;
       var span = _polygonScanlineSpan(polygons, y);
       if (span) {
         if (left === null || span.left < left) left = span.left;
@@ -3312,8 +3362,8 @@ function _buildPathShapeRows(polygons, sampleCount) {
       covered++;
       rows.push({
         y: yRatio,
-        left: Math.max(0, Math.min(1, (left - minX) / width)),
-        right: Math.max(0, Math.min(1, (right - minX) / width)),
+        left: Math.max(0, Math.min(1, (left - frameLeft) / width)),
+        right: Math.max(0, Math.min(1, (right - frameLeft) / width)),
         width: Math.max(0, Math.min(1, (right - left) / width)),
       });
     } else {
@@ -3441,7 +3491,7 @@ function _sampleSelectionShapeViaPath(bounds, sampleCount, restoreSelection) {
   }
   var rows = null;
   if (!failure && polygons && polygons.length) {
-    rows = _buildPathShapeRows(polygons, sampleCount);
+    rows = _buildPathShapeRows(polygons, sampleCount, bounds);
     if (!rows) failure = "emptyRows";
   } else if (!failure) {
     failure = "noPolygons";
@@ -4083,6 +4133,7 @@ function _createTextLayersInStoredSelections() {
         _resizeTextBoxToContent(dimensions.width, bounds);
       }
       bounds = _getCurrentTextLayerBounds();
+      bounds = _getCurrentRenderedTextBounds() || bounds;
 
       // Position the layer inside the stored selection.
       _positionLayerWithinSelection(selection, bounds);

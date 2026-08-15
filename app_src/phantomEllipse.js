@@ -277,7 +277,11 @@ export function fitEllipseDirect(points) {
 
   const a = semiMajorScaled * scale;
   const b = semiMinorScaled * scale;
-  const angle = 0.5 * Math.atan2(B, A - C);
+  // atan2(B, A-C)/2 points along the smaller quadratic eigen-axis when
+  // `a` is normalized to the semi-major radius below. Rotate by 90° so the
+  // returned angle and the returned (a,b) pair describe the same axes.
+  // Without this, every non-circular ellipse is reconstructed sideways.
+  const angle = 0.5 * Math.atan2(B, A - C) - Math.PI / 2;
 
   return {
     centerX,
@@ -510,6 +514,9 @@ export function analyzeMangaBalloonGeometry(shapeData) {
   let targetNormX = visualCentroidX;
   let targetNormY = visualCentroidY;
 
+  const sortedMids = [...midpoints].sort((a, b) => a - b);
+  const medianMid = sortedMids[Math.floor(sortedMids.length / 2)];
+  const hasDirectionalCut = isLeftCut || isRightCut || isTopCut || isBottomCut;
   const visibleMidX = (minLeft + maxRight) / 2;
   if (isLeftCut && !isRightCut) {
     const cutShift = Math.min(0.12, (maxRight - minLeft) * 0.15);
@@ -517,9 +524,11 @@ export function analyzeMangaBalloonGeometry(shapeData) {
   } else if (isRightCut && !isLeftCut) {
     const cutShift = Math.min(0.12, (maxRight - minLeft) * 0.15);
     targetNormX = visualCentroidX * 0.4 + visibleMidX * 0.6 + cutShift;
+  } else if (!hasDirectionalCut) {
+    // Ignore a speech-tail protrusion or a small local wobble when finding
+    // the body center. The median of row centers is stable against both.
+    targetNormX = medianMid;
   } else {
-    const sortedMids = [...midpoints].sort((a, b) => a - b);
-    const medianMid = sortedMids[Math.floor(sortedMids.length / 2)];
     targetNormX = visualCentroidX * 0.6 + medianMid * 0.4;
   }
 
@@ -528,14 +537,14 @@ export function analyzeMangaBalloonGeometry(shapeData) {
   } else if (isTopCut && !isBottomCut) {
     targetNormY = visualCentroidY * 0.6 + 0.5 * 0.4 - 0.06;
   } else {
-    targetNormY = visualCentroidY;
+    targetNormY = hasDirectionalCut ? visualCentroidY : 0.5;
   }
 
   const rawOffsetX = targetNormX - 0.5;
   const rawOffsetY = targetNormY - 0.5;
 
-  const maxShiftX = 0.25;
-  const maxShiftY = 0.25;
+  const maxShiftX = 0.05;
+  const maxShiftY = 0.05;
   const offsetX = Math.max(-maxShiftX, Math.min(maxShiftX, rawOffsetX));
   const offsetY = Math.max(-maxShiftY, Math.min(maxShiftY, rawOffsetY));
 
@@ -687,14 +696,16 @@ export function reconstructPhantomBalloon(shapeData) {
     }
     const angleCoverage = 2 * Math.PI - maxGap;
 
+    const partialArcEvidence = angleCoverage < Math.PI * 1.85;
     if (
       distFromCenter < maxSpan * 0.8 &&
       aspectRatio <= 3.0 &&
       aspectRatio >= 0.33 &&
-      angleCoverage >= Math.PI * 0.95
+      angleCoverage >= Math.PI * 0.95 &&
+      (robustAnalysis.isCut || partialArcEvidence)
     ) {
-      const ellOffsetX = Math.max(-0.25, Math.min(0.25, (ellipse.centerX - bounds.xMid) / bounds.width));
-      const ellOffsetY = Math.max(-0.25, Math.min(0.25, (ellipse.centerY - bounds.yMid) / bounds.height));
+      const ellOffsetX = Math.max(-0.05, Math.min(0.05, (ellipse.centerX - bounds.xMid) / bounds.width));
+      const ellOffsetY = Math.max(-0.05, Math.min(0.05, (ellipse.centerY - bounds.yMid) / bounds.height));
       // Blend ellipse center with robust analysis for smooth consistency
       finalOffsetX = robustAnalysis.offsetX * 0.35 + ellOffsetX * 0.65;
       finalOffsetY = robustAnalysis.offsetY * 0.35 + ellOffsetY * 0.65;

@@ -1306,6 +1306,21 @@ const getShapeProfileGeometry = (shapeProfile) => {
   // 1. Attempt full 2D phantom ellipse reconstruction if polygon / bounds data permits
   if (shapeProfile && (shapeProfile.polygons || shapeProfile.bounds)) {
     const phantom = reconstructPhantomBalloon(shapeProfile);
+    if (phantom && phantom.isRectangular) {
+      return {
+        rows,
+        phantomRows: rows,
+        centerX: 0.5,
+        centerY: 0.5,
+        offsetX: 0,
+        offsetY: 0,
+        phantomWidth: phantom.phantomWidth,
+        phantomHeight: phantom.phantomHeight,
+        ellipse: null,
+        hasCompletion: false,
+        isRectangular: true,
+      };
+    }
     if (phantom && phantom.hasCompletion) {
       return {
         rows,
@@ -1318,6 +1333,7 @@ const getShapeProfileGeometry = (shapeProfile) => {
         phantomHeight: phantom.phantomHeight,
         ellipse: phantom.ellipse,
         hasCompletion: true,
+        isRectangular: false,
       };
     }
   }

@@ -1031,11 +1031,12 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     const phantomOffsetY = geometry
       ? (geometry.offsetY || 0) * (inlineSelectionShape.height || 0)
       : (inlineSelectionShape?.phantomOffsetY || 0);
+    const phantomGeometryProvided = !!geometry;
     alignTextLayerToSelection(context.state.resizeTextBoxOnCenter, context.state.internalPadding || 0, () => {
       if (context.state.multiBubbleMode && (context.state.storedSelections || []).length > 0) {
         resetStoredSelections(true);
       }
-    }, phantomOffsetX, phantomOffsetY);
+    }, phantomOffsetX, phantomOffsetY, phantomGeometryProvided);
   }, [context.state, inlineSelectionShape, resetStoredSelections, textShapeREngine]);
 
   const handleDecrease = React.useCallback(() => {

@@ -178,10 +178,12 @@ assert.ok(Number.isFinite(completed.offsetX));
 assert.strictEqual(completed.phantomRows.length, cutRows.length);
 assert.ok(completed.phantomRows.some((row, index) => row.left !== completed.rows[index].left));
 const rectangle = getShapeProfileGeometry({
+  bounds: { left: 0, top: 0, width: 100, height: 100 },
   rows: Array.from({ length: 9 }, (_, index) => ({ y: index / 8, left: 0, right: 1, width: 1 })),
 });
 assert.strictEqual(rectangle.hasCompletion, false);
 assert.strictEqual(rectangle.offsetX, 0);
+assert.strictEqual(rectangle.isRectangular, true);
 
 // Bubble-aware mode: a round outline plus pixel calibration must yield
 // variants that stay inside the bubble and keep a harmonious convex shape

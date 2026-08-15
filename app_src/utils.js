@@ -948,12 +948,16 @@ const createTextLayersInStoredSelections = (texts, styles, selections, pointText
   }));
 };
 
-const alignTextLayerToSelection = (resizeTextBox = false, padding = 0, callback = () => {}, phantomOffsetX = 0, phantomOffsetY = 0) => {
+const alignTextLayerToSelection = (resizeTextBox = false, padding = 0, callback = () => {}, phantomOffsetX = 0, phantomOffsetY = 0, phantomGeometryProvided = false) => {
   const data = JSON.stringify({
     resizeTextBox: !!resizeTextBox,
     padding: padding || 0,
     phantomOffsetX: Number(phantomOffsetX) || 0,
     phantomOffsetY: Number(phantomOffsetY) || 0,
+    // Zero is a real geometry result for symmetric/rectangular balloons.
+    // Keep it distinct from the legacy shortcut path, which asks the host
+    // to sample and infer geometry itself.
+    phantomGeometryProvided: phantomGeometryProvided === true,
   });
   csInterface.evalScript("alignTextLayerToSelection(" + data + ")", trackHostAction((error) => {
     if (error === "smallSelection") nativeAlert(locale.errorSmallSelection, locale.errorTitle, true);

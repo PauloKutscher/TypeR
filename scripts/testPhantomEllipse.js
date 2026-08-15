@@ -27,6 +27,27 @@ assert.ok(Math.abs(intactFit.centerY - trueCy) < 0.5, `Expected cy=${trueCy}, go
 assert.ok(Math.abs(intactFit.a - trueB) < 1.0, `Expected semi-major=${trueB}, got ${intactFit.a}`);
 assert.ok(Math.abs(intactFit.b - trueA) < 1.0, `Expected semi-minor=${trueA}, got ${intactFit.b}`);
 
+// The returned angle must describe the semi-major axis, modulo 180 degrees.
+// This catches the old 90-degree convention mismatch between fitEllipseDirect
+// and generateEllipseProfileRows.
+const rotatedPoints = [];
+const rotatedAngle = 0.4;
+for (let deg = 0; deg < 360; deg += 10) {
+  const rad = (deg * Math.PI) / 180;
+  const x = trueA * Math.cos(rad);
+  const y = 50 * Math.sin(rad);
+  rotatedPoints.push([
+    trueCx + x * Math.cos(rotatedAngle) - y * Math.sin(rotatedAngle),
+    trueCy + x * Math.sin(rotatedAngle) + y * Math.cos(rotatedAngle),
+  ]);
+}
+const rotatedFit = fitEllipseDirect(rotatedPoints);
+const axisAngleError = Math.abs(Math.atan2(
+  Math.sin(2 * (rotatedFit.angle - rotatedAngle)),
+  Math.cos(2 * (rotatedFit.angle - rotatedAngle))
+) / 2);
+assert.ok(axisAngleError < 1e-6, `Rotated ellipse angle must follow its major axis, got ${rotatedFit.angle}`);
+
 // 2. Test a manga balloon cut on the left by a vertical gutter:
 // True ellipse is at center=(200, 200), radii a=100, b=120.
 // The balloon is cut at x = 170 (30px into the balloon).
@@ -60,10 +81,11 @@ const cutLeftReconstruction = reconstructPhantomBalloon(cutLeftShape);
 assert.ok(cutLeftReconstruction !== null, "Left cut balloon must reconstruct successfully");
 assert.ok(cutLeftReconstruction.hasCompletion, "Should detect completion/cut");
 // The true center is at x=200. The bounding box xMid is at 235.
-// So pixelOffsetX should be ~ -35px (shifting left towards the imaginary balloon center).
+// The correction should move left toward the imaginary center, but stay within
+// the requested 5% safety limit of the visible width.
 assert.ok(
-  cutLeftReconstruction.pixelOffsetX < -15,
-  `Expected negative pixelOffsetX, got ${cutLeftReconstruction.pixelOffsetX}`
+  cutLeftReconstruction.pixelOffsetX < 0 && cutLeftReconstruction.pixelOffsetX >= -6.5,
+  `Expected safe negative pixelOffsetX, got ${cutLeftReconstruction.pixelOffsetX}`
 );
 assert.ok(
   Math.abs(cutLeftReconstruction.pixelOffsetY) < 5,
@@ -99,10 +121,13 @@ const angledShape = {
 
 const angledReconstruction = reconstructPhantomBalloon(angledShape);
 assert.ok(angledReconstruction !== null, "Angled cut balloon must reconstruct successfully");
-// Reconstructed center should be close to true center (300, 300)
+// The safety clamp intentionally prevents a cut from moving text all the way
+// to an uncertain phantom center. It should move toward the true center while
+// staying within 5% of the visible bounds.
 assert.ok(
-  Math.abs(angledReconstruction.ellipse.centerX - 300) < 15,
-  `Expected reconstructed centerX ~ 300, got ${angledReconstruction.ellipse.centerX}`
+  angledReconstruction.ellipse.centerX > angledShape.bounds.xMid &&
+    angledReconstruction.ellipse.centerX <= angledShape.bounds.xMid + angledShape.bounds.width * 0.05 + 0.01,
+  `Expected safe positive centerX correction, got ${angledReconstruction.ellipse.centerX}`
 );
 assert.ok(
   Math.abs(angledReconstruction.ellipse.centerY - 300) < 15,
@@ -136,11 +161,11 @@ const bottomCutShape = {
 const bottomCutReconstruction = reconstructPhantomBalloon(bottomCutShape);
 assert.ok(bottomCutReconstruction !== null, "Bottom cut balloon must reconstruct successfully");
 // yMid is 150, true center is 200, so pixelOffsetY should be positive. The
-// reconstruction intentionally caps the normalized correction at 25% so a
+// reconstruction intentionally caps the normalized correction at 5% so a
 // partial scan cannot move text outside the usable selection.
 assert.ok(
-  bottomCutReconstruction.pixelOffsetY > 0 && bottomCutReconstruction.pixelOffsetY <= 25,
-  `Expected safe positive pixelOffsetY <= 25, got ${bottomCutReconstruction.pixelOffsetY}`
+  bottomCutReconstruction.pixelOffsetY > 0 && bottomCutReconstruction.pixelOffsetY <= 5,
+  `Expected safe positive pixelOffsetY <= 5, got ${bottomCutReconstruction.pixelOffsetY}`
 );
 
 // 5. Test clean fallback on rectangular boxes (e.g. narration box with 0 curvature)
@@ -192,17 +217,17 @@ const extremeCutShape = {
 
 const extremeReconstruction = reconstructPhantomBalloon(extremeCutShape);
 if (extremeReconstruction) {
-  // Must be safely clamped within [-0.25, 0.25]
+  // Must be safely clamped within [-0.05, 0.05]
   assert.ok(
-    Math.abs(extremeReconstruction.offsetX) <= 0.25,
-    `offsetX must be safely clamped <= 0.25, got ${extremeReconstruction.offsetX}`
+    Math.abs(extremeReconstruction.offsetX) <= 0.05,
+    `offsetX must be safely clamped <= 0.05, got ${extremeReconstruction.offsetX}`
   );
   assert.ok(
-    Math.abs(extremeReconstruction.offsetY) <= 0.25,
-    `offsetY must be safely clamped <= 0.25, got ${extremeReconstruction.offsetY}`
+    Math.abs(extremeReconstruction.offsetY) <= 0.05,
+    `offsetY must be safely clamped <= 0.05, got ${extremeReconstruction.offsetY}`
   );
-  // Reconstructed pixel offset should not exceed 25% of width (20px)
-  assert.ok(Math.abs(extremeReconstruction.pixelOffsetX) <= 20.01);
+  // Reconstructed pixel offset should not exceed 5% of width (4px)
+  assert.ok(Math.abs(extremeReconstruction.pixelOffsetX) <= 4.01);
 }
 
 // 8. Test visible rows intersection safety in generateEllipseProfileRows

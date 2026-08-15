@@ -29,8 +29,13 @@ assert.match(
 );
 assert.match(
   hostSource,
-  /var maxShiftX = 0\.25;[\s\S]*?var maxShiftY = 0\.25;/,
-  "Host phantom offsets must use the safe 25% clamp"
+  /var maxShiftX = 0\.05;[\s\S]*?var maxShiftY = 0\.05;/,
+  "Host phantom offsets must use the safe 5% clamp"
+);
+assert.match(
+  hostSource,
+  /var partialArcEvidence = angleCoverage < Math\.PI \* 1\.85;/,
+  "Ellipse fitting must require evidence of a partial arc"
 );
 
 const positionStart = hostSource.indexOf("function _positionLayerWithinSelection");
@@ -39,10 +44,41 @@ assert.ok(positionStart >= 0 && positionEnd > positionStart, "Host positioning h
 const positionSource = hostSource.slice(positionStart, positionEnd);
 
 assert.match(positionSource, /var boundXMid = bounds\.xMid;/);
+assert.match(positionSource, /var boundYMid = bounds\.yMid;/);
 assert.doesNotMatch(
   positionSource,
-  /boundXMid\s*-=/,
-  "Italic text must not receive a fixed horizontal offset from its font size"
+  /isItalic|italicCorrection|textSizePx|fontStyleName/,
+  "Square narration centering must not apply italic or DPI heuristics"
+);
+assert.match(
+  hostSource,
+  /if \(!state\.phantomGeometryProvided && phantomOffsetX === 0 && phantomOffsetY === 0\)/,
+  "A provided zero geometry result must not trigger a second host-side fit"
+);
+assert.match(
+  hostSource,
+  /selection = _checkSelection\(\{ adaptiveOpen: !state\.phantomGeometryProvided \}\);/,
+  "Provided geometry must use the same selection frame that was sampled"
+);
+assert.match(
+  hostSource,
+  /state\.phantomGeometryProvided = !!\(data && data\.phantomGeometryProvided === true\)/,
+  "Host must preserve whether geometry was explicitly supplied"
+);
+assert.match(
+  hostSource,
+  /function _buildPathShapeRows\(polygons, sampleCount, referenceBounds\)[\s\S]*?\(left - frameLeft\) \/ width[\s\S]*?_buildPathShapeRows\(polygons, sampleCount, bounds\)/,
+  "Path scan rows must use the same coordinate frame as the selection bounds"
+);
+assert.match(
+  hostSource,
+  /function _getCurrentRenderedTextBounds\(\)[\s\S]*?_changeToPointText\(\)[\s\S]*?_getCurrentTextLayerBounds\(\)/,
+  "Positioning must be able to measure the rendered wrapped glyph bounds"
+);
+assert.match(
+  hostSource,
+  /function _getCurrentRenderedTextBounds\(\)[\s\S]*?rasterize\(RasterizeType\.TEXTCONTENTS\)/,
+  "Positioning must prefer exact rasterized ink bounds for wrapped glyphs"
 );
 
 console.log("host balloon centering tests passed");

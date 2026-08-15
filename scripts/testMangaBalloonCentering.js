@@ -47,7 +47,8 @@ for (let i = 0; i <= 20; i++) {
 const leftCutRes = analyzeMangaBalloonGeometry({ bounds: { left: 0, right: 150, top: 0, bottom: 200, width: 150, height: 200, xMid: 75, yMid: 100 }, rows: leftCutRows });
 assert.ok(leftCutRes.isCut, "Should detect left cut");
 assert.strictEqual(leftCutRes.cutType, "left");
-assert.ok(leftCutRes.offsetX < -0.1, `Left cut should shift center leftwards, got ${leftCutRes.offsetX}`);
+assert.ok(leftCutRes.offsetX < 0, `Left cut should shift center leftwards, got ${leftCutRes.offsetX}`);
+assert.ok(Math.abs(leftCutRes.offsetX) <= 0.05, `Left cut shift must respect 5% safety, got ${leftCutRes.offsetX}`);
 console.log("✓ Case 3: Left Cut Balloon (Gutter) passed, offset:", leftCutRes.offsetX);
 
 // Case 4: Right Cut Balloon (Vertical Gutter on Right)
@@ -62,7 +63,8 @@ for (let i = 0; i <= 20; i++) {
 const rightCutRes = analyzeMangaBalloonGeometry({ bounds: { left: 0, right: 150, top: 0, bottom: 200, width: 150, height: 200, xMid: 75, yMid: 100 }, rows: rightCutRows });
 assert.ok(rightCutRes.isCut, "Should detect right cut");
 assert.strictEqual(rightCutRes.cutType, "right");
-assert.ok(rightCutRes.offsetX > 0.1, `Right cut should shift center rightwards, got ${rightCutRes.offsetX}`);
+assert.ok(rightCutRes.offsetX > 0, `Right cut should shift center rightwards, got ${rightCutRes.offsetX}`);
+assert.ok(Math.abs(rightCutRes.offsetX) <= 0.05, `Right cut shift must respect 5% safety, got ${rightCutRes.offsetX}`);
 console.log("✓ Case 4: Right Cut Balloon (Gutter) passed, offset:", rightCutRes.offsetX);
 
 // Case 5: Hand-drawn / Slightly Asymmetrical Balloon
@@ -78,6 +80,26 @@ const organicRes = analyzeMangaBalloonGeometry({ bounds: { left: 0, right: 200, 
 assert.ok(Math.abs(organicRes.offsetX) < 0.03, `Organic balloon should be centered near 0, got ${organicRes.offsetX}`);
 assert.ok(Math.abs(organicRes.offsetY) < 0.03, `Organic balloon should be centered near 0, got ${organicRes.offsetY}`);
 console.log("✓ Case 5: Organic Hand-drawn Balloon passed");
+
+// Case 5b: An intact balloon with a short speech tail. The tail must not be
+// classified as a scene cut or force the ellipse fitter to invent a shift.
+const tailRows = [];
+for (let i = 0; i <= 20; i++) {
+  const y = i / 20;
+  const halfW = Math.sqrt(Math.max(0, 1 - Math.pow(2 * y - 1, 2))) * 0.42;
+  let left = 0.5 - halfW;
+  const right = 0.5 + halfW;
+  if (i === 11) left = 0.02;
+  tailRows.push({ y, left, right, width: right - left });
+}
+const tailRes = analyzeMangaBalloonGeometry({
+  bounds: { left: 0, right: 240, top: 0, bottom: 240, width: 240, height: 240, xMid: 120, yMid: 120 },
+  rows: tailRows,
+});
+assert.strictEqual(tailRes.isCut, false, "A short speech tail is not a scene cut");
+assert.ok(Math.abs(tailRes.offsetX) < 0.03, `Speech-tail balloon must not tilt, got ${tailRes.offsetX}`);
+assert.strictEqual(tailRes.offsetY, 0, "An intact balloon must use its geometric vertical center");
+console.log("✓ Case 5b: Intact balloon with speech tail passed");
 
 // Case 6: Rectangular / Square Narration Box
 const rectRows = [];
