@@ -4247,24 +4247,6 @@ function getSelectionChanged() {
       var phantomOffsetY = 0;
       var isCut = false;
       var isRectangular = false;
-      try {
-        var sampled = _sampleSelectionShapeViaPath(currentPayload, 21, true);
-        if (sampled && sampled.rows && sampled.rows.length > 0) {
-          isRectangular = _isRectangularShapeES3({ bounds: currentPayload, rows: sampled.rows, polygons: sampled.polygons });
-          if (!isRectangular) {
-            var phantom = _fitPhantomEllipseForSelection({
-              bounds: currentPayload,
-              rows: sampled.rows,
-              polygons: sampled.polygons,
-            });
-            if (phantom && phantom.isCut === true) {
-              phantomOffsetX = phantom.pixelOffsetX || 0;
-              phantomOffsetY = phantom.pixelOffsetY || 0;
-              isCut = true;
-            }
-          }
-        }
-      } catch (err) {}
 
       multiResults.push({
         shiftKey: shiftPressed,

@@ -333,7 +333,7 @@ Esses testes não substituem um teste visual dentro do Photoshop. Eles confirmam
 - **Diagnóstico em tempo real (antigo P2):** Implementado no componente `BalloonCenteringDebug.jsx`, ativado nas preferências e alimentado tanto pelo botão quanto pelo atalho `WIN + ALT`.
 - **Desacoplamento e blindagem de balões intactos:** Ajuste dos limiares de corte (35% de linhas, largura substancial e desacoplamento de eixos horizontal/vertical).
 - **Margem de segurança condicionada:** `useSafetyMargin = false` ($0\text{ px}$) em balões intactos e retângulos.
-- **Geometria e centralização no modo batch / Multi-Bubble:** O monitor de seleções agora analisa e armazena a geometria, offset de corte e identificação de retângulos/intactos para cada balão do lote (`_createTextLayersInStoredSelections`), aplicando a mesma precisão geométrica em massa.
+- **Geometria e centralização no modo batch / Multi-Bubble:** O monitor de seleções captura os limites de forma não-intrusiva sem converter seleções em Work Paths em tempo real, eliminando o piscar de tela. A rota em lote (_createTextLayersInStoredSelections) aplica o posicionamento exato medindo os glifos reais renderizados de cada balão.
 - **Eliminação de bloqueios de inicialização e loops de histórico:** WorkPaths limpos preventivamente e histórico restaurado após os scans.
 
 #### Itens descartados / não necessários
