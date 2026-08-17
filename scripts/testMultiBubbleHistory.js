@@ -5,9 +5,36 @@ const path = require("path");
 const { loadAppModule } = require("./loadAppModule");
 
 const rootDir = path.resolve(__dirname, "..");
-const { getStoredSelectionLineIndex } = loadAppModule(
+const { getStoredSelectionLineIndex, isDuplicateSelection } = loadAppModule(
   path.join(rootDir, "app_src", "multiBubbleHistory.js")
 );
+
+const bubble = (left, top, width, height) => ({
+  left,
+  top,
+  right: left + width,
+  bottom: top + height,
+  width,
+  height,
+  xMid: left + width / 2,
+  yMid: top + height / 2,
+});
+
+const storedBubbles = [bubble(328, 714, 132, 210), bubble(58, 714, 153, 240)];
+
+assert.strictEqual(isDuplicateSelection(storedBubbles, bubble(328, 714, 132, 210)), true, "Same bubble again is a duplicate");
+assert.strictEqual(isDuplicateSelection(storedBubbles, bubble(331, 716, 132, 210)), true, "A few pixels off is still the same bubble");
+assert.strictEqual(isDuplicateSelection(storedBubbles, bubble(58, 1125, 86, 145)), false, "A different bubble must be stored");
+assert.strictEqual(isDuplicateSelection(storedBubbles, bubble(328, 714, 180, 260)), false, "Growing past the tolerance is a new selection");
+assert.strictEqual(isDuplicateSelection([], bubble(0, 0, 10, 10)), false, "Nothing stored yet, nothing to match");
+assert.strictEqual(isDuplicateSelection(storedBubbles, null), false, "No selection, no duplicate");
+
+// The host must catch a union by geometry: the Shift key it reports is not
+// reliable across Photoshop versions, and the "Add to selection" tool mode
+// never presses a key at all
+const hostSource = fs.readFileSync(path.join(rootDir, "app_src", "host.js"), "utf8");
+const unionGuard = hostSource.match(/\n( *)if \(!isSame && monitor\.lastBounds[\s\S]*?multipleSelections: true/);
+assert.ok(unionGuard, "The union guard must not depend on the reported Shift key");
 
 const lines = [
   { rawIndex: 0, rawText: "Page 1", ignore: true },

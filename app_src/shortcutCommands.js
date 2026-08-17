@@ -84,6 +84,18 @@ const pasteInSelection = (ctx, preferredOrder = []) => {
         // Prevent the selection monitor from immediately capturing the live
         // marquee again after a successful multi-bubble paste.
         deselectDocument();
+        // The host pastes min(texts, selections) and the panel then drops every
+        // stored selection: without this the extra selections vanish silently
+        // and the mismatch only shows up as text in the wrong bubble.
+        if (payload.texts.length < storedSelections.length) {
+          nativeAlert(
+            locale.multiPastePartial
+              .replace("{applied}", payload.texts.length)
+              .replace("{selected}", storedSelections.length),
+            locale.warningTitle,
+            true
+          );
+        }
       }
     );
     return;

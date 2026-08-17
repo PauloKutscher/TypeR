@@ -4213,11 +4213,15 @@ function getSelectionChanged() {
       return jamJSON.stringify({ noChange: true, shiftKey: shiftPressed });
     }
 
-    // Shift-adding a second outline never shrinks the selection: Photoshop
-    // reports a single union rectangle that still contains the previously
-    // seen bounds. Warn the panel instead of capturing that union as one
-    // giant bubble, and remember it so it is not captured later either.
-    if (shiftPressed && !isSame && monitor.lastBounds && merged.length === 1 &&
+    // Adding a second outline never shrinks the selection: Photoshop reports a
+    // single union rectangle that still contains the previously seen bounds.
+    // Warn the panel instead of capturing that union as one giant bubble, and
+    // remember it so it is not captured later either.
+    // The test is geometric on purpose: the add can come from Shift, from the
+    // "Add to selection" tool mode (no key at all), and ScriptUI's keyboard
+    // state is unreliable across Photoshop versions and focus, so a union must
+    // never depend on the reported Shift key to be caught.
+    if (!isSame && monitor.lastBounds && merged.length === 1 &&
       merged[0].top <= monitor.lastBounds.top + 5 &&
       merged[0].left <= monitor.lastBounds.left + 5 &&
       merged[0].right >= monitor.lastBounds.right - 5 &&
