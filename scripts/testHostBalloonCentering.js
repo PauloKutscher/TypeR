@@ -85,6 +85,17 @@ assert.match(
   /function getSelectionChanged\(\)[\s\S]*?phantomOffsetX[\s\S]*?phantomOffsetY[\s\S]*?isCut[\s\S]*?isRectangular/,
   "Selection capture must sample and store geometric analysis for each selection"
 );
+assert.match(
+  hostSource,
+  /if \(!adjustedSelection \|\| adjustedSelection\.width < 2 \|\| adjustedSelection\.height < 2 \|\| adjustedSelection\.width \* adjustedSelection\.height < 4\)/,
+  "Selection check must accept small valid selections without arbitrary 200px threshold"
+);
+assert.match(
+  hostSource,
+  /if \(curDocW > 0 && curDocH > 0 && selection\.width >= curDocW \* 0\.96 && selection\.height >= curDocH \* 0\.96\)/,
+  "Centering fallback must prevent magic wand leaks to whole canvas"
+);
 
 console.log("host balloon centering tests passed");
+
 

@@ -11,6 +11,11 @@ const cache = new Map();
 const loadAppModule = (filePath) => {
   const resolved = require.resolve(path.resolve(filePath));
   if (cache.has(resolved)) return cache.get(resolved);
+  if (resolved.endsWith(".json")) {
+    const json = JSON.parse(fs.readFileSync(resolved, "utf8"));
+    cache.set(resolved, json);
+    return json;
+  }
 
   const { code } = babel.transformSync(fs.readFileSync(resolved, "utf8"), {
     filename: resolved,

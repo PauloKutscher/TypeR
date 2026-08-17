@@ -797,3 +797,253 @@ export function reconstructPhantomBalloon(shapeData) {
     phantomRows: phantomRows || shapeData.rows,
   };
 }
+
+function interpolateRowAtY(rawRows, targetY) {
+  if (!rawRows || !rawRows.length) return { left: 0.5, right: 0.5 };
+  if (rawRows.length === 1 || targetY <= rawRows[0].y) {
+    return { left: rawRows[0].left, right: rawRows[0].right };
+  }
+  if (targetY >= rawRows[rawRows.length - 1].y) {
+    const last = rawRows[rawRows.length - 1];
+    return { left: last.left, right: last.right };
+  }
+  for (let i = 0; i < rawRows.length - 1; i++) {
+    const r0 = rawRows[i];
+    const r1 = rawRows[i + 1];
+    if (targetY >= r0.y && targetY <= r1.y) {
+      const t = (r1.y - r0.y) > 1e-6 ? (targetY - r0.y) / (r1.y - r0.y) : 0;
+      return {
+        left: r0.left + (r1.left - r0.left) * t,
+        right: r0.right + (r1.right - r0.right) * t,
+      };
+    }
+  }
+  const fallback = rawRows[rawRows.length - 1];
+  return { left: fallback.left, right: fallback.right };
+}
+
+/**
+ * Detects bimodal profile with a constriction (neck / gargalo) in scanlines.
+ * Identifies connected double balloons (stacked vertically / diagonally).
+ */
+export function detectBimodalNeck(rows) {
+  if (!rows || rows.length < 7) return null;
+  if (hasInvertedSymmetricProfile(rows)) return null;
+
+  const n = rows.length;
+  const widths = [];
+  for (let i = 0; i < n; i++) {
+    const r = rows[i];
+    widths.push(Math.max(0, (r.right !== undefined && r.left !== undefined) ? r.right - r.left : (r.width || 0)));
+  }
+
+  // Find the most prominent bimodal neck
+  let bestResult = null;
+  let bestNeckDepth = 0;
+
+  for (let i = 1; i <= n - 4; i++) {
+    if (widths[i] < 0.30) continue;
+    if (widths[i] < widths[i - 1]) continue;
+
+    for (let j = i + 3; j <= n - 2; j++) {
+      if (widths[j] < 0.30) continue;
+      if (widths[j] < widths[j + 1]) continue;
+
+      let neckIdx = -1;
+      let neckMin = Infinity;
+      for (let k = i + 1; k < j; k++) {
+        if (widths[k] < neckMin) {
+          neckMin = widths[k];
+          neckIdx = k;
+        }
+      }
+
+      if (neckIdx < 0) continue;
+
+      const minPeak = Math.min(widths[i], widths[j]);
+      const neckRatio = neckMin / minPeak;
+      const neckDepth = minPeak - neckMin;
+
+      if (neckRatio <= 0.75 && neckDepth >= 0.12) {
+        const neckY = rows[neckIdx].y !== undefined ? rows[neckIdx].y : neckIdx / (n - 1);
+        if (neckY >= 0.20 && neckY <= 0.80 && neckDepth > bestNeckDepth) {
+          bestNeckDepth = neckDepth;
+          bestResult = {
+            isDouble: true,
+            neckIndex: neckIdx,
+            neckY,
+            peak1Index: i,
+            peak2Index: j,
+            peak1Width: widths[i],
+            peak2Width: widths[j],
+            neckWidth: neckMin,
+            neckRatio,
+            neckDepth,
+          };
+        }
+      }
+    }
+  }
+
+  return bestResult;
+}
+
+/**
+ * Splits a connected double balloon shape into two distinct sub-lobes (lobeA and lobeB),
+ * with separate sub-bounds, re-normalized rows, and reconstructed phantom centers.
+ */
+export function splitShapeProfile(shapeData) {
+  if (!shapeData || !shapeData.bounds || !shapeData.rows || shapeData.rows.length < 7) {
+    return { isDouble: false };
+  }
+
+  const bimodal = detectBimodalNeck(shapeData.rows);
+  if (!bimodal || !bimodal.isDouble) {
+    return { isDouble: false };
+  }
+
+  const bounds = shapeData.bounds;
+  const origRows = shapeData.rows;
+  const neckIdx = bimodal.neckIndex;
+  const neckY = bimodal.neckY;
+
+  // Extract raw rows for Lobe A and Lobe B
+  const rawRowsA = origRows.slice(0, neckIdx + 1);
+  const rawRowsB = origRows.slice(neckIdx);
+
+  if (rawRowsA.length < 3 || rawRowsB.length < 3) {
+    return { isDouble: false };
+  }
+
+  // Calculate horizontal bounds for Lobe A
+  let minLeftA = 1, maxRightA = 0;
+  for (let i = 0; i < rawRowsA.length; i++) {
+    if (rawRowsA[i].width > 0.05) {
+      if (rawRowsA[i].left < minLeftA) minLeftA = rawRowsA[i].left;
+      if (rawRowsA[i].right > maxRightA) maxRightA = rawRowsA[i].right;
+    }
+  }
+  if (minLeftA >= maxRightA) { minLeftA = 0; maxRightA = 1; }
+
+  // Calculate horizontal bounds for Lobe B
+  let minLeftB = 1, maxRightB = 0;
+  for (let i = 0; i < rawRowsB.length; i++) {
+    if (rawRowsB[i].width > 0.05) {
+      if (rawRowsB[i].left < minLeftB) minLeftB = rawRowsB[i].left;
+      if (rawRowsB[i].right > maxRightB) maxRightB = rawRowsB[i].right;
+    }
+  }
+  if (minLeftB >= maxRightB) { minLeftB = 0; maxRightB = 1; }
+
+  // Sub-bounds in document coordinates
+  const spanA = Math.max(1e-6, maxRightA - minLeftA);
+  const boundsA = {
+    left: bounds.left + bounds.width * minLeftA,
+    top: bounds.top,
+    right: bounds.left + bounds.width * maxRightA,
+    bottom: bounds.top + bounds.height * neckY,
+    width: bounds.width * spanA,
+    height: bounds.height * neckY,
+  };
+  boundsA.xMid = (boundsA.left + boundsA.right) / 2;
+  boundsA.yMid = (boundsA.top + boundsA.bottom) / 2;
+
+  const spanB = Math.max(1e-6, maxRightB - minLeftB);
+  const boundsB = {
+    left: bounds.left + bounds.width * minLeftB,
+    top: bounds.top + bounds.height * neckY,
+    right: bounds.left + bounds.width * maxRightB,
+    bottom: bounds.bottom,
+    width: bounds.width * spanB,
+    height: bounds.height * (1 - neckY),
+  };
+  boundsB.xMid = (boundsB.left + boundsB.right) / 2;
+  boundsB.yMid = (boundsB.top + boundsB.bottom) / 2;
+
+  // Normalized rows for Lobe A
+  const sampleCount = 21;
+  const rowsA = [];
+  for (let s = 0; s < sampleCount; s++) {
+    const targetY = s / (sampleCount - 1);
+    const origY = targetY * neckY;
+    const sampled = interpolateRowAtY(rawRowsA, origY);
+    const normL = Math.max(0, Math.min(1, (sampled.left - minLeftA) / spanA));
+    const normR = Math.max(0, Math.min(1, (sampled.right - minLeftA) / spanA));
+    rowsA.push({
+      y: targetY,
+      left: normL,
+      right: normR,
+      width: Math.max(0, normR - normL),
+    });
+  }
+
+  // Normalized rows for Lobe B
+  const rowsB = [];
+  for (let s = 0; s < sampleCount; s++) {
+    const targetY = s / (sampleCount - 1);
+    const origY = neckY + targetY * (1 - neckY);
+    const sampled = interpolateRowAtY(rawRowsB, origY);
+    const normL = Math.max(0, Math.min(1, (sampled.left - minLeftB) / spanB));
+    const normR = Math.max(0, Math.min(1, (sampled.right - minLeftB) / spanB));
+    rowsB.push({
+      y: targetY,
+      left: normL,
+      right: normR,
+      width: Math.max(0, normR - normL),
+    });
+  }
+
+  const phantomA = reconstructPhantomBalloon({ bounds: boundsA, rows: rowsA }) || {
+    centerX: 0.5, centerY: 0.5, offsetX: 0, offsetY: 0, pixelOffsetX: 0, pixelOffsetY: 0, hasCompletion: false
+  };
+
+  const phantomB = reconstructPhantomBalloon({ bounds: boundsB, rows: rowsB }) || {
+    centerX: 0.5, centerY: 0.5, offsetX: 0, offsetY: 0, pixelOffsetX: 0, pixelOffsetY: 0, hasCompletion: false
+  };
+
+  const centerA = {
+    x: boundsA.xMid + (phantomA.pixelOffsetX || 0),
+    y: boundsA.yMid + (phantomA.pixelOffsetY || 0),
+  };
+
+  const centerB = {
+    x: boundsB.xMid + (phantomB.pixelOffsetX || 0),
+    y: boundsB.yMid + (phantomB.pixelOffsetY || 0),
+  };
+
+  return {
+    isDouble: true,
+    neckIndex: neckIdx,
+    neckY,
+    neckRatio: bimodal.neckRatio,
+    lobes: [
+      {
+        id: "lobeA",
+        bounds: boundsA,
+        shape: { bounds: boundsA, rows: rowsA },
+        phantom: phantomA,
+        centerX: centerA.x,
+        centerY: centerA.y,
+        offsetX: phantomA.offsetX || 0,
+        offsetY: phantomA.offsetY || 0,
+        pixelOffsetX: phantomA.pixelOffsetX || 0,
+        pixelOffsetY: phantomA.pixelOffsetY || 0,
+        hasCompletion: phantomA.hasCompletion === true,
+      },
+      {
+        id: "lobeB",
+        bounds: boundsB,
+        shape: { bounds: boundsB, rows: rowsB },
+        phantom: phantomB,
+        centerX: centerB.x,
+        centerY: centerB.y,
+        offsetX: phantomB.offsetX || 0,
+        offsetY: phantomB.offsetY || 0,
+        pixelOffsetX: phantomB.pixelOffsetX || 0,
+        pixelOffsetY: phantomB.pixelOffsetY || 0,
+        hasCompletion: phantomB.hasCompletion === true,
+      },
+    ],
+  };
+}
+

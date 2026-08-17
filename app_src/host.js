@@ -311,28 +311,44 @@ function _resolveStyleSizeForDocument(style) {
 
 function _changeToPointText() {
   try {
+    if (_textLayerIsPointText()) return;
+  } catch (checkPointErr) {}
+  try {
     if (app.activeDocument && app.activeDocument.activeLayer && app.activeDocument.activeLayer.textItem) {
       app.activeDocument.activeLayer.textItem.kind = TextType.POINTTEXT;
       return;
     }
   } catch (e) {}
-  var reference = new ActionReference();
-  reference.putProperty(charID.Property, charID.TextShapeType);
-  reference.putEnumerated(charID.TextLayer, charID.Ordinal, charID.Target);
-  var descriptor = new ActionDescriptor();
-  descriptor.putReference(charID.Null, reference);
-  descriptor.putEnumerated(charID.To, charID.TextShapeType, charID.Point);
-  executeAction(charID.Set, descriptor, DialogModes.NO);
+  try {
+    var reference = new ActionReference();
+    reference.putProperty(charID.Property, charID.TextShapeType);
+    reference.putEnumerated(charID.TextLayer, charID.Ordinal, charID.Target);
+    var descriptor = new ActionDescriptor();
+    descriptor.putReference(charID.Null, reference);
+    descriptor.putEnumerated(charID.To, charID.TextShapeType, charID.Point);
+    executeAction(charID.Set, descriptor, DialogModes.NO);
+  } catch (actionErr) {}
 }
 
 function _changeToBoxText() {
-  var reference = new ActionReference();
-  reference.putProperty(charID.Property, charID.TextShapeType);
-  reference.putEnumerated(charID.TextLayer, charID.Ordinal, charID.Target);
-  var descriptor = new ActionDescriptor();
-  descriptor.putReference(charID.Null, reference);
-  descriptor.putEnumerated(charID.To, charID.TextShapeType, stringIDToTypeID("box"));
-  executeAction(charID.Set, descriptor, DialogModes.NO);
+  try {
+    if (!_textLayerIsPointText()) return;
+  } catch (checkBoxErr) {}
+  try {
+    if (app.activeDocument && app.activeDocument.activeLayer && app.activeDocument.activeLayer.textItem) {
+      app.activeDocument.activeLayer.textItem.kind = TextType.PARAGRAPHTEXT;
+      return;
+    }
+  } catch (e) {}
+  try {
+    var reference = new ActionReference();
+    reference.putProperty(charID.Property, charID.TextShapeType);
+    reference.putEnumerated(charID.TextLayer, charID.Ordinal, charID.Target);
+    var descriptor = new ActionDescriptor();
+    descriptor.putReference(charID.Null, reference);
+    descriptor.putEnumerated(charID.To, charID.TextShapeType, stringIDToTypeID("box"));
+    executeAction(charID.Set, descriptor, DialogModes.NO);
+  } catch (actionErr) {}
 }
 
 function _layerIsTextLayer() {
@@ -558,12 +574,23 @@ function toggleCleaningLayers() {
 }
 
 function _deselect() {
-  var reference = new ActionReference();
-  reference.putProperty(charID.Channel, charID.FrameSelect);
-  var descriptor = new ActionDescriptor();
-  descriptor.putReference(charID.Null, reference);
-  descriptor.putEnumerated(charID.To, charID.Ordinal, charID.None);
-  executeAction(charID.Set, descriptor, DialogModes.NO);
+  try {
+    var doc = app.activeDocument;
+    if (!doc) return;
+    var selectionRef = new ActionReference();
+    selectionRef.putProperty(charID.Property, charID.FrameSelect);
+    selectionRef.putEnumerated(charID.Document, charID.Ordinal, charID.Target);
+    var desc = executeActionGet(selectionRef);
+    if (!desc.hasKey(charID.FrameSelect)) return;
+  } catch (checkSelErr) {}
+  try {
+    var reference = new ActionReference();
+    reference.putProperty(charID.Channel, charID.FrameSelect);
+    var descriptor = new ActionDescriptor();
+    descriptor.putReference(charID.Null, reference);
+    descriptor.putEnumerated(charID.To, charID.Ordinal, charID.None);
+    executeAction(charID.Set, descriptor, DialogModes.NO);
+  } catch (deselectErr) {}
 }
 
 function _getBoundsFromDescriptor(bounds) {
@@ -649,9 +676,11 @@ function _getCurrentRenderedTextBounds() {
 
 function _modifySelectionBounds(amount) {
   if (amount == 0) return;
-  var size = new ActionDescriptor();
-  size.putUnitDouble(charID.By, charID.PixelUnit, Math.abs(amount));
-  executeAction(amount > 0 ? charID.Expand : charID.Contract, size, DialogModes.NO);
+  try {
+    var size = new ActionDescriptor();
+    size.putUnitDouble(charID.By, charID.PixelUnit, Math.abs(amount));
+    executeAction(amount > 0 ? charID.Expand : charID.Contract, size, DialogModes.NO);
+  } catch (modifyErr) {}
 }
 
 
@@ -790,10 +819,10 @@ function _getAdaptiveOpenedSelectionBounds(bounds) {
   }
 
   var opened = null;
-  var attemptRadius = radius;
+  var attemptRadius = Math.min(radius, 12);
   try {
     while (attemptRadius >= 1 && !opened) {
-      if (attemptRadius !== radius) {
+      if (attemptRadius !== radius && attemptRadius !== Math.min(radius, 12)) {
         try {
           doc.selection.load(tempChannel);
         } catch (retryRestoreError) {
@@ -813,7 +842,7 @@ function _getAdaptiveOpenedSelectionBounds(bounds) {
         candidate = null;
       }
 
-      if (candidate && candidate.width * candidate.height >= 200) {
+      if (candidate && candidate.width >= 2 && candidate.height >= 2 && candidate.width * candidate.height >= 4) {
         opened = candidate;
       } else {
         attemptRadius = Math.floor(attemptRadius / 2);
@@ -839,8 +868,11 @@ function _selectionBoundsKey(bounds) {
 function _calculateSelectionDimensions(selection, padding) {
   if (!selection) return { width: 0, height: 0 };
   var width = selection.width * _DEFAULT_SELECTION_SCALE;
+  var minWidth = Math.min(_MIN_TEXTBOX_WIDTH, selection.width);
   if (padding > 0) {
-    width = Math.max(width - padding * 2, _MIN_TEXTBOX_WIDTH);
+    width = Math.max(width - padding * 2, minWidth);
+  } else {
+    width = Math.max(width, minWidth);
   }
   return {
     width: width,
@@ -924,6 +956,231 @@ function _isRectangularShapeES3(shapeData) {
   }
 
   return false;
+}
+
+function _interpolateRowAtYES3(rawRows, targetY) {
+  if (!rawRows || !rawRows.length) return { left: 0.5, right: 0.5 };
+  if (rawRows.length === 1 || targetY <= rawRows[0].y) {
+    return { left: rawRows[0].left, right: rawRows[0].right };
+  }
+  if (targetY >= rawRows[rawRows.length - 1].y) {
+    var last = rawRows[rawRows.length - 1];
+    return { left: last.left, right: last.right };
+  }
+  for (var i = 0; i < rawRows.length - 1; i++) {
+    var r0 = rawRows[i];
+    var r1 = rawRows[i + 1];
+    if (targetY >= r0.y && targetY <= r1.y) {
+      var t = (r1.y - r0.y) > 1e-6 ? (targetY - r0.y) / (r1.y - r0.y) : 0;
+      return {
+        left: r0.left + (r1.left - r0.left) * t,
+        right: r0.right + (r1.right - r0.right) * t,
+      };
+    }
+  }
+  var fallback = rawRows[rawRows.length - 1];
+  return { left: fallback.left, right: fallback.right };
+}
+
+function _detectBimodalNeckES3(rows) {
+  if (!rows || rows.length < 7) return null;
+  if (_hasInvertedSymmetricProfileES3(rows)) return null;
+
+  var n = rows.length;
+  var widths = [];
+  for (var i = 0; i < n; i++) {
+    var r = rows[i];
+    var w = (r.right !== undefined && r.left !== undefined) ? r.right - r.left : (r.width || 0);
+    widths.push(Math.max(0, w));
+  }
+
+  var bestResult = null;
+  var bestNeckDepth = 0;
+
+  for (var i = 1; i <= n - 4; i++) {
+    if (widths[i] < 0.30) continue;
+    if (widths[i] < widths[i - 1]) continue;
+
+    for (var j = i + 3; j <= n - 2; j++) {
+      if (widths[j] < 0.30) continue;
+      if (widths[j] < widths[j + 1]) continue;
+
+      var neckIdx = -1;
+      var neckMin = Infinity;
+      for (var k = i + 1; k < j; k++) {
+        if (widths[k] < neckMin) {
+          neckMin = widths[k];
+          neckIdx = k;
+        }
+      }
+
+      if (neckIdx < 0) continue;
+
+      var minPeak = Math.min(widths[i], widths[j]);
+      var neckRatio = neckMin / minPeak;
+      var neckDepth = minPeak - neckMin;
+
+      if (neckRatio <= 0.75 && neckDepth >= 0.12) {
+        var neckY = rows[neckIdx].y !== undefined ? rows[neckIdx].y : neckIdx / (n - 1);
+        if (neckY >= 0.20 && neckY <= 0.80 && neckDepth > bestNeckDepth) {
+          bestNeckDepth = neckDepth;
+          bestResult = {
+            isDouble: true,
+            neckIndex: neckIdx,
+            neckY: neckY,
+            peak1Index: i,
+            peak2Index: j,
+            peak1Width: widths[i],
+            peak2Width: widths[j],
+            neckWidth: neckMin,
+            neckRatio: neckRatio,
+            neckDepth: neckDepth,
+          };
+        }
+      }
+    }
+  }
+
+  return bestResult;
+}
+
+function _splitShapeProfileES3(shapeData) {
+  if (!shapeData || !shapeData.bounds || !shapeData.rows || shapeData.rows.length < 7) {
+    return { isDouble: false };
+  }
+
+  var bimodal = _detectBimodalNeckES3(shapeData.rows);
+  if (!bimodal || !bimodal.isDouble) {
+    return { isDouble: false };
+  }
+
+  var bounds = shapeData.bounds;
+  var origRows = shapeData.rows;
+  var neckIdx = bimodal.neckIndex;
+  var neckY = bimodal.neckY;
+
+  var rawRowsA = origRows.slice(0, neckIdx + 1);
+  var rawRowsB = origRows.slice(neckIdx);
+
+  if (rawRowsA.length < 3 || rawRowsB.length < 3) {
+    return { isDouble: false };
+  }
+
+  var minLeftA = 1, maxRightA = 0;
+  for (var i = 0; i < rawRowsA.length; i++) {
+    if (rawRowsA[i].width > 0.05) {
+      if (rawRowsA[i].left < minLeftA) minLeftA = rawRowsA[i].left;
+      if (rawRowsA[i].right > maxRightA) maxRightA = rawRowsA[i].right;
+    }
+  }
+  if (minLeftA >= maxRightA) { minLeftA = 0; maxRightA = 1; }
+
+  var minLeftB = 1, maxRightB = 0;
+  for (var i = 0; i < rawRowsB.length; i++) {
+    if (rawRowsB[i].width > 0.05) {
+      if (rawRowsB[i].left < minLeftB) minLeftB = rawRowsB[i].left;
+      if (rawRowsB[i].right > maxRightB) maxRightB = rawRowsB[i].right;
+    }
+  }
+  if (minLeftB >= maxRightB) { minLeftB = 0; maxRightB = 1; }
+
+  var spanA = Math.max(1e-6, maxRightA - minLeftA);
+  var boundsA = {
+    left: bounds.left + bounds.width * minLeftA,
+    top: bounds.top,
+    right: bounds.left + bounds.width * maxRightA,
+    bottom: bounds.top + bounds.height * neckY,
+    width: bounds.width * spanA,
+    height: bounds.height * neckY,
+  };
+  boundsA.xMid = (boundsA.left + boundsA.right) / 2;
+  boundsA.yMid = (boundsA.top + boundsA.bottom) / 2;
+
+  var spanB = Math.max(1e-6, maxRightB - minLeftB);
+  var boundsB = {
+    left: bounds.left + bounds.width * minLeftB,
+    top: bounds.top + bounds.height * neckY,
+    right: bounds.left + bounds.width * maxRightB,
+    bottom: bounds.bottom,
+    width: bounds.width * spanB,
+    height: bounds.height * (1 - neckY),
+  };
+  boundsB.xMid = (boundsB.left + boundsB.right) / 2;
+  boundsB.yMid = (boundsB.top + boundsB.bottom) / 2;
+
+  var sampleCount = 21;
+  var rowsA = [];
+  for (var s = 0; s < sampleCount; s++) {
+    var targetY = s / (sampleCount - 1);
+    var origY = targetY * neckY;
+    var sampledA = _interpolateRowAtYES3(rawRowsA, origY);
+    var normLA = Math.max(0, Math.min(1, (sampledA.left - minLeftA) / spanA));
+    var normRA = Math.max(0, Math.min(1, (sampledA.right - minLeftA) / spanA));
+    rowsA.push({
+      y: targetY,
+      left: normLA,
+      right: normRA,
+      width: Math.max(0, normRA - normLA),
+    });
+  }
+
+  var rowsB = [];
+  for (var s = 0; s < sampleCount; s++) {
+    var targetY = s / (sampleCount - 1);
+    var origY = neckY + targetY * (1 - neckY);
+    var sampledB = _interpolateRowAtYES3(rawRowsB, origY);
+    var normLB = Math.max(0, Math.min(1, (sampledB.left - minLeftB) / spanB));
+    var normRB = Math.max(0, Math.min(1, (sampledB.right - minLeftB) / spanB));
+    rowsB.push({
+      y: targetY,
+      left: normLB,
+      right: normRB,
+      width: Math.max(0, normRB - normLB),
+    });
+  }
+
+  var phantomA = _fitPhantomEllipseForSelection({ bounds: boundsA, rows: rowsA }) || {
+    pixelOffsetX: 0, pixelOffsetY: 0, isCut: false
+  };
+
+  var phantomB = _fitPhantomEllipseForSelection({ bounds: boundsB, rows: rowsB }) || {
+    pixelOffsetX: 0, pixelOffsetY: 0, isCut: false
+  };
+
+  return {
+    isDouble: true,
+    neckIndex: neckIdx,
+    neckY: neckY,
+    neckRatio: bimodal.neckRatio,
+    lobes: [
+      {
+        id: "lobeA",
+        bounds: boundsA,
+        shape: { bounds: boundsA, rows: rowsA },
+        phantom: phantomA,
+        centerX: boundsA.xMid + (phantomA.pixelOffsetX || 0),
+        centerY: boundsA.yMid + (phantomA.pixelOffsetY || 0),
+        phantomOffsetX: phantomA.pixelOffsetX || 0,
+        phantomOffsetY: phantomA.pixelOffsetY || 0,
+        pixelOffsetX: phantomA.pixelOffsetX || 0,
+        pixelOffsetY: phantomA.pixelOffsetY || 0,
+        hasCompletion: phantomA.isCut === true,
+      },
+      {
+        id: "lobeB",
+        bounds: boundsB,
+        shape: { bounds: boundsB, rows: rowsB },
+        phantom: phantomB,
+        centerX: boundsB.xMid + (phantomB.pixelOffsetX || 0),
+        centerY: boundsB.yMid + (phantomB.pixelOffsetY || 0),
+        phantomOffsetX: phantomB.pixelOffsetX || 0,
+        phantomOffsetY: phantomB.pixelOffsetY || 0,
+        pixelOffsetX: phantomB.pixelOffsetX || 0,
+        pixelOffsetY: phantomB.pixelOffsetY || 0,
+        hasCompletion: phantomB.isCut === true,
+      },
+    ],
+  };
 }
 
 function _positionLayerWithinSelection(selection, bounds, phantomOffsetX, phantomOffsetY, useSafetyMargin) {
@@ -1091,70 +1348,75 @@ function _getLayerStroke(layerIndex) {
  */
 function _setLayerStroke(stroke) {
   if (!stroke || (stroke.size <= 0 && stroke.enabled !== true)) return;
+  try {
+    var d = new ActionDescriptor();
+    var r = new ActionReference();
+    r.putProperty(charIDToTypeID("Prpr"), charIDToTypeID("Lefx"));
+    r.putEnumerated(charIDToTypeID("Lyr "), charIDToTypeID("Ordn"), charIDToTypeID("Trgt"));
+    d.putReference(charIDToTypeID("null"), r);
 
-  var d = new ActionDescriptor();
-  var r = new ActionReference();
-  r.putProperty(charIDToTypeID("Prpr"), charIDToTypeID("Lefx"));
-  r.putEnumerated(charIDToTypeID("Lyr "), charIDToTypeID("Ordn"), charIDToTypeID("Trgt"));
-  d.putReference(charIDToTypeID("null"), r);
+    var fx = new ActionDescriptor();
+    fx.putUnitDouble(charIDToTypeID("Scl "), charIDToTypeID("#Prc"), 100);
 
-  var fx = new ActionDescriptor();
-  fx.putUnitDouble(charIDToTypeID("Scl "), charIDToTypeID("#Prc"), 100);
+    var fr = new ActionDescriptor();
+    fr.putBoolean(charIDToTypeID("enab"), true);
+    fr.putBoolean(stringIDToTypeID("present"), true);
+    fr.putBoolean(stringIDToTypeID("showInDialog"), true);
 
-  var fr = new ActionDescriptor();
-  fr.putBoolean(charIDToTypeID("enab"), true);
-  fr.putBoolean(stringIDToTypeID("present"), true);
-  fr.putBoolean(stringIDToTypeID("showInDialog"), true);
+    fr.putEnumerated(charIDToTypeID("Styl"), charIDToTypeID("FStl"), charIDToTypeID("OutF"));
+    fr.putEnumerated(charIDToTypeID("PntT"), charIDToTypeID("FrFl"), charIDToTypeID("SClr"));
+    fr.putEnumerated(charIDToTypeID("Md  "), charIDToTypeID("BlnM"), charIDToTypeID("Nrml"));
 
-  fr.putEnumerated(charIDToTypeID("Styl"), charIDToTypeID("FStl"), charIDToTypeID("OutF"));
-  fr.putEnumerated(charIDToTypeID("PntT"), charIDToTypeID("FrFl"), charIDToTypeID("SClr"));
-  fr.putEnumerated(charIDToTypeID("Md  "), charIDToTypeID("BlnM"), charIDToTypeID("Nrml"));
+    fr.putUnitDouble(charIDToTypeID("Sz  "), charIDToTypeID("#Pxl"), stroke.size || 3);
+    fr.putUnitDouble(charIDToTypeID("Opct"), charIDToTypeID("#Prc"), stroke.opacity || 100);
 
-  fr.putUnitDouble(charIDToTypeID("Sz  "), charIDToTypeID("#Pxl"), stroke.size || 3);
-  fr.putUnitDouble(charIDToTypeID("Opct"), charIDToTypeID("#Prc"), stroke.opacity || 100);
+    var c = new ActionDescriptor();
+    c.putDouble(charIDToTypeID("Rd  "), stroke.color.r);
+    c.putDouble(charIDToTypeID("Grn "), stroke.color.g);
+    c.putDouble(charIDToTypeID("Bl  "), stroke.color.b);
+    fr.putObject(charIDToTypeID("Clr "), charIDToTypeID("RGBC"), c);
 
-  var c = new ActionDescriptor();
-  c.putDouble(charIDToTypeID("Rd  "), stroke.color.r);
-  c.putDouble(charIDToTypeID("Grn "), stroke.color.g);
-  c.putDouble(charIDToTypeID("Bl  "), stroke.color.b);
-  fr.putObject(charIDToTypeID("Clr "), charIDToTypeID("RGBC"), c);
+    fx.putObject(charIDToTypeID("FrFX"), charIDToTypeID("FrFX"), fr);
+    d.putObject(charIDToTypeID("T   "), charIDToTypeID("Lefx"), fx);
 
-  fx.putObject(charIDToTypeID("FrFX"), charIDToTypeID("FrFX"), fr);
-  d.putObject(charIDToTypeID("T   "), charIDToTypeID("Lefx"), fx);
-
-  executeAction(charIDToTypeID("setd"), d, DialogModes.NO);
+    executeAction(charIDToTypeID("setd"), d, DialogModes.NO);
+  } catch (strokeErr) {}
 }
 
 function _setDiacXOffset(val) {
-  var d = new ActionDescriptor();
-  var r = new ActionReference();
-  r.putProperty(charIDToTypeID("Prpr"), charIDToTypeID("TxtS"));
-  r.putEnumerated(charIDToTypeID("TxLr"), charIDToTypeID("Ordn"), charIDToTypeID("Trgt"));
-  d.putReference(charIDToTypeID("null"), r);
+  try {
+    var d = new ActionDescriptor();
+    var r = new ActionReference();
+    r.putProperty(charIDToTypeID("Prpr"), charIDToTypeID("TxtS"));
+    r.putEnumerated(charIDToTypeID("TxLr"), charIDToTypeID("Ordn"), charIDToTypeID("Trgt"));
+    d.putReference(charIDToTypeID("null"), r);
 
-  var t = new ActionDescriptor();
-  t.putInteger(stringIDToTypeID("textOverrideFeatureName"), 808466486);
-  t.putInteger(stringIDToTypeID("typeStyleOperationType"), 3);
-  t.putUnitDouble(stringIDToTypeID("diacXOffset"), charIDToTypeID("#Pxl"), val);
-  d.putObject(charIDToTypeID("T   "), charIDToTypeID("TxtS"), t);
+    var t = new ActionDescriptor();
+    t.putInteger(stringIDToTypeID("textOverrideFeatureName"), 808466486);
+    t.putInteger(stringIDToTypeID("typeStyleOperationType"), 3);
+    t.putUnitDouble(stringIDToTypeID("diacXOffset"), charIDToTypeID("#Pxl"), val);
+    d.putObject(charIDToTypeID("T   "), charIDToTypeID("TxtS"), t);
 
-  executeAction(charIDToTypeID("setd"), d, DialogModes.NO);
+    executeAction(charIDToTypeID("setd"), d, DialogModes.NO);
+  } catch (diacErr) {}
 }
 
 function _setMarkYOffset(val) {
-  var d = new ActionDescriptor();
-  var r = new ActionReference();
-  r.putProperty(charIDToTypeID("Prpr"), charIDToTypeID("TxtS"));
-  r.putEnumerated(charIDToTypeID("TxLr"), charIDToTypeID("Ordn"), charIDToTypeID("Trgt"));
-  d.putReference(charIDToTypeID("null"), r);
+  try {
+    var d = new ActionDescriptor();
+    var r = new ActionReference();
+    r.putProperty(charIDToTypeID("Prpr"), charIDToTypeID("TxtS"));
+    r.putEnumerated(charIDToTypeID("TxLr"), charIDToTypeID("Ordn"), charIDToTypeID("Trgt"));
+    d.putReference(charIDToTypeID("null"), r);
 
-  var t = new ActionDescriptor();
-  t.putInteger(stringIDToTypeID("textOverrideFeatureName"), 808466488);
-  t.putInteger(stringIDToTypeID("typeStyleOperationType"), 3);
-  t.putUnitDouble(stringIDToTypeID("markYDistFromBaseline"), charIDToTypeID("#Pxl"), val);
-  d.putObject(charIDToTypeID("T   "), charIDToTypeID("TxtS"), t);
+    var t = new ActionDescriptor();
+    t.putInteger(stringIDToTypeID("textOverrideFeatureName"), 808466488);
+    t.putInteger(stringIDToTypeID("typeStyleOperationType"), 3);
+    t.putUnitDouble(stringIDToTypeID("markYDistFromBaseline"), charIDToTypeID("#Pxl"), val);
+    d.putObject(charIDToTypeID("T   "), charIDToTypeID("TxtS"), t);
 
-  executeAction(charIDToTypeID("setd"), d, DialogModes.NO);
+    executeAction(charIDToTypeID("setd"), d, DialogModes.NO);
+  } catch (markErr) {}
 }
 
 function _applyMiddleEast(textStyle) {
@@ -1318,19 +1580,21 @@ function _createAndSetLayerText(data, width, height) {
 }
 
 function _setTextBoxSize(width, height) {
-  var box = [
-    {
-      textType: "box",
-      orientation: "horizontal",
-      bounds: {
-        top: 0,
-        left: 0,
-        right: _convertPixelToPoint(width),
-        bottom: _convertPixelToPoint(height),
+  try {
+    var box = [
+      {
+        textType: "box",
+        orientation: "horizontal",
+        bounds: {
+          top: 0,
+          left: 0,
+          right: _convertPixelToPoint(width),
+          bottom: _convertPixelToPoint(height),
+        },
       },
-    },
-  ];
-  jamText.setLayerText({ layerText: { textShape: box } });
+    ];
+    jamText.setLayerText({ layerText: { textShape: box } });
+  } catch (setTextBoxErr) {}
 }
 
 function _checkSelection(options) {
@@ -1354,7 +1618,7 @@ function _checkSelection(options) {
   } else if (adjustAmount !== 0) {
     adjustedSelection = _getAdjustedSelectionBounds(selection, adjustAmount);
   }
-  if (!adjustedSelection || adjustedSelection.width * adjustedSelection.height < 200) {
+  if (!adjustedSelection || adjustedSelection.width < 2 || adjustedSelection.height < 2 || adjustedSelection.width * adjustedSelection.height < 4) {
     return { error: "smallSelection" };
   }
 
@@ -2432,6 +2696,16 @@ function _alignCurrentTextLayerToSelection(collectDebug) {
         } else {
           _createMagicWandSelection(20);
           selection = _checkSelection({ adaptiveOpen: true });
+          if (!selection.error && app.activeDocument) {
+            try {
+              var curDocW = parseFloat(app.activeDocument.width);
+              var curDocH = parseFloat(app.activeDocument.height);
+              if (curDocW > 0 && curDocH > 0 && selection.width >= curDocW * 0.96 && selection.height >= curDocH * 0.96) {
+                _deselect();
+                selection = { error: "noSelection" };
+              }
+            } catch (curDocErr) {}
+          }
         }
       }
       if (selection.error) {
@@ -2508,6 +2782,21 @@ function _alignCurrentTextLayerToSelection(collectDebug) {
           }
         }
       } catch (debugSampleError) {}
+    }
+
+    // Double balloon diagnostics: when the sampled silhouette shows two lobes
+    // joined by a neck, report the split (neck position and each lobe center)
+    // so the debug panel can display it. Pure geometry, no Photoshop calls.
+    if (debugData && sampledShape) {
+      try {
+        var splitDebugBalloon = _splitShapeProfileES3(sampledShape);
+        if (splitDebugBalloon && splitDebugBalloon.isDouble) {
+          debugData.isDouble = true;
+          debugData.neckY = splitDebugBalloon.neckY;
+          debugData.neckRatio = splitDebugBalloon.neckRatio;
+          debugData.lobes = splitDebugBalloon.lobes;
+        }
+      } catch (splitDebugError) {}
     }
 
     if (debugData) {
@@ -3271,7 +3560,9 @@ function createTextLayerInSelection(data, point) {
   state.point = point;
   state.padding = data.padding || 0;
   state.result = "";
-  app.activeDocument.suspendHistory("TyperTools Paste", "_createTextLayerInSelection()");
+  _withDialogsSuppressed(function () {
+    app.activeDocument.suspendHistory("TyperTools Paste", "_createTextLayerInSelection()");
+  });
   return state.result;
 }
 
@@ -3287,7 +3578,9 @@ function alignTextLayerToSelection(data) {
   state.collectDebug = !!(data && data.collectDebug === true);
   state.debugData = null;
   state.result = "";
-  app.activeDocument.suspendHistory("TyperTools Align", "_alignTextLayerToSelection()");
+  _withDialogsSuppressed(function () {
+    app.activeDocument.suspendHistory("TyperTools Align", "_alignTextLayerToSelection()");
+  });
   var result = state.result;
   if (state.collectDebug && state.debugData) {
     return jamJSON.stringify({ result: result, debugData: state.debugData });
@@ -3756,17 +4049,33 @@ function _scanActiveLayerBubble(tolerance, sampleCount) {
       var textBounds = _getCurrentTextLayerBounds();
       _createMagicWandSelection(tolerance);
       var bounds = _getCurrentSelectionBounds();
-      if (!bounds || bounds.width * bounds.height < 200) {
+      if (!bounds || bounds.width < 2 || bounds.height < 2 || bounds.width * bounds.height < 4) {
         _deselect();
         return { error: "noBubble" };
       }
       // A wand escaping the bubble (open outline, plain page background) grabs
       // a huge area: reject implausible bubbles instead of shaping to the page
+      if (app.activeDocument) {
+        try {
+          var scanDocW = parseFloat(app.activeDocument.width);
+          var scanDocH = parseFloat(app.activeDocument.height);
+          if (scanDocW > 0 && scanDocH > 0 && bounds.width >= scanDocW * 0.96 && bounds.height >= scanDocH * 0.96) {
+            _deselect();
+            return { error: "noBubble" };
+          }
+        } catch (scanDocDimErr) {}
+      }
       if (textBounds && textBounds.width > 0 && textBounds.height > 0) {
         var areaRatio = (bounds.width * bounds.height) / (textBounds.width * textBounds.height);
-        if (areaRatio > 60) {
-          _deselect();
-          return { error: "noBubble" };
+        if (areaRatio > 350 && app.activeDocument) {
+          try {
+            var scanDocW2 = parseFloat(app.activeDocument.width);
+            var scanDocH2 = parseFloat(app.activeDocument.height);
+            if (scanDocW2 > 0 && scanDocH2 > 0 && (bounds.width * bounds.height) > (scanDocW2 * scanDocH2 * 0.35)) {
+              _deselect();
+              return { error: "noBubble" };
+            }
+          } catch (ratioDocErr) {}
         }
       }
       // Close the text holes and smooth the outline before sampling
