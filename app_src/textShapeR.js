@@ -1,5 +1,5 @@
 import defaultTextShapeRTuning from "./textShapeRDefaultTuning.json";
-import { reconstructPhantomBalloon, splitShapeProfile } from "./phantomEllipse";
+import { reconstructPhantomBalloon } from "./phantomEllipse";
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const VOWELS = "aeiouyAEIOUY\u00e0\u00e2\u00e4\u00e9\u00e8\u00ea\u00eb\u00ee\u00ef\u00f4\u00f6\u00f9\u00fb\u00fc\u00c0\u00c2\u00c4\u00c9\u00c8\u00ca\u00cb\u00ce\u00cf\u00d4\u00d6\u00d9\u00db\u00dc";
@@ -1303,30 +1303,7 @@ const getShapeProfileGeometry = (shapeProfile) => {
     return { rows, phantomRows: rows, centerX: 0.5, centerY: 0.5, offsetX: 0, offsetY: 0, hasCompletion: false };
   }
 
-  // 0. Check if this is a connected double balloon
-  if (shapeProfile && (shapeProfile.polygons || shapeProfile.bounds)) {
-    const doubleResult = splitShapeProfile(shapeProfile);
-    if (doubleResult && doubleResult.isDouble) {
-      return {
-        rows,
-        phantomRows: rows,
-        centerX: 0.5,
-        centerY: 0.5,
-        offsetX: 0,
-        offsetY: 0,
-        phantomWidth: (shapeProfile.bounds && shapeProfile.bounds.width),
-        phantomHeight: (shapeProfile.bounds && shapeProfile.bounds.height),
-        ellipse: null,
-        hasCompletion: false,
-        isRectangular: false,
-        isDouble: true,
-        neckY: doubleResult.neckY,
-        lobes: doubleResult.lobes,
-      };
-    }
-  }
-
-  // 1. Attempt full 2D phantom ellipse reconstruction if polygon / bounds data permits
+  // Attempt full 2D phantom ellipse reconstruction if polygon / bounds data permits
   if (shapeProfile && (shapeProfile.polygons || shapeProfile.bounds)) {
     const phantom = reconstructPhantomBalloon(shapeProfile);
     if (phantom && phantom.isRectangular) {

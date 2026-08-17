@@ -85,14 +85,6 @@ const BalloonCenteringDebug = ({ data, onClose }) => {
           <Grid>
             <Row label="Formato Retangular" value={isRectangular ? "Sim" : "Não"} monospace={false} />
             <Row label="Tem Completion" value={hasCompletion ? "Sim" : "Não"} monospace={false} />
-            {data.isDouble && data.lobes && (
-              <>
-                <Row label="Balão Duplo" value="Detectado (2 Lóbulos)" monospace={false} />
-                <Row label="Gargalo (Neck Y)" value={formatNumber((data.neckY || 0) * 100)} unit="%" />
-                <Row label="Lóbulo A Centro Y" value={formatInt(data.lobes[0]?.centerY)} unit="px" />
-                <Row label="Lóbulo B Centro Y" value={formatInt(data.lobes[1]?.centerY)} unit="px" />
-              </>
-            )}
             {ellipseFit && (
               <>
                 <Row label="Elipse Center X" value={formatInt(ellipseFit.centerX)} unit="px" />

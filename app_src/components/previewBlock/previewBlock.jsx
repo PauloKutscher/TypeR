@@ -1,7 +1,7 @@
 import "./previewBlock.scss";
 
 import React from "react";
-import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiChevronsRight, FiPlay, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiInfo, FiRotateCcw, FiStar, FiX, FiLink2 } from "react-icons/fi";
+import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiChevronsRight, FiPlay, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiInfo, FiRotateCcw, FiStar, FiX } from "react-icons/fi";
 import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
@@ -14,7 +14,6 @@ import { getBubbleCacheKey, haveSameLayerSize } from "../../textShapeRTracking";
 import { pasteInSelection, withShortcutHint } from "../../shortcutCommands";
 import { createFontPreviewRegistry, getFontPreviewFamily } from "../../fontPreview";
 import { notePerfRender } from "../../perfDebug";
-import { splitShapeProfile } from "../../phantomEllipse";
 import TextShapeRFitPreview from "../textShapeRFitpreview";
 import BalloonCenteringDebug from "./BalloonCenteringDebug";
 
@@ -815,72 +814,13 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const addSelectionAndAdvance = (selection) => {
     if (!selection) return;
     const currentLineIndex = context.state.currentLineIndex;
-
-    csInterface.evalScript(`getCurrentSelectionShape(${JSON.stringify({ samples: 21 })})`, (result) => {
-      try {
-        const data = JSON.parse(result || "{}");
-        if (data && data.bounds && data.rows && data.rows.length >= 7) {
-          const doubleBalloon = splitShapeProfile(data);
-          if (doubleBalloon && doubleBalloon.isDouble && doubleBalloon.lobes && doubleBalloon.lobes.length === 2) {
-            const lobeA = {
-              top: doubleBalloon.lobes[0].bounds.top,
-              left: doubleBalloon.lobes[0].bounds.left,
-              right: doubleBalloon.lobes[0].bounds.right,
-              bottom: doubleBalloon.lobes[0].bounds.bottom,
-              width: doubleBalloon.lobes[0].bounds.width,
-              height: doubleBalloon.lobes[0].bounds.height,
-              xMid: doubleBalloon.lobes[0].bounds.xMid,
-              yMid: doubleBalloon.lobes[0].bounds.yMid,
-              phantomOffsetX: doubleBalloon.lobes[0].phantomOffsetX || 0,
-              phantomOffsetY: doubleBalloon.lobes[0].phantomOffsetY || 0,
-              phantomGeometryProvided: true,
-              isDoubleLobe: true,
-              lobeId: "lobeA",
-            };
-            const lobeB = {
-              top: doubleBalloon.lobes[1].bounds.top,
-              left: doubleBalloon.lobes[1].bounds.left,
-              right: doubleBalloon.lobes[1].bounds.right,
-              bottom: doubleBalloon.lobes[1].bounds.bottom,
-              width: doubleBalloon.lobes[1].bounds.width,
-              height: doubleBalloon.lobes[1].bounds.height,
-              xMid: doubleBalloon.lobes[1].bounds.xMid,
-              yMid: doubleBalloon.lobes[1].bounds.yMid,
-              phantomOffsetX: doubleBalloon.lobes[1].phantomOffsetX || 0,
-              phantomOffsetY: doubleBalloon.lobes[1].phantomOffsetY || 0,
-              phantomGeometryProvided: true,
-              isDoubleLobe: true,
-              lobeId: "lobeB",
-            };
-            const nextLine1 = context.state.multiBubbleMode
-              ? getNextUsableLineIndex(context.state.lines || [], currentLineIndex)
-              : { index: currentLineIndex, advanced: false };
-            const lineIndex2 = nextLine1.advanced ? nextLine1.index : currentLineIndex;
-            const nextLine2 = nextLine1.advanced
-              ? getNextUsableLineIndex(context.state.lines || [], lineIndex2)
-              : nextLine1;
-
-            context.dispatch({
-              type: "addSelectionBatch",
-              entries: [
-                { selection: lobeA, lineIndex: currentLineIndex },
-                { selection: lobeB, lineIndex: lineIndex2 },
-              ],
-              nextLineIndex: nextLine2.advanced ? nextLine2.index : (nextLine1.advanced ? nextLine1.index : undefined),
-            });
-            return;
-          }
-        }
-      } catch (err) {}
-
-      const nextLine = context.state.multiBubbleMode
-        ? getNextUsableLineIndex(context.state.lines || [], currentLineIndex)
-        : { index: currentLineIndex, advanced: false };
-      context.dispatch({
-        type: "addSelectionBatch",
-        entries: [{ selection, lineIndex: currentLineIndex }],
-        nextLineIndex: nextLine.advanced ? nextLine.index : undefined,
-      });
+    const nextLine = context.state.multiBubbleMode
+      ? getNextUsableLineIndex(context.state.lines || [], currentLineIndex)
+      : { index: currentLineIndex, advanced: false };
+    context.dispatch({
+      type: "addSelectionBatch",
+      entries: [{ selection, lineIndex: currentLineIndex }],
+      nextLineIndex: nextLine.advanced ? nextLine.index : undefined,
     });
   };
 
@@ -1321,13 +1261,7 @@ const handleAlignLayer = React.useCallback(() => {
     !inlineLayerSource.loading &&
     !batchRun;
 
-  // A double balloon capture stores two lobe entries (lobeA + lobeB) as a
-  // pair: count the lobeA entries to report how many double balloons the
-  // current batch contains.
   const storedSelectionsList = context.state.storedSelections || [];
-  const doubleBalloonCount = storedSelectionsList.filter(
-    (storedSelection) => storedSelection.isDoubleLobe === true && storedSelection.lobeId === "lobeA"
-  ).length;
 
   return (
     <React.Fragment>
@@ -1337,11 +1271,6 @@ const handleAlignLayer = React.useCallback(() => {
           <div className="preview-top_selection-controls">
             <div className="preview-top_selection-info">
               <span className="preview-top_selection-count">{storedSelectionsList.length} {storedSelectionsList.length > 1 ? (locale.selectionsCount || 'selections') : (locale.selectionCount || 'selection')}</span>
-              {doubleBalloonCount > 0 && (
-                <span className="preview-top_selection-double" title={locale.multiBubbleDoubleBalloonTip || "Double balloon detected: one selection creates 2 text targets (upper and lower lobe)"}>
-                  <FiLink2 size={12} /> {doubleBalloonCount} {locale.multiBubbleDoubleBalloon || "double balloon"}
-                </span>
-              )}
               <button
                 className="topcoat-icon-button--large"
                 title={locale.clearSelections || "Remove the last selection (hold 1s to clear all)"}
