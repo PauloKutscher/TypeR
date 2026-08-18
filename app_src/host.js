@@ -799,17 +799,46 @@ function _getAdaptiveOpenedSelectionBounds(bounds) {
     // while giving up on it fell back to the bounding-box centre and let the
     // phantom offset back in, costing 405 px.
     var target = opened || bounds;
-    if (target && !target.centroid) {
+    if (target && !target.centroid && _centroidRetryWorthIt(opened ? _hostState.centroidSkip : "")) {
       try {
         target.centroid = _openedSelectionCentroid(doc, _getCurrentSelectionBounds() || target);
       } catch (rawCentroidError) {}
     }
+    // `Make Work Path` consumes the selection, and the retry above runs it on the
+    // caller's own marquee. Multi-bubble polls this helper for every new
+    // selection, so a marquee the user had just drawn was silently dropped
+    // whenever the centroid was refused — and the next poll then read the empty
+    // document as "the user deselected" and wiped the whole stored batch.
+    // Checked rather than assumed: the load above can fail too, and no reader of
+    // these bounds has ever been allowed to cost the user their selection.
+    try {
+      if (!_getCurrentSelectionBounds()) {
+        doc.selection.load(tempChannel);
+      }
+    } catch (finalRestoreError) {}
     try {
       tempChannel.remove();
     } catch (removeError) {}
   }
 
   return opened || bounds;
+}
+
+/*
+ * Is a second trace on the unopened selection worth the cost? Everything gets
+ * the retry except the refusals the unopened selection cannot possibly fix,
+ * because it is larger, not smaller: a region already too big to trace, an
+ * outline already over the anchor budget, and a work path that belongs to the
+ * user. Skipping those is not an optimisation for its own sake — each trace runs
+ * `Make Work Path` on the marquee the user is still holding, and a large
+ * selection blows the budget on both passes, so retrying it paid twice for the
+ * same refusal.
+ */
+function _centroidRetryWorthIt(skip) {
+  if (!skip) return true;
+  if (skip === "coversPage" || skip === "userWorkPath" || skip === "noBounds") return false;
+  if (skip.indexOf("anchors:") === 0) return Number(skip.substring(8)) <= 2;
+  return true;
 }
 
 function _selectionBoundsKey(bounds) {
@@ -1733,6 +1762,33 @@ function _createTextLayerInSelection() {
 }
 
 /*
+ * Page size in pixels, whatever the user's rulers are set to.
+ *
+ * `doc.width` is a UnitValue in the active ruler units, so a document measured in
+ * centimetres reports ~21 where the selection bounds report ~2700. Every
+ * comparison between the two then collapses: the page-share guard below refused
+ * every region (so the centroid was never traced and centring silently fell back
+ * to the bounding box), and the narrowing box clamped to the first pixels of the
+ * page. The lab pages are measured in pixels, which is why no run ever saw it.
+ */
+function _getDocumentPixelSize(doc) {
+  var oldUnits = app.preferences.rulerUnits;
+  try {
+    app.preferences.rulerUnits = Units.PIXELS;
+    var width = parseFloat(doc.width);
+    var height = parseFloat(doc.height);
+    if (!(width > 0) || !(height > 0)) return null;
+    return { width: width, height: height };
+  } catch (sizeError) {
+    return null;
+  } finally {
+    try {
+      app.preferences.rulerUnits = oldUnits;
+    } catch (restoreError) {}
+  }
+}
+
+/*
  * A region covering a quarter of the page is not a balloon: it is a fill that
  * escaped through a gap in an outline and swallowed the artwork. Measured on the
  * reference pages, real balloon regions stay under 7% of the page while the two
@@ -1741,8 +1797,9 @@ function _createTextLayerInSelection() {
 function _regionCoversTooMuchPage(bounds) {
   if (!bounds) return false;
   try {
-    var doc = app.activeDocument;
-    var docArea = parseFloat(doc.width) * parseFloat(doc.height);
+    var size = _getDocumentPixelSize(app.activeDocument);
+    if (!size) return false;
+    var docArea = size.width * size.height;
     return docArea > 0 && bounds.width * bounds.height > docArea * _MAX_BALLOON_PAGE_SHARE;
   } catch (sizeError) {
     return false;
@@ -1780,10 +1837,15 @@ function _narrowSelectionToTextNeighbourhood() {
 
   var marginX = ink.width / 2;
   var marginY = ink.height / 2;
+  var pageSize = _getDocumentPixelSize(doc);
   var left = Math.max(0, Math.round(ink.left - marginX));
   var top = Math.max(0, Math.round(ink.top - marginY));
-  var right = Math.min(Math.round(parseFloat(doc.width)), Math.round(ink.right + marginX));
-  var bottom = Math.min(Math.round(parseFloat(doc.height)), Math.round(ink.bottom + marginY));
+  var right = Math.round(ink.right + marginX);
+  var bottom = Math.round(ink.bottom + marginY);
+  if (pageSize) {
+    right = Math.min(Math.round(pageSize.width), right);
+    bottom = Math.min(Math.round(pageSize.height), bottom);
+  }
   if (right - left < 2 || bottom - top < 2) return null;
 
   // The intersection can come out empty on a shape we did not anticipate, so the

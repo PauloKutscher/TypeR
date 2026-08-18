@@ -2,7 +2,7 @@
 
 Documento de trabalho. Atualizado a cada etapa concluída.
 
-Última atualização: 2026-08-18, após explicar o centroide ausente e fechar os cinco cenários (runs `031` a `035`).
+Última atualização: 2026-08-18, após devolver a marquee que a leitura do centroide roubava no multi-bolhas e tirar as guardas de área da dependência da régua (runs `036` e `037`).
 
 ## Objetivo
 
@@ -88,6 +88,8 @@ Baseline da medição: `resizeTextBoxOnCenter` desligado e `internalPadding = 0`
 | 12 | Fluxo real: seleção viva e offset do painel | concluída |
 | 13 | Recusa removida e vazamento da varinha contornado | concluída |
 | 14 | Centroide ausente no estreitamento: orçamento obsoleto e traçado vazio | concluída |
+| 15 | Regressão do multi-bolhas: a leitura do centroide roubava a marquee do usuário | concluída |
+| 16 | Guardas de área dependiam da unidade da régua do usuário | concluída |
 
 ## Registro do que já foi feito
 
@@ -315,6 +317,61 @@ Os dois últimos cenários agora dão **os mesmos números**, o que é a evidên
 
 Ferramentas de diagnóstico do laboratório, todas fora do git: `diagCentroid.jsx` (passo a passo do centroide, hoje recusando região que cobre demais a página, porque traçá-la travou o Photoshop por mais de uma hora), `diagNarrow.jsx` (só o estreitamento), `diagNarrowCentroid.jsx` (o cálculo guarda por guarda) e `diagPathRef.jsx` (leitura do path por alvo contra por índice, contra o DOM).
 
+### Tarefa 15 — a leitura do centroide roubava a marquee do usuário (concluída)
+
+O usuário reportou que, com o modo multi-bolhas ligado, uma seleção grande era desfeita pelo próprio plugin logo depois de ser desenhada. Isso é uma regressão introduzida pelo centroide: antes da Task 8 a captura em `getSelectionChanged` só abria a seleção (contrair/expandir sobre um canal temporário, sempre restaurado); agora ela também traça o contorno, e `Make Work Path` **consome a seleção**.
+
+O `finally` de `_getAdaptiveOpenedSelectionBounds` restaurava a seleção do canal **antes** da segunda tentativa da Task 14 e removia o canal **depois** dela. Quando a primeira passagem não devolvia centroide, a segunda traçava outra vez — sobre a marquee do usuário — e ninguém a recolocava. Duas consequências: a marquee desaparecia e o poll seguinte lia o documento vazio como "o usuário desselecionou", o que também apagava o lote inteiro de bolhas guardadas.
+
+Duas correções em `app_src/host.js`, ambas no ponto compartilhado:
+
+1. **Restauração verificada antes de remover o canal.** Se não há seleção viva no fim, ela volta do canal. Conferir em vez de assumir cobre também a falha da primeira restauração, e vale para Paste, Align e multi-bolhas de uma vez.
+2. **`_centroidRetryWorthIt`**: a segunda tentativa deixa de rodar quando a recusa não pode melhorar sem a abertura — região que cobre demais a página, work path do usuário e contorno acima do orçamento de âncoras (o traçado sem abertura tem no mínimo as mesmas âncoras). O caso da Task 14 (`anchors:0`, traçado vazio depois da abertura) continua repetindo, que é a razão de a segunda tentativa existir. Uma seleção grande estourava o orçamento nas duas passagens, então a repetição pagava dois traçados pela mesma recusa.
+
+Medição no motor real, `scripts/lab/diagCapture.jsx` + `scripts/lab/runCapture.ps1` (novos): 20 formas e tamanhos de seleção por página — retângulos de 2% a 60% da página, retângulo com feather, laço serrilhado, faixa diagonal fina e moldura fina com bbox grande, varinha no fundo da página, varinha no balão, e os mesmos casos numa página redimensionada para o dobro. Cada caso roda a sequência real do painel: captura, captura repetida, `getCurrentSelectionShape` do TextShapeR inline e captura outra vez.
+
+| caso | motor publicado (`35bcbbe`) | corrigido |
+| --- | --- | --- |
+| centroide aceito (todas as formas normais) | marquee viva, centroide devolvido | igual |
+| região > 25% da página (`coversPage`) | marquee viva, sem centroide | igual, sem o traçado extra |
+| centroide recusado **depois** de traçar (`anchors:` acima do orçamento) | **marquee destruída**, e as capturas seguintes devolvem `cleared` | marquee viva em todos os passos |
+
+A recusa depois do traçado foi exercitada baixando `_MAX_BALLOON_PATH_ANCHORS` para 3 em runtime, porque nas 10 páginas de referência nenhuma seleção sintética chega às 30 000 âncoras: o que importa é que a marquee sobreviva a uma recusa, não o que causou a recusa. Sem isso o defeito não aparece — foi por isso que as cinco matrizes anteriores passaram.
+
+Gate de centralização, cenário mais próximo do uso real (seleção viva, offset fantasma de 15% da largura), run `036-nosteal-live-phantom` contra o motor original `000L-live-phantom`:
+
+| categoria | n | PASS base → novo | \|dX\| med/p95 | \|dY\| med/p95 | recusas |
+| --- | --- | --- | --- | --- | --- |
+| normal | 26 | 0/26 → 12/26 | 72/100 → 2/4 | 4/38 → 4/17 | 0 |
+| cut | 15 | 0/15 → 5/15 | 46/177 → 3/16 | 11/113 → 5/62 | 0 |
+| leak | 24 | 0/24 → 4/24 | 101/389 → 92/219 | 130/1370 → 61/349 | 0 |
+
+**GATE APROVADO**, e os números são idênticos aos do run `035-final-live-phantom` documentado na Tarefa 14 (normal 4/17, cut 16/62, leak mediana 92/61, PASS leak 4). Era o resultado esperado por construção: a correção não toca no cálculo do centroide, apenas devolve a seleção e deixa de pagar um traçado que já ia ser recusado. 65 camadas, 0 erros de script, ground truth intacto.
+
+Teste: `scripts/testBalloonCentroid.js` ganhou um teste de comportamento de `_getAdaptiveOpenedSelectionBounds` com um documento falso que modela o que o Photoshop faz (o canal guarda uma cópia, contrair/expandir movem as bordas, um traçado consome a seleção). Ele afirma que a marquee sobrevive a um centroide recusado, que o caso `anchors:0` ainda repete na seleção não aberta e que um contorno acima do orçamento não é traçado duas vezes. A checagem por regex sobre o texto-fonte que existia antes foi substituída por ele. Verificado que o teste **falha** no código anterior (`a refused centroid must not cost the user their selection`) e passa no corrigido.
+
+### Tarefa 16 — as guardas de área dependiam da régua do usuário (concluída)
+
+`doc.width` e `doc.height` do DOM vêm nas **unidades de régua ativas**, e dois pontos os comparavam com bounds em pixels:
+
+- `_regionCoversTooMuchPage`: `docArea = parseFloat(doc.width) * parseFloat(doc.height)`. Com a régua em centímetros, uma página de 2700x3840 px reporta ~21x30, então a área da página vale ~650 em vez de 10,4 milhões e **qualquer** balão fica acima de 25% dela. Efeito medido: o contorno nunca era traçado, o centroide nunca existia e a centralização caía silenciosamente no centro do bbox — ou seja, todo o ganho das tarefas 8 a 14 ficava desligado para esses usuários.
+- `_narrowSelectionToTextNeighbourhood`: `right = Math.min(Math.round(parseFloat(doc.width)), ...)`. Com a régua em centímetros o teto virava ~21, a caixa de estreitamento colapsava para os primeiros pixels da página e a função devolvia `null` (`right - left < 2`).
+
+Correção: um helper único, `_getDocumentPixelSize(doc)`, que fixa `Units.PIXELS`, lê as dimensões e devolve a régua do usuário como estava (mesmo padrão que `_getMeasureBoxSpanPoints` já usava). Os dois pontos passam por ele, e o estreitamento só aplica o teto quando o tamanho é conhecido. `doc.resolution` não entra nisso: é sempre em pixels por polegada, independente da régua.
+
+Medição no motor real (`runCapture.ps1`, caso `cm rulers: wand on balloon`, com `Units.CM` ativo durante a captura):
+
+| motor | região do balão | resultado |
+| --- | --- | --- |
+| publicado (`35bcbbe`) | varinha no balão real, ~5% da página | `coversPage` — centroide recusado |
+| corrigido | mesma região | centroide calculado |
+
+Nesse cenário só a varinha é informativa: `_wandAt` endereça o documento em pixels explícitos, enquanto `doc.selection.select` recebe unidades de régua, então um retângulo sintético sairia microscópico e não acionaria guarda nenhuma.
+
+Gate de centralização revalidado depois da mudança, run `037-units-live-phantom` contra `000L-live-phantom` (seleção viva, offset de 15%): normal 12/26 PASS, p95 4/17; cut 5/15, p95 16/62; leak 4/24, mediana 92/61; 0 recusas — **idêntico** aos runs `035` e `036`, como esperado, porque com a régua em pixels o helper devolve exatamente os mesmos números. 65 camadas, 0 erros.
+
+Teste: `scripts/testBalloonCentroid.js` cobre `_getDocumentPixelSize` com um documento falso cuja largura muda conforme a régua ativa (deve devolver pixels com a régua em cm, restaurar a unidade do usuário e devolver `null` sem vazar a unidade quando a leitura falha) e `_regionCoversTooMuchPage` (um balão de 900x1200 numa página de 2700x3840 nunca é recusado; uma região de 2000x2000 continua sendo). Verificado que o teste falha quando a fixação da régua é removida.
+
 ## Próximos passos imediatos
 
 1. **Task 7 precisa de amostra:** nenhuma das 10 páginas tem balão de grito (solidez ≥ 0,85 em todas). Sem pelo menos uma, a categoria fica sem medição.
@@ -342,6 +399,10 @@ powershell -NoProfile -File scripts/lab/runMeasure.ps1 -Root "<raiz>" -Run 020-n
 
 # 6. destrinchar um caso dentro do Photoshop, passo a passo
 powershell -NoProfile -File scripts/lab/runDiag.ps1 -Root "<raiz>" -Run 000-baseline -Page "<nome do psd>" -Index 1
+
+# 7. conferir que nenhuma seleção do usuário é destruída pela captura multi-bolhas
+#    (-HostJsx compara com outro bundle, por exemplo o do commit anterior)
+powershell -NoProfile -File scripts/lab/runCapture.ps1 -Root "<raiz>" -Run 000-baseline -Page "<nome do psd>" -Index 5 -Label atual
 ```
 
 Runs guardados em `.centering-lab/runs/`. Motor original: `000-baseline` (sem resize), `000R-resize`, `000R-pad12`, `000L-live`, `000L-live-phantom`. Motor atual: `016-narrow`, `017-narrow-resize`, `018-narrow-pad12`, `019-narrow-live`, `020-narrow-live-phantom`. Os demais (`002` a `015`, `021`, `022`) são as etapas intermediárias descritas acima.

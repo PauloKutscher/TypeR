@@ -152,23 +152,123 @@ assert.ok(
   "Align must not answer noSelection after finding a region"
 );
 
-/* ---------- the centroid must get a second chance ---------- */
+/* ---------- reading the bounds must never cost the user their selection ---------- */
 
 /*
- * Opening a selection that is a mesh of thin slivers can leave `Make Work Path`
- * with nothing to trace (measured: 0 subpaths after a 9 px opening against 2 059
- * subpaths on the same selection unopened). Without a retry on the unopened
- * selection the layer falls back to the bounding-box centre and the phantom
- * offset comes back with it, which cost 405 px on the measured case.
+ * `Make Work Path` consumes the live selection, so every trace runs on the
+ * marquee the user is still holding. Multi-bubble polls this helper for every new
+ * selection: when the centroid was refused, the marquee was dropped and the next
+ * poll read the empty document as a user deselect and wiped the stored batch.
+ * A large selection is exactly the case that trips it, because it blows the
+ * anchor budget on both passes.
+ *
+ * The fake document below models what Photoshop does: the channel keeps a copy,
+ * contract/expand move the edges, and a trace eats the selection.
  */
-const openBody = hostSource.slice(
-  hostSource.indexOf("function _getAdaptiveOpenedSelectionBounds("),
-  hostSource.indexOf("\n}", hostSource.indexOf("return opened || bounds;"))
-);
-assert.ok(
-  /!target\.centroid[\s\S]*_openedSelectionCentroid\(doc, _getCurrentSelectionBounds\(\)/.test(openBody),
-  "the opened bounds helper must retry the centroid on the unopened selection"
-);
+const box = (left, top, right, bottom) => ({
+  left, top, right, bottom,
+  width: right - left,
+  height: bottom - top,
+  xMid: (left + right) / 2,
+  yMid: (top + bottom) / 2,
+});
+
+const openRadius = lift("_getAdaptiveSelectionOpenRadius(bounds)", [
+  "_MIN_SELECTION_OPEN_RADIUS",
+  "_SELECTION_OPEN_RATIO",
+])(4, 0.1);
+
+const openBounds = lift("_getAdaptiveOpenedSelectionBounds(bounds)", [
+  "app",
+  "_getAdaptiveSelectionOpenRadius",
+  "_createTempSelectionChannel",
+  "_modifySelectionBounds",
+  "_getCurrentSelectionBounds",
+  "_openedSelectionCentroid",
+  "_centroidRetryWorthIt",
+  "_hostState",
+]);
+
+const retryWorthIt = lift("_centroidRetryWorthIt(skip)", [])();
+
+function runOpen(initial, traceResults) {
+  const world = { live: { ...initial }, stored: null, traces: 0, channelRemoved: false };
+  const hostState = { centroidSkip: "" };
+  const doc = {
+    selection: {
+      load: () => {
+        if (!world.stored) throw new Error("no channel to restore from");
+        world.live = { ...world.stored };
+      },
+    },
+  };
+  const helper = openBounds(
+    { activeDocument: doc },
+    openRadius,
+    () => {
+      world.stored = { ...world.live };
+      return { remove: () => { world.channelRemoved = true; } };
+    },
+    (amount) => {
+      if (!world.live) throw new Error("no selection to modify");
+      world.live = {
+        left: world.live.left - amount,
+        top: world.live.top - amount,
+        right: world.live.right + amount,
+        bottom: world.live.bottom + amount,
+      };
+    },
+    () => (world.live ? box(world.live.left, world.live.top, world.live.right, world.live.bottom) : undefined),
+    () => {
+      const result = traceResults[world.traces] || { skip: "anchors:0" };
+      world.traces += 1;
+      world.live = null; // Make Work Path consumed the selection
+      hostState.centroidSkip = result.centroid ? "" : result.skip;
+      return result.centroid || null;
+    },
+    retryWorthIt,
+    hostState
+  );
+  const result = helper(box(initial.left, initial.top, initial.right, initial.bottom));
+  return { world, result, hostState };
+}
+
+const big = { left: 200, top: 300, right: 1400, bottom: 1600 };
+
+// The reported bug: a big selection blows the anchor budget, the centroid is
+// refused, and the marquee must still be there afterwards.
+let run = runOpen(big, [{ skip: "anchors:41000" }]);
+assert.ok(run.world.live, "a refused centroid must not cost the user their selection");
+assert.strictEqual(run.world.traces, 1, "an outline over the anchor budget must not be traced again unopened");
+assert.ok(run.world.channelRemoved, "the temporary channel must always be removed");
+assert.ok(run.result && run.result.width > 0, "the caller must still get usable bounds");
+
+// The Task 14 case must survive: an opening that wipes the outline out still
+// gets its second chance, and the selection comes back from that trace too.
+run = runOpen(big, [{ skip: "anchors:0" }, { skip: "anchors:0" }]);
+assert.strictEqual(run.world.traces, 2, "an empty trace after opening must retry on the unopened selection");
+assert.ok(run.world.live, "the retry must not cost the user their selection either");
+
+run = runOpen(big, [{ skip: "anchors:0" }, { centroid: { x: 700, y: 900 } }]);
+assert.deepStrictEqual(run.result.centroid, { x: 700, y: 900 }, "the retry's centroid must reach the caller");
+assert.ok(run.world.live, "a successful retry must leave the selection alive");
+
+// The normal path: the centroid comes from the opened selection, one trace, and
+// the marquee is restored from the channel as it always was.
+run = runOpen(big, [{ centroid: { x: 800, y: 950 } }]);
+assert.strictEqual(run.world.traces, 1, "a usable centroid must not be traced twice");
+assert.deepStrictEqual(run.result.centroid, { x: 800, y: 950 }, "the opened centroid must reach the caller");
+assert.ok(run.world.live, "the historical restore must still happen");
+
+// Which refusals are worth a second trace: everything the unopened selection
+// could still fix, and nothing it provably cannot, because it is the larger one.
+assert.ok(retryWorthIt(""), "no attempt yet means the unopened selection is still worth a try");
+assert.ok(retryWorthIt("anchors:0"), "an empty outline is what the retry exists for");
+assert.ok(retryWorthIt("degenerateOutline"), "a degenerate outline deserves the retry");
+assert.ok(retryWorthIt("outsideEnvelope"), "a centroid outside the opened envelope can still land inside the raw one");
+assert.ok(!retryWorthIt("anchors:41000"), "an outline over the budget only gets bigger unopened");
+assert.ok(!retryWorthIt("coversPage"), "a region too big to trace must not be traced twice");
+assert.ok(!retryWorthIt("userWorkPath"), "the user's work path must be left alone on both passes");
 
 /*
  * The anchor budget belongs to the Action Manager read (about 13 µs per anchor,
@@ -249,5 +349,57 @@ for (const caller of [
     caller + " must pass a target centre to _positionLayerWithinSelection"
   );
 }
+
+/* ---------- the page-share guard must not depend on the user's rulers ---------- */
+
+/*
+ * `doc.width` comes back in the active ruler units. With rulers in centimetres a
+ * 2700x3840 page reports ~21x30, so every balloon looks bigger than a quarter of
+ * the "page", the guard refuses the region, and the centroid is never traced:
+ * centring silently falls back to the bounding box for those users. The lab pages
+ * are measured in pixels, which is why no run ever caught it.
+ */
+const pixelSize = lift("_getDocumentPixelSize(doc)", ["app", "Units"]);
+
+function rulerWorld(startUnit, pageWidthPx, pageHeightPx) {
+  const fakeApp = { preferences: { rulerUnits: startUnit } };
+  const doc = {
+    get width() { return fakeApp.preferences.rulerUnits === "px" ? pageWidthPx : pageWidthPx / 118.11; },
+    get height() { return fakeApp.preferences.rulerUnits === "px" ? pageHeightPx : pageHeightPx / 118.11; },
+  };
+  return { fakeApp, doc };
+}
+
+let world = rulerWorld("cm", 2700, 3840);
+let size = pixelSize(world.fakeApp, { PIXELS: "px" })(world.doc);
+assert.deepStrictEqual(size, { width: 2700, height: 3840 }, "the page must be measured in pixels whatever the rulers say");
+assert.strictEqual(world.fakeApp.preferences.rulerUnits, "cm", "the user's ruler unit must be put back");
+
+world = rulerWorld("px", 2700, 3840);
+size = pixelSize(world.fakeApp, { PIXELS: "px" })(world.doc);
+assert.deepStrictEqual(size, { width: 2700, height: 3840 }, "rulers already in pixels must keep working");
+
+const throwingWorld = { preferences: { rulerUnits: "in" } };
+assert.strictEqual(
+  pixelSize(throwingWorld, { PIXELS: "px" })({ get width() { throw new Error("no document"); } }),
+  null,
+  "an unreadable document must give no size instead of a wrong one"
+);
+assert.strictEqual(throwingWorld.preferences.rulerUnits, "in", "a failure must still put the ruler unit back");
+
+const coversTooMuch = lift("_regionCoversTooMuchPage(bounds)", [
+  "app",
+  "_getDocumentPixelSize",
+  "_MAX_BALLOON_PAGE_SHARE",
+]);
+
+const pageSize = { width: 2700, height: 3840 };
+const guard = coversTooMuch({ activeDocument: {} }, () => pageSize, 0.25);
+const balloon = { width: 900, height: 1200 };
+const escapedFill = { width: 2000, height: 2000 };
+
+assert.ok(!guard(balloon), "a real balloon must never be refused as too big");
+assert.ok(guard(escapedFill), "a fill that swallowed a third of the page must still be refused");
+assert.ok(!coversTooMuch({ activeDocument: {} }, () => null, 0.25)(balloon), "an unknown page size must not refuse anything");
 
 console.log("balloon centroid tests passed");
