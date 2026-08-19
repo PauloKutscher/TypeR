@@ -832,6 +832,10 @@ const getSelectionChanged = (callback = () => {}) => {
   csInterface.evalScript("getSelectionChanged()", (result) => {
     const data = safeJsonParse(result);
     if (Date.now() < selectionResultsSuppressedUntil || data.noChange || data.error) {
+      // A host error here is invisible by design (the panel just keeps polling),
+      // and that is how a capture failing on every single selection read as
+      // "multi-bubble is off" instead of as a bug. Costs nothing, says which.
+      if (data.error) console.error("TypeR getSelectionChanged:", data.message || result);
       callback(null);
     } else if (data.cleared) {
       // The document has no selection at all: a real user deselect resets the

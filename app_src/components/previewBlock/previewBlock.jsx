@@ -859,7 +859,12 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   };
 
   const checkForSelectionChange = React.useCallback(() => {
-    if (!context.state.multiBubbleMode || context.state.modalType || document.hidden || selectionCheckPending.current || isHostActionPending()) return;
+    // A lost CEP callback used to leave this flag raised forever, and with it
+    // multi-bubble looked switched off until the panel was remounted. Every other
+    // host call gets that safety net from `trackHostAction`; this one keeps its
+    // own flag, so it expires on the same 15 s.
+    if (selectionCheckPending.current && Date.now() - selectionPollLastAt.current < 15000) return;
+    if (!context.state.multiBubbleMode || context.state.modalType || document.hidden || isHostActionPending()) return;
     // A click just happened inside the panel: let Photoshop's main thread
     // deliver it before spending a round-trip on selection polling
     if (isPanelInteracting()) return;

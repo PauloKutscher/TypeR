@@ -370,9 +370,10 @@ assert.ok(budget >= 20000, `anchor budget must fit the Action Manager read, got 
  * fakes the descriptor chain and checks the numbers, then checks that the DOM
  * cross-check refuses a mismatch instead of trusting it.
  */
-function fakePointsDescriptor(points, subpaths = 1, tally = {}) {
+function fakePointsDescriptor(points, subpaths = 1, tally = {}, unit = "pointsUnit") {
   const anchorOf = (point) => ({
     getUnitDoubleValue: (id) => (id === "horizontal" ? point[0] : point[1]),
+    getUnitDoubleType: () => unit,
   });
   const pointList = {
     count: points.length,
@@ -390,6 +391,7 @@ const readAnchors = lift("_readPathAnchorPolygons(doc)", [
   "ActionReference",
   "executeActionGet",
   "stringIDToTypeID",
+  "typeIDToStringID",
   "charID",
   "_MAX_BALLOON_PATH_ANCHORS",
   "_hostState",
@@ -400,6 +402,7 @@ function readerFor(descriptor, budget = 30000, state = {}) {
     function () { return { putProperty() {}, putEnumerated() {} }; },
     () => descriptor,
     (name) => name,
+    (id) => id,
     { Property: 0, Path: 0, Ordinal: 0, Target: 0 },
     budget,
     state
@@ -417,6 +420,17 @@ assert.deepStrictEqual(
 
 const polygonsAt72 = readerFor(fakePointsDescriptor(anchorsInPoints))({ resolution: 72 });
 assert.deepStrictEqual(polygonsAt72, [anchorsInPoints], "at 72 dpi points and pixels coincide");
+
+/*
+ * Measured on Photoshop 27.9: `pathContents` anchors carry `pixelsUnit` and are
+ * already in document pixels. Scaling those by the resolution anyway multiplied
+ * every anchor by 4.17 on a 300 dpi page, the DOM cross-check refused the
+ * outline (`centroidSkip: unitMismatch`) and no balloon outside 72 dpi ever got
+ * a centroid. The unit comes from the descriptor, it is not assumed.
+ */
+const anchorsInPixels = [[10, 20], [110, 20], [110, 120], [10, 120]];
+const pixelsAt300 = readerFor(fakePointsDescriptor(anchorsInPixels, 1, {}, "pixelsUnit"))({ resolution: 300 });
+assert.deepStrictEqual(pixelsAt300, [anchorsInPixels], "anchors already in pixels must not be rescaled by the resolution");
 
 /*
  * The budget must be spent before the anchors are, not after. Subpath point
@@ -510,5 +524,64 @@ const escapedFill = { width: 2000, height: 2000 };
 assert.ok(!guard(balloon), "a real balloon must never be refused as too big");
 assert.ok(guard(escapedFill), "a fill that swallowed a third of the page must still be refused");
 assert.ok(!coversTooMuch({ activeDocument: {} }, () => null, 0.25)(balloon), "an unknown page size must not refuse anything");
+
+/* ---------- a refused centroid must not kill the whole capture ---------- */
+
+/*
+ * `jamJSON.stringify` is not `JSON.stringify`: an undefined value throws
+ * ("[jamJSON.stringify] Invalid JSON") instead of dropping the key. The capture
+ * used to set `centroidX: undefined` whenever no centroid came out, so the whole
+ * answer turned into `{error: true}` — and the panel drops errors silently, so
+ * multi-bubble looked switched off and the counter never moved. Measured on the
+ * user's 300 dpi page: 0 of 4 balloons stored, 4 of 4 after the fix.
+ */
+const captureChanged = lift("getSelectionChanged()", [
+  "_hostState",
+  "ScriptUI",
+  "_getCurrentSelectionBounds",
+  "_recoverSelectionFromTempChannel",
+  "_selectionClearedResult",
+  "jamJSON",
+  "_withSuspendedHistory",
+  "_getAdaptiveOpenedSelectionBounds",
+  "_selectionBoundsKey",
+]);
+
+// Same contract as the host's serializer: undefined is not JSON.
+const strictJson = {
+  stringify: (value) => JSON.stringify(value, (key, item) => {
+    if (item === undefined) throw new SyntaxError("[jamJSON.stringify] Invalid JSON");
+    return item;
+  }),
+};
+
+function captureWith(centroid) {
+  const region = { top: 20, left: 10, right: 110, bottom: 140, width: 100, height: 120, xMid: 60, yMid: 80 };
+  const opened = Object.assign({}, region);
+  if (centroid) opened.centroid = centroid;
+  return captureChanged(
+    { selectionMonitor: { lastBounds: null, lastBoundsKey: null, multiWarnBounds: null } },
+    { environment: { keyboardState: { shiftKey: false } } },
+    () => region,
+    () => null,
+    () => strictJson.stringify({ cleared: true }),
+    strictJson,
+    (name, fn) => fn(),
+    () => opened,
+    () => "key"
+  )();
+}
+
+const withoutCentroid = JSON.parse(captureWith(null));
+assert.ok(!withoutCentroid.error, "a capture without a centroid must not report an error");
+assert.strictEqual(withoutCentroid.multiSelection.length, 1, "and must still hand the panel its selection");
+assert.ok(
+  !("centroidX" in withoutCentroid.multiSelection[0]),
+  "a missing centroid must leave the key out, never set it to undefined"
+);
+
+const withCentroid = JSON.parse(captureWith({ x: 55, y: 75 }));
+assert.strictEqual(withCentroid.multiSelection[0].centroidX, 55, "a centroid must still travel with the selection");
+assert.strictEqual(withCentroid.multiSelection[0].centroidY, 75, "on both axes");
 
 console.log("balloon centroid tests passed");

@@ -2813,19 +2813,23 @@ function _findWorkPath(doc) {
  * a centering click can pay. The same anchors come back from a single
  * executeActionGet in a few milliseconds.
  *
- * Action Manager reports path coordinates in points, so they are scaled by the
- * document resolution. `_pathAnchorsMatchDom` checks that conversion against one
- * DOM anchor before the numbers are trusted.
+ * The unit comes from the descriptor, it is not assumed: measured on Photoshop
+ * 27.9, `pathContents` anchors carry `pixelsUnit` and are already in document
+ * pixels (DOM 1082,24 against Action Manager 1082,24 on a 300 dpi page). Scaling
+ * them by `resolution / 72` anyway multiplied every anchor by 4.17 there, so
+ * `_pathAnchorsMatchDom` refused the outline and no balloon on a page outside
+ * 72 dpi ever produced a centroid. A host that reports them in points still
+ * works: that is what the resolution scale below is for.
  *
  * Control points are ignored on purpose: with a 0.5 px trace tolerance the
  * chords are a couple of pixels long and flattening the curves changed the
  * centroid by less than 0.2 px on the reference pages.
  */
 function _readPathAnchorPolygons(doc) {
-  var scale = 1;
+  var pointScale = 1;
   try {
     var resolution = parseFloat(doc.resolution);
-    if (resolution > 0) scale = resolution / 72;
+    if (resolution > 0) pointScale = resolution / 72;
   } catch (resolutionError) {
     return null;
   }
@@ -2859,6 +2863,7 @@ function _readPathAnchorPolygons(doc) {
   if (overBudget) return null;
 
   var polygons = [];
+  var scale = null;
   for (var c = 0; c < components.count; c++) {
     var subpaths = components.getObjectValue(c).getList(subpathsId);
     for (var s = 0; s < subpaths.count; s++) {
@@ -2867,6 +2872,16 @@ function _readPathAnchorPolygons(doc) {
       var poly = [];
       for (var p = 0; p < points.count; p++) {
         var anchor = points.getObjectValue(p).getObjectValue(anchorId);
+        // Pixels stay pixels; anything else is a 72 dpi distance and needs the
+        // resolution scale. The ruler is pinned to pixels by the caller. Read
+        // once for the whole outline: a descriptor cannot change unit halfway,
+        // and the anchor loop is the hot path (10 740 anchors in 111 ms).
+        if (scale === null) {
+          scale = pointScale;
+          try {
+            if (typeIDToStringID(anchor.getUnitDoubleType(horizontalId)) === "pixelsUnit") scale = 1;
+          } catch (unitError) {}
+        }
         poly.push([
           anchor.getUnitDoubleValue(horizontalId) * scale,
           anchor.getUnitDoubleValue(verticalId) * scale,
@@ -3852,7 +3867,7 @@ function getSelectionChanged() {
 
     var multiResults = [];
     for (var payloadIndex = 0; payloadIndex < payloadBounds.length; payloadIndex++) {
-      multiResults.push({
+      var result = {
         shiftKey: shiftPressed,
         top: payloadBounds[payloadIndex].top,
         left: payloadBounds[payloadIndex].left,
@@ -3862,9 +3877,17 @@ function getSelectionChanged() {
         height: payloadBounds[payloadIndex].height,
         xMid: payloadBounds[payloadIndex].xMid,
         yMid: payloadBounds[payloadIndex].yMid,
-        centroidX: payloadCentroid && payloadIndex === 0 ? payloadCentroid.x : undefined,
-        centroidY: payloadCentroid && payloadIndex === 0 ? payloadCentroid.y : undefined,
-      });
+      };
+      // The key is left out when there is no centroid, never set to undefined:
+      // `jamJSON.stringify` throws on an undefined value instead of dropping the
+      // key the way `JSON.stringify` does, so one refused centroid turned the
+      // whole capture into `{error: true}` and the panel — which drops errors
+      // silently — behaved as if multi-bubble were switched off.
+      if (payloadCentroid && payloadIndex === 0) {
+        result.centroidX = payloadCentroid.x;
+        result.centroidY = payloadCentroid.y;
+      }
+      multiResults.push(result);
     }
 
     return jamJSON.stringify({

@@ -2,7 +2,7 @@
 
 Documento de trabalho. Atualizado a cada etapa concluída.
 
-Última atualização: 2026-08-18, após devolver a marquee que a leitura do centroide roubava no multi-bolhas e tirar as guardas de área da dependência da régua (runs `036` e `037`).
+Última atualização: 2026-08-19, após destravar o multi-bolhas em páginas fora de 72 dpi (unidade das âncoras lida do descritor e centroide ausente deixando de virar `undefined` no payload).
 
 ## Objetivo
 
@@ -91,6 +91,7 @@ Baseline da medição: `resizeTextBoxOnCenter` desligado e `internalPadding = 0`
 | 15 | Regressão do multi-bolhas: a leitura do centroide roubava a marquee do usuário | concluída |
 | 16 | Guardas de área dependiam da unidade da régua do usuário | concluída |
 | 17 | Travamento e perda da seleção no multi-bolhas: o custo estava na abertura, não no traçado | concluída |
+| 18 | Multi-bolhas morto fora de 72 dpi: unidade das âncoras e `undefined` no payload | concluída |
 
 ## Registro do que já foi feito
 
@@ -415,6 +416,47 @@ Gate de centralização revalidado no cenário mais próximo do uso real (seleç
 
 Testes: `scripts/testBalloonCentroid.js` ganhou o teto de raio, o caso "região que cobre a página não custa canal, nem contração, nem traçado", a recusa do orçamento sem ler âncora nenhuma, a inversão do retry, e o comportamento do canal órfão (devolve a marquee e remove o canal; sem canal, continua reportando `cleared`). `scripts/testSelectionOpening.js` ganhou o teto. Verificado que falham no código anterior.
 
+### Tarefa 18 — multi-bolhas morto em página fora de 72 dpi (concluída)
+
+O usuário reportou que, num PSD cuja resolução não é 72 dpi, o multi-bolhas não guarda nada: o contador **nem chega a 1**, "como se estivesse desligado", e a colagem cria só a primeira fala — consequência, não causa, já que `_createTextLayersInStoredSelections` cola `min(texts, selections)`.
+
+Repro do usuário: `bug/月の子_02_009-010.psd`, 1680x1280, grayscale, **300 dpi**, varinha mágica, TextShapeR inline desligado. As 5 matrizes das Tarefas 8 a 17 nunca pegaram isso porque as 10 páginas de referência são todas 72 dpi: a resolução do documento jamais variou no harness.
+
+Medição (`scripts/lab/diagMultiBubble.jsx` + `runMultiBubble.ps1`, novos: caçam balões por varinha numa grade, capturam quatro em sequência **sem** resetar o monitor entre eles — como o painel faz — e imprimem a string crua que o host devolve, mais o veredito da régua do painel). Controle: o mesmo arquivo com a resolução trocada para 72 dpi no bloco de recursos do PSD, byte a byte igual no resto, então o diferencial isola a resolução e nada mais.
+
+| página | balões capturados | armazenados pelo painel | `centroidSkip` |
+| --- | --- | --- | --- |
+| 300 dpi (motor `3bd1543`) | 4 | **0** | `unitMismatch` nos 4 |
+| 72 dpi (mesmo motor, mesmos pixels) | 4 | 4 | vazio nos 4 |
+
+A resposta crua do host a 300 dpi, nas quatro capturas:
+
+```
+{ "error": true, "message": "getSelectionChanged inner error: [jamJSON.stringify] Invalid JSON on line 1", "shiftKey": false }
+```
+
+Dois defeitos em série, os dois medidos:
+
+1. **A unidade das âncoras era suposta, não lida.** `_readPathAnchorPolygons` multiplicava toda âncora por `resolution / 72` porque o Action Manager "reporta pontos". Medido em Photoshop 27.9 (`scripts/lab/diagAnchorUnits.jsx`, novo): a mesma âncora vale `1082,24` no DOM e `1082,24` no Action Manager, com `unitDoubleType = pixelsUnit` — **já são pixels de documento**. A 300 dpi a escala suposta era 4,17, `_pathAnchorsMatchDom` recusava o contorno (`unitMismatch`) e nenhum balão fora de 72 dpi jamais produzia centroide. Correção: ler o tipo de unidade do descritor uma vez por contorno e só aplicar a escala de resolução quando ela não for `pixelsUnit` — um host que realmente reporte pontos continua funcionando.
+
+2. **`undefined` no payload derruba a captura inteira.** `jamJSON.stringify` **não** é `JSON.stringify`: valor `undefined` cai no `default:` do `str()` e lança `[jamJSON.stringify] Invalid JSON`, em vez de omitir a chave. A captura escrevia `centroidX: undefined` sempre que não havia centroide, então **qualquer** recusa de centroide transformava a resposta inteira em `{error: true}` — e o painel (`utils.js:831`) descarta erro em silêncio. É por isso que o sintoma foi "o multi-bolhas está desligado" e não "o texto centralizou torto". Correção: a chave só é escrita quando existe centroide. Isso vale para todas as recusas (`coversPage`, work path do usuário, orçamento de âncoras), não só para a de unidade.
+
+3. **Painel:** `checkForSelectionChange` era a única chamada ao host sem rede de segurança — um callback CEP perdido deixava `selectionCheckPending` levantado para sempre e o modo morria em silêncio até remontar o painel. Agora a pendência expira nos mesmos 15 s que `trackHostAction` já usa, e um erro do host vai ao console em vez de sumir.
+
+Resultado no motor corrigido, mesmas duas variantes: **4 de 4 balões armazenados nas duas**, `centroidSkip` vazio, marquee viva em todas as capturas, e os centroides a 300 dpi **idênticos** aos de 72 dpi ao pixel (1123,103 / 1421,173 / 1516,123 / 553,226).
+
+Gate de centralização revalidado nas 10 páginas de referência, cenário mais próximo do uso real (seleção viva, offset fantasma de 15% da largura), run `041-dpi-live-phantom` contra `000L-live-phantom`:
+
+| categoria | n | PASS base → novo | \|dX\| med/p95 | \|dY\| med/p95 | recusas |
+| --- | --- | --- | --- | --- | --- |
+| normal | 26 | 0/26 → 12/26 | 72/100 → 2/4 | 4/38 → 4/17 | 0 |
+| cut | 15 | 0/15 → 5/15 | 46/177 → 3/16 | 11/113 → 5/62 | 0 |
+| leak | 24 | 0/24 → 4/24 | 101/389 → 92/219 | 130/1370 → 61/349 | 0 |
+
+**GATE APROVADO**, números **idênticos** aos runs `035`, `036`, `037` e `038` — esperado por construção: as páginas de referência são 72 dpi, onde a escala suposta valia 1 e o centroide sempre existia, então nenhuma delas passa pelos dois caminhos corrigidos. 65 camadas, 0 erros de script, `psd/` e `true/` intactos por SHA-1.
+
+Testes: `scripts/testBalloonCentroid.js` ganhou (a) âncoras em `pixelsUnit` num documento a 300 dpi, que não podem ser reescaladas, e (b) o comportamento de `getSelectionChanged` com um serializador que rejeita `undefined` como o do host: sem centroide a captura tem de chegar ao painel sem a chave e sem erro; com centroide as duas coordenadas viajam. Verificado que os dois falham no motor anterior — o (b) devolve exatamente o `{"error":true,...}` que o usuário via.
+
 ## Próximos passos imediatos
 
 1. **Balões duplos (fora do escopo atual):** não há mais recusa, então os 24 casos movem sempre. A mediana caiu de 159/178 px para 20/12 px, mas a cauda continua ruim (p95 136/159 px) e o balão "That's…" da 0003 erra 243/396 px. O caminho medido segue sendo a partição da região pela camada de texto mais próxima, que no laboratório derruba o erro mediano desses casos de 159/178 px para 12/26 px.
@@ -450,9 +492,17 @@ powershell -NoProfile -File scripts/lab/runLive.ps1 -Root "<raiz>" -Label crash-
 # 8. conferir que nenhuma seleção do usuário é destruída pela captura multi-bolhas
 #    (-HostJsx compara com outro bundle, por exemplo o do commit anterior)
 powershell -NoProfile -File scripts/lab/runCapture.ps1 -Root "<raiz>" -Run 000-baseline -Page "<nome do psd>" -Index 5 -Label atual
+
+# 9. conferir que o multi-bolhas acumula vários balões numa página qualquer
+#    (caça balões por varinha, captura quatro em sequência e diz o que o painel
+#     faria com cada resposta; rodar nas duas variantes de dpi para o diferencial)
+powershell -NoProfile -File scripts/lab/runMultiBubble.ps1 -Root "<raiz>" -Run 040-dpi -Page bug300 -Label dpi300
+
+# 10. em que unidade o Action Manager devolve as âncoras deste Photoshop
+powershell -NoProfile -File scripts/lab/runAnchor.ps1 -Root "<raiz>" -Run 040-dpi -Page bug300 -Label dpi300 -X 1120 -Y 98
 ```
 
-Runs guardados em `.centering-lab/runs/`. Motor original: `000-baseline` (sem resize), `000R-resize`, `000R-pad12`, `000L-live`, `000L-live-phantom`. Motor atual: `038-cost-live-phantom` (Tarefa 17), antes dele `016-narrow`, `017-narrow-resize`, `018-narrow-pad12`, `019-narrow-live`, `020-narrow-live-phantom`. Os demais (`002` a `015`, `021`, `022`) são as etapas intermediárias descritas acima.
+Runs guardados em `.centering-lab/runs/`. Motor original: `000-baseline` (sem resize), `000R-resize`, `000R-pad12`, `000L-live`, `000L-live-phantom`. Motor atual: `041-dpi-live-phantom` (Tarefa 18), antes dele `038-cost-live-phantom` (Tarefa 17), antes dele `016-narrow`, `017-narrow-resize`, `018-narrow-pad12`, `019-narrow-live`, `020-narrow-live-phantom`. Os demais (`002` a `015`, `021`, `022`) são as etapas intermediárias descritas acima.
 
 ## Decisões e pendências
 
