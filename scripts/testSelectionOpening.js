@@ -13,13 +13,19 @@ assert.ok(radiusFunctionMatch, "Adaptive selection radius helper must exist");
 const getRadius = new Function(
   "_SELECTION_OPEN_RATIO",
   "_MIN_SELECTION_OPEN_RADIUS",
+  "_MAX_SELECTION_OPEN_RADIUS",
   `return function (bounds) {${radiusFunctionMatch[1]}\n};`
-)(0.1, 4);
+)(0.1, 4, 96);
 
 assert.strictEqual(getRadius({ width: 300, height: 500 }), 30);
 assert.strictEqual(getRadius({ width: 100, height: 160 }), 10);
 assert.strictEqual(getRadius({ width: 20, height: 80 }), 4);
 assert.strictEqual(getRadius({ width: 6, height: 80 }), 2, "Radius must stay safe for tiny selections");
+assert.strictEqual(
+  getRadius({ width: 6294, height: 8716 }),
+  96,
+  "Radius must be capped: a 629 px contract cost 2 708 ms on a 6331x8882 page"
+);
 
 assert.ok(
   /_modifySelectionBounds\(-attemptRadius\)[\s\S]*_modifySelectionBounds\(attemptRadius\)/.test(hostSource),

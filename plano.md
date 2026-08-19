@@ -90,6 +90,7 @@ Baseline da medição: `resizeTextBoxOnCenter` desligado e `internalPadding = 0`
 | 14 | Centroide ausente no estreitamento: orçamento obsoleto e traçado vazio | concluída |
 | 15 | Regressão do multi-bolhas: a leitura do centroide roubava a marquee do usuário | concluída |
 | 16 | Guardas de área dependiam da unidade da régua do usuário | concluída |
+| 17 | Travamento e perda da seleção no multi-bolhas: o custo estava na abertura, não no traçado | concluída |
 
 ## Registro do que já foi feito
 
@@ -372,10 +373,51 @@ Gate de centralização revalidado depois da mudança, run `037-units-live-phant
 
 Teste: `scripts/testBalloonCentroid.js` cobre `_getDocumentPixelSize` com um documento falso cuja largura muda conforme a régua ativa (deve devolver pixels com a régua em cm, restaurar a unidade do usuário e devolver `null` sem vazar a unidade quando a leitura falha) e `_regionCoversTooMuchPage` (um balão de 900x1200 numa página de 2700x3840 nunca é recusado; uma região de 2000x2000 continua sendo). Verificado que o teste falha quando a fixação da régua é removida.
 
+### Tarefa 17 — o travamento e a perda da seleção: o custo estava na abertura, não no traçado (concluída)
+
+O usuário reportou que o multi-bolhas trava o Photoshop por vários segundos ao capturar uma seleção, que a marquee some depois disso, e que um usuário chegou a ter crash. Repro: `crash/MUP_育成スキルはもういらない74話-1_2023~0005.psd`, dentro do objeto inteligente, varinha na calça preta do personagem do último quadro.
+
+**A primeira medição mediu a coisa errada.** O contorno é o que as tarefas anteriores mediram, então foi por ele que comecei: `scripts/lab/diagLiveCost.jsx` traçava a seleção viva e contava as âncoras. Deu 4 âncoras e 0 ms — porque a região cobre a página inteira, `_regionCoversTooMuchPage` recusa, e o traçado **nunca roda**. O custo estava antes da guarda.
+
+**Onde os segundos iam.** A abertura da seleção (contrair e expandir sobre um canal temporário) roda **antes** de qualquer guarda de custo, e o raio é 10% do menor lado da região, sem teto. A varinha que escapou pegou 6294x8716 de uma página de 6331x8882 — o interior do objeto inteligente tem 56 megapixels, contra 2700x3840 das 10 páginas de referência. Medido no motor publicado, nessa seleção:
+
+| etapa | publicado | corrigido |
+| --- | --- | --- |
+| criar o canal temporário | 423 ms | não roda |
+| Contract de 629 px | 2 708 ms, e **aniquila a seleção** | não roda |
+| Expand de 629 px | falha: "o comando Expansão não está disponível" | não roda |
+| `getSelectionChanged()` (o poll inteiro) | **5 982 ms** | **81 ms** |
+| `getCurrentSelectionShape()` (TextShapeR inline) | **2 698 ms** | **62 ms** |
+
+O Contract aniquilar a seleção é o que multiplica a conta: o laço tenta de novo com metade do raio (629, 314, 157, 78, 39, 19, 9, 4), recarregando o canal a cada volta. E o painel chama isso a cada evento de seleção mais um poll de segurança a cada 1,5 s: seis segundos de trabalho a cada segundo e meio é o Photoshop inutilizável que o usuário descreveu. O crash e a desseleção saem do mesmo lugar — o Photoshop mostra barra de progresso cancelável no Contract, e um Esc no meio aborta o script com a marquee já consumida e só guardada no canal temporário.
+
+Correções, todas no ponto compartilhado:
+
+1. **A guarda de área passou para antes da abertura** (`_getAdaptiveOpenedSelectionBounds`). `_openedSelectionCentroid` já ia recusar essa região; recusar depois significava pagar a abertura à toa. Devolve o bbox cru, que é o que o multi-bolhas guarda para essas regiões de qualquer jeito, e o Align estreita logo em seguida.
+2. **Teto de raio de abertura**, `_MAX_SELECTION_OPEN_RADIUS = 96`. Conferido nos 65 casos de referência: toda região abaixo de um quarto da página abre com 85 px ou menos (mediana 52), e o único caso de 270 px é justamente o vazamento de 100% da página. O teto é no-op no que já foi calibrado e só impede o raio de seguir uma região que escapou numa página de alta resolução.
+3. **O shape scan do TextShapeR também desiste de região que cobre a página**, caindo direto no perfil do bbox que `getCurrentSelectionShape` já usa como último recurso. Não há forma a amostrar ali, e amostrar custava 2 698 ms porque o traçado recusa e o amostrador legado então roda 21 operações de seleção em 56 megapixels.
+4. **O orçamento de âncoras passou a ser gasto antes das âncoras** (`_readPathAnchorPolygons`). O tamanho de cada subcaminho é um tamanho de lista, então o contorno inteiro é medido sem materializar uma âncora sequer. Antes o orçamento era conferido pelo chamador **depois** da leitura que ele existe para proteger.
+5. **Sem segundo traçado depois de uma recusa que já custou um traçado** (`_centroidRetryWorthIt`). Só o traçado vazio (`anchors:0`) ainda repete — é o caso da Tarefa 14, e a razão de a segunda tentativa existir. Todo o resto já pagou um traçado completo para ser recusado, e a seleção não aberta é a maior, não a menor.
+6. **Canal órfão devolve a marquee** (`_recoverSelectionFromTempChannel`, chamado por `getSelectionChanged` antes de reportar `cleared`). O canal temporário só existe enquanto um leitor nosso está rodando, então encontrá-lo é prova de que o usuário não desselecionou: uma captura interrompida (Esc, erro de engine, crash) deixa de virar "o usuário apertou Ctrl+D" e o lote inteiro deixa de ser apagado. Um Ctrl+D de verdade não deixa canal, então limpar o lote continua funcionando.
+7. **Painel:** o shape scan (`previewBlock.jsx`) passou a ir por `trackHostAction`, como todas as outras chamadas ao host, para o poll de multi-bolhas recuar enquanto ele roda em vez de enfileirar atrás dele.
+
+Ferramentas novas do laboratório, fora do git: `scripts/lab/diagLiveCost.jsx` e `scripts/lab/runLive.ps1`, que medem etapa por etapa a seleção que o usuário está segurando no documento aberto, sem abrir nem fechar nada. Foi o que mostrou que o contorno não era o problema.
+
+Gate de centralização revalidado no cenário mais próximo do uso real (seleção viva, offset fantasma de 15% da largura), run `038-cost-live-phantom` contra `000L-live-phantom`:
+
+| categoria | n | PASS base → novo | \|dX\| med/p95 | \|dY\| med/p95 | recusas |
+| --- | --- | --- | --- | --- | --- |
+| normal | 26 | 0/26 → 12/26 | 72/100 → 2/4 | 4/38 → 4/17 | 0 |
+| cut | 15 | 0/15 → 5/15 | 46/177 → 3/16 | 11/113 → 5/62 | 0 |
+| leak | 24 | 0/24 → 4/24 | 101/389 → 92/219 | 130/1370 → 61/349 | 0 |
+
+**GATE APROVADO**, com os números **idênticos** aos runs `035`, `036` e `037`. Era o resultado esperado por construção: nenhuma dessas correções toca no cálculo do centroide, elas apenas deixam de pagar por trabalho que ia ser descartado. 65 camadas, 0 erros de script, ground truth intacto.
+
+Testes: `scripts/testBalloonCentroid.js` ganhou o teto de raio, o caso "região que cobre a página não custa canal, nem contração, nem traçado", a recusa do orçamento sem ler âncora nenhuma, a inversão do retry, e o comportamento do canal órfão (devolve a marquee e remove o canal; sem canal, continua reportando `cleared`). `scripts/testSelectionOpening.js` ganhou o teto. Verificado que falham no código anterior.
+
 ## Próximos passos imediatos
 
-1. **Task 7 precisa de amostra:** nenhuma das 10 páginas tem balão de grito (solidez ≥ 0,85 em todas). Sem pelo menos uma, a categoria fica sem medição.
-2. **Balões duplos (fora do escopo atual):** não há mais recusa, então os 24 casos movem sempre. A mediana caiu de 159/178 px para 20/12 px, mas a cauda continua ruim (p95 136/159 px) e o balão "That's…" da 0003 erra 243/396 px. O caminho medido segue sendo a partição da região pela camada de texto mais próxima, que no laboratório derruba o erro mediano desses casos de 159/178 px para 12/26 px.
+1. **Balões duplos (fora do escopo atual):** não há mais recusa, então os 24 casos movem sempre. A mediana caiu de 159/178 px para 20/12 px, mas a cauda continua ruim (p95 136/159 px) e o balão "That's…" da 0003 erra 243/396 px. O caminho medido segue sendo a partição da região pela camada de texto mais próxima, que no laboratório derruba o erro mediano desses casos de 159/178 px para 12/26 px.
 
 ## Como reproduzir
 
@@ -400,12 +442,17 @@ powershell -NoProfile -File scripts/lab/runMeasure.ps1 -Root "<raiz>" -Run 020-n
 # 6. destrinchar um caso dentro do Photoshop, passo a passo
 powershell -NoProfile -File scripts/lab/runDiag.ps1 -Root "<raiz>" -Run 000-baseline -Page "<nome do psd>" -Index 1
 
-# 7. conferir que nenhuma seleção do usuário é destruída pela captura multi-bolhas
+# 7. medir o custo da seleção que está viva agora, etapa por etapa
+#    (não abre nem fecha documento: serve para casos que só existem na máquina
+#     do usuário, como uma varinha dentro de um objeto inteligente)
+powershell -NoProfile -File scripts/lab/runLive.ps1 -Root "<raiz>" -Label crash-pants
+
+# 8. conferir que nenhuma seleção do usuário é destruída pela captura multi-bolhas
 #    (-HostJsx compara com outro bundle, por exemplo o do commit anterior)
 powershell -NoProfile -File scripts/lab/runCapture.ps1 -Root "<raiz>" -Run 000-baseline -Page "<nome do psd>" -Index 5 -Label atual
 ```
 
-Runs guardados em `.centering-lab/runs/`. Motor original: `000-baseline` (sem resize), `000R-resize`, `000R-pad12`, `000L-live`, `000L-live-phantom`. Motor atual: `016-narrow`, `017-narrow-resize`, `018-narrow-pad12`, `019-narrow-live`, `020-narrow-live-phantom`. Os demais (`002` a `015`, `021`, `022`) são as etapas intermediárias descritas acima.
+Runs guardados em `.centering-lab/runs/`. Motor original: `000-baseline` (sem resize), `000R-resize`, `000R-pad12`, `000L-live`, `000L-live-phantom`. Motor atual: `038-cost-live-phantom` (Tarefa 17), antes dele `016-narrow`, `017-narrow-resize`, `018-narrow-pad12`, `019-narrow-live`, `020-narrow-live-phantom`. Os demais (`002` a `015`, `021`, `022`) são as etapas intermediárias descritas acima.
 
 ## Decisões e pendências
 

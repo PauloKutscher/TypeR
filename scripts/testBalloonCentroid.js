@@ -176,7 +176,18 @@ const box = (left, top, right, bottom) => ({
 const openRadius = lift("_getAdaptiveSelectionOpenRadius(bounds)", [
   "_MIN_SELECTION_OPEN_RADIUS",
   "_SELECTION_OPEN_RATIO",
-])(4, 0.1);
+  "_MAX_SELECTION_OPEN_RADIUS",
+])(4, 0.1, 96);
+
+/*
+ * Contract/Expand cost grows with the radius and with the page. Measured on a
+ * 6331x8882 smart object interior, a region taking almost the whole page opened
+ * with a 629 px radius and one Contract alone took 2 708 ms. Across the 65
+ * reference cases no region under a quarter of the page opens wider than 85 px,
+ * so the ceiling must bite only above that.
+ */
+assert.strictEqual(openRadius(box(0, 0, 850, 850)), 85, "a reference-sized region keeps its measured radius");
+assert.strictEqual(openRadius(box(0, 0, 6294, 8716)), 96, "a page-sized region must not open with a 629 px radius");
 
 const openBounds = lift("_getAdaptiveOpenedSelectionBounds(bounds)", [
   "app",
@@ -186,13 +197,14 @@ const openBounds = lift("_getAdaptiveOpenedSelectionBounds(bounds)", [
   "_getCurrentSelectionBounds",
   "_openedSelectionCentroid",
   "_centroidRetryWorthIt",
+  "_regionCoversTooMuchPage",
   "_hostState",
 ]);
 
 const retryWorthIt = lift("_centroidRetryWorthIt(skip)", [])();
 
-function runOpen(initial, traceResults) {
-  const world = { live: { ...initial }, stored: null, traces: 0, channelRemoved: false };
+function runOpen(initial, traceResults, coversPage = false) {
+  const world = { live: { ...initial }, stored: null, traces: 0, channels: 0, channelRemoved: false, modifies: 0 };
   const hostState = { centroidSkip: "" };
   const doc = {
     selection: {
@@ -206,11 +218,13 @@ function runOpen(initial, traceResults) {
     { activeDocument: doc },
     openRadius,
     () => {
+      world.channels += 1;
       world.stored = { ...world.live };
       return { remove: () => { world.channelRemoved = true; } };
     },
     (amount) => {
       if (!world.live) throw new Error("no selection to modify");
+      world.modifies += 1;
       world.live = {
         left: world.live.left - amount,
         top: world.live.top - amount,
@@ -227,6 +241,7 @@ function runOpen(initial, traceResults) {
       return result.centroid || null;
     },
     retryWorthIt,
+    () => coversPage,
     hostState
   );
   const result = helper(box(initial.left, initial.top, initial.right, initial.bottom));
@@ -264,9 +279,78 @@ assert.ok(run.world.live, "the historical restore must still happen");
 // could still fix, and nothing it provably cannot, because it is the larger one.
 assert.ok(retryWorthIt(""), "no attempt yet means the unopened selection is still worth a try");
 assert.ok(retryWorthIt("anchors:0"), "an empty outline is what the retry exists for");
-assert.ok(retryWorthIt("degenerateOutline"), "a degenerate outline deserves the retry");
-assert.ok(retryWorthIt("outsideEnvelope"), "a centroid outside the opened envelope can still land inside the raw one");
 assert.ok(!retryWorthIt("anchors:41000"), "an outline over the budget only gets bigger unopened");
+// Everything else already paid for a full trace on the way to being refused, and
+// the unopened selection is the larger one: repeating it bought the same refusal
+// twice on the marquee the user is still holding.
+assert.ok(!retryWorthIt("degenerateOutline"), "a refusal that already cost a trace must not cost a second one");
+assert.ok(!retryWorthIt("outsideEnvelope"), "a traced-then-rejected centroid must not be traced again");
+assert.ok(!retryWorthIt("amRead:out of memory"), "a read that blew up must not be repeated on a bigger outline");
+
+/*
+ * The reported freeze: a wand that escaped into the artwork covers almost the
+ * whole page, and `_openedSelectionCentroid` was always going to refuse it. Doing
+ * that after the opening meant paying for the opening anyway — measured 5 982 ms
+ * in a single poll on a 6331x8882 page, with the poll firing every 1,5 s. Nothing
+ * may be spent on such a region: no channel, no Contract/Expand, no trace.
+ */
+run = runOpen(big, [{ centroid: { x: 800, y: 950 } }], true);
+assert.strictEqual(run.world.channels, 0, "a region covering the page must not cost a temp channel");
+assert.strictEqual(run.world.modifies, 0, "a region covering the page must not be contracted or expanded");
+assert.strictEqual(run.world.traces, 0, "a region covering the page must not be traced");
+assert.ok(run.world.live, "and the marquee must be untouched");
+assert.strictEqual(run.hostState.centroidSkip, "coversPage", "the refusal must still be reported");
+assert.deepStrictEqual(
+  { left: run.result.left, right: run.result.right },
+  { left: big.left, right: big.right },
+  "the caller still gets the raw bounds to work from"
+);
+
+/* ---------- an interrupted capture must not read back as a user deselect ---------- */
+
+/*
+ * `Make Work Path` consumes the selection, so between the trace and the restore
+ * the marquee lives only in the temp channel. If that window is interrupted — Esc
+ * during a slow trace, an engine error, a crash — the document is left empty, and
+ * multi-bubble read that as "the user pressed Ctrl+D" and wiped the whole stored
+ * batch. An orphan channel is proof the user did not deselect: it only exists
+ * while one of our own readers is running.
+ */
+function runRecover(channelHolds) {
+  const state = { live: null, removed: false };
+  const channel = channelHolds ? { remove: () => { state.removed = true; } } : null;
+  const doc = {
+    channels: {
+      getByName: (name) => {
+        assert.strictEqual(name, "__TyperSelectionTemp__", "the reader must look for its own channel");
+        if (!channel) throw new Error("no such channel");
+        return channel;
+      },
+    },
+    selection: { load: () => { state.live = box(10, 20, 110, 220); } },
+  };
+  const helper = lift("_recoverSelectionFromTempChannel()", [
+    "app",
+    "_TEMP_SELECTION_CHANNEL",
+    "_getCurrentSelectionBounds",
+  ])({ activeDocument: doc }, "__TyperSelectionTemp__", () => state.live || undefined);
+  return { result: helper(), state };
+}
+
+let recovered = runRecover(true);
+assert.ok(recovered.result, "an orphan channel must give the marquee back");
+assert.strictEqual(recovered.result.width, 100, "and the recovered bounds must be the stored ones");
+assert.ok(recovered.state.removed, "the orphan channel must not be left behind a second time");
+
+recovered = runRecover(false);
+assert.strictEqual(recovered.result, null, "a real Ctrl+D leaves no channel, so it must still read as cleared");
+
+const changedBody = hostSource.match(/function getSelectionChanged\(\) \{([\s\S]*?)\n\}/)[1];
+const clearedBranch = changedBody.slice(0, changedBody.indexOf("_selectionClearedResult"));
+assert.ok(
+  /_recoverSelectionFromTempChannel\(\)/.test(clearedBranch),
+  "getSelectionChanged must try to recover before telling the panel the user deselected"
+);
 assert.ok(!retryWorthIt("coversPage"), "a region too big to trace must not be traced twice");
 assert.ok(!retryWorthIt("userWorkPath"), "the user's work path must be left alone on both passes");
 
@@ -286,15 +370,18 @@ assert.ok(budget >= 20000, `anchor budget must fit the Action Manager read, got 
  * fakes the descriptor chain and checks the numbers, then checks that the DOM
  * cross-check refuses a mismatch instead of trusting it.
  */
-function fakePointsDescriptor(points) {
+function fakePointsDescriptor(points, subpaths = 1, tally = {}) {
   const anchorOf = (point) => ({
     getUnitDoubleValue: (id) => (id === "horizontal" ? point[0] : point[1]),
   });
   const pointList = {
     count: points.length,
-    getObjectValue: (i) => ({ getObjectValue: () => anchorOf(points[i]) }),
+    getObjectValue: (i) => {
+      tally.anchorsRead = (tally.anchorsRead || 0) + 1;
+      return { getObjectValue: () => anchorOf(points[i]) };
+    },
   };
-  const subpathList = { count: 1, getObjectValue: () => ({ getList: () => pointList }) };
+  const subpathList = { count: subpaths, getObjectValue: () => ({ getList: () => pointList }) };
   const componentList = { count: 1, getObjectValue: () => ({ getList: () => subpathList }) };
   return { getObjectValue: () => ({ getList: () => componentList }) };
 }
@@ -304,29 +391,51 @@ const readAnchors = lift("_readPathAnchorPolygons(doc)", [
   "executeActionGet",
   "stringIDToTypeID",
   "charID",
+  "_MAX_BALLOON_PATH_ANCHORS",
+  "_hostState",
 ]);
+
+function readerFor(descriptor, budget = 30000, state = {}) {
+  return readAnchors(
+    function () { return { putProperty() {}, putEnumerated() {} }; },
+    () => descriptor,
+    (name) => name,
+    { Property: 0, Path: 0, Ordinal: 0, Target: 0 },
+    budget,
+    state
+  );
+}
 
 // Points at 144 dpi are twice as many pixels.
 const anchorsInPoints = [[10, 20], [110, 20], [110, 120], [10, 120]];
-const polygonsAt144 = readAnchors(
-  function () { return { putProperty() {}, putEnumerated() {} }; },
-  () => fakePointsDescriptor(anchorsInPoints),
-  (name) => name,
-  { Property: 0, Path: 0, Ordinal: 0, Target: 0 }
-)({ resolution: 144 });
+const polygonsAt144 = readerFor(fakePointsDescriptor(anchorsInPoints))({ resolution: 144 });
 assert.deepStrictEqual(
   polygonsAt144,
   [[[20, 40], [220, 40], [220, 240], [20, 240]]],
   "anchors must be scaled from points to pixels by the document resolution"
 );
 
-const polygonsAt72 = readAnchors(
-  function () { return { putProperty() {}, putEnumerated() {} }; },
-  () => fakePointsDescriptor(anchorsInPoints),
-  (name) => name,
-  { Property: 0, Path: 0, Ordinal: 0, Target: 0 }
-)({ resolution: 72 });
+const polygonsAt72 = readerFor(fakePointsDescriptor(anchorsInPoints))({ resolution: 72 });
 assert.deepStrictEqual(polygonsAt72, [anchorsInPoints], "at 72 dpi points and pixels coincide");
+
+/*
+ * The budget must be spent before the anchors are, not after. Subpath point
+ * counts are list sizes, so an outline can be measured without materialising a
+ * single anchor — which is the difference between refusing a screentone outline
+ * for free and reading a few hundred thousand anchors first and then throwing
+ * them away.
+ */
+const noisy = { anchorsRead: 0 };
+const state = {};
+const refused = readerFor(fakePointsDescriptor(anchorsInPoints, 5000, noisy), 400, state)({ resolution: 72 });
+assert.strictEqual(refused, null, "an outline over the budget must be refused");
+assert.strictEqual(noisy.anchorsRead, 0, "and refused without reading one anchor");
+assert.strictEqual(state.lastPathAnchorCount > 400, true, "the caller must still learn how big it was");
+
+const allowed = { anchorsRead: 0 };
+const kept = readerFor(fakePointsDescriptor(anchorsInPoints, 3, allowed), 400, {})({ resolution: 72 });
+assert.strictEqual(kept.length, 3, "an outline inside the budget is still read in full");
+assert.strictEqual(allowed.anchorsRead, 12, "and every anchor of it is read exactly once");
 
 const anchorsMatchDom = lift("_pathAnchorsMatchDom(pathItem, polygons)", [])();
 const domPath = { subPathItems: [{ pathPoints: [{ anchor: [20, 40] }] }] };

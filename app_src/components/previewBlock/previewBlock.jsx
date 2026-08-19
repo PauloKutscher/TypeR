@@ -6,7 +6,7 @@ import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
 
-import { csInterface, locale, nativeConfirm, setActiveLayerText, setLayerTextFast, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isHostActionPending, isPanelIdle, isPanelInteracting, notePanelActivity, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, getUserFonts, refreshUserFonts, scrollToLine, parseMarkdownRuns } from "../../utils";
+import { csInterface, locale, nativeConfirm, setActiveLayerText, setLayerTextFast, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isHostActionPending, isPanelIdle, isPanelInteracting, notePanelActivity, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, getCurrentSelectionShape, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, getUserFonts, refreshUserFonts, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { getScaledStyle } from "../../textLayerPayload";
 import { isDuplicateSelection } from "../../multiBubbleHistory";
@@ -436,10 +436,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           return;
         }
         clearInlineShapeSettle();
-        csInterface.evalScript(`getCurrentSelectionShape(${JSON.stringify({ samples: 21 })})`, (result) => {
+        getCurrentSelectionShape(21, (data) => {
           inlineShapePending.current = false;
           try {
-            const data = JSON.parse(result || "{}");
             if (!data || data.error || !data.bounds) return;
             const geometry = textShapeREngine && textShapeREngine.getShapeProfileGeometry
               ? textShapeREngine.getShapeProfileGeometry(data)

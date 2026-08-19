@@ -76,6 +76,14 @@ var _MIN_TEXTBOX_WIDTH = 10;
 var _TEMP_SELECTION_CHANNEL = "__TyperSelectionTemp__";
 var _SELECTION_OPEN_RATIO = 0.1;
 var _MIN_SELECTION_OPEN_RADIUS = 4;
+// Ceiling for that ratio. Contract/Expand cost grows with the radius AND with the
+// page: measured on a 6331x8882 smart object interior, one Contract at 629 px took
+// 2 708 ms and annihilated the selection, so the retry loop halved the radius and
+// spent 5 982 ms in a single poll. Across the 65 reference cases every region
+// under a quarter of the page opens with a radius of 85 px or less (median 52), so
+// this ceiling changes nothing that was ever measured — it only stops the radius
+// from following a region that escaped the balloon onto a high-resolution page.
+var _MAX_SELECTION_OPEN_RADIUS = 96;
 
 var _hostState = {
   fallbackTextSize: 20,
@@ -655,6 +663,32 @@ function _getAdjustedSelectionBounds(bounds, amount) {
   return adjusted;
 }
 
+/*
+ * The marquee left behind in the temp channel by an interrupted capture, loaded
+ * back and the channel dropped, or null when there is nothing to recover. The
+ * channel only ever exists while one of our own readers is running, so an orphan
+ * one is unambiguous evidence of an abort.
+ */
+function _recoverSelectionFromTempChannel() {
+  try {
+    var doc = app.activeDocument;
+    if (!doc) return null;
+    var channel = doc.channels.getByName(_TEMP_SELECTION_CHANNEL);
+    if (!channel) return null;
+    var recovered = null;
+    try {
+      doc.selection.load(channel);
+      recovered = _getCurrentSelectionBounds();
+    } catch (loadError) {
+      recovered = null;
+    }
+    try { channel.remove(); } catch (removeError) {}
+    return recovered || null;
+  } catch (missingChannel) {
+    return null;
+  }
+}
+
 function _createTempSelectionChannel(doc) {
   var channel = null;
   try {
@@ -724,11 +758,27 @@ function _getAdaptiveSelectionOpenRadius(bounds) {
   var maxRadius = Math.floor(shortestSide / 2 - 1);
   if (maxRadius <= 0) return 0;
   var radius = Math.max(_MIN_SELECTION_OPEN_RADIUS, Math.round(shortestSide * _SELECTION_OPEN_RATIO));
-  return Math.min(radius, maxRadius);
+  return Math.min(radius, maxRadius, _MAX_SELECTION_OPEN_RADIUS);
 }
 
 function _getAdaptiveOpenedSelectionBounds(bounds) {
   if (!bounds) return bounds;
+
+  // A region covering a quarter of the page is a fill that escaped the balloon,
+  // and `_openedSelectionCentroid` already refuses to trace it. Refusing after
+  // the opening meant paying for the opening anyway, and the opening is the
+  // expensive half: measured on a wand that swallowed 97,6% of a 6331x8882 smart
+  // object interior, one poll cost 5 982 ms — a temp channel of 56 megapixels
+  // plus Contract/Expand at 629 px, retried at halved radii because the
+  // contraction annihilated the selection. Multi-bubble polls this on every
+  // selection change and every 1,5 s, so Photoshop spent six seconds of every one
+  // and a half working on a region whose outline was going to be thrown away.
+  // The raw bounds are what multi-bubble stores for these regions anyway, and
+  // Align narrows them to the text's neighbourhood right after.
+  if (_regionCoversTooMuchPage(bounds)) {
+    _hostState.centroidSkip = "coversPage";
+    return bounds;
+  }
 
   var radius = _getAdaptiveSelectionOpenRadius(bounds);
   if (radius <= 0) return bounds;
@@ -836,9 +886,14 @@ function _getAdaptiveOpenedSelectionBounds(bounds) {
  */
 function _centroidRetryWorthIt(skip) {
   if (!skip) return true;
-  if (skip === "coversPage" || skip === "userWorkPath" || skip === "noBounds") return false;
+  // Only the empty trace is worth repeating — that is the case the retry was
+  // added for (Task 14: 0 subpaths after the opening, 2 059 on the same selection
+  // unopened). Every other refusal already paid for a full trace on the way to
+  // being refused, and the unopened selection is larger, not smaller, so the
+  // second trace bought the same refusal twice on the marquee the user is still
+  // holding.
   if (skip.indexOf("anchors:") === 0) return Number(skip.substring(8)) <= 2;
-  return true;
+  return false;
 }
 
 function _selectionBoundsKey(bounds) {
@@ -2786,6 +2841,23 @@ function _readPathAnchorPolygons(doc) {
   var pointsId = stringIDToTypeID("points");
   var subpathsId = stringIDToTypeID("subpathListKey");
 
+  // Count first, read second. `points.count` is a list size, so the whole outline
+  // can be measured without materialising a single anchor: the budget below now
+  // protects the read it exists to protect, instead of being checked by the caller
+  // after the read has already been paid for.
+  var budgeted = 0;
+  var overBudget = false;
+  for (var cc = 0; cc < components.count && !overBudget; cc++) {
+    var sizing = components.getObjectValue(cc).getList(subpathsId);
+    for (var ss = 0; ss < sizing.count; ss++) {
+      budgeted += sizing.getObjectValue(ss).getList(pointsId).count;
+      if (budgeted > _MAX_BALLOON_PATH_ANCHORS) { overBudget = true; break; }
+    }
+  }
+  // The caller reports the count, so it must survive the refusal
+  _hostState.lastPathAnchorCount = budgeted;
+  if (overBudget) return null;
+
   var polygons = [];
   for (var c = 0; c < components.count; c++) {
     var subpaths = components.getObjectValue(c).getList(subpathsId);
@@ -2981,22 +3053,22 @@ function _openedSelectionCentroid(doc, openedBounds) {
     var workPath = _findWorkPath(doc);
     if (workPath) {
       var polygons = null;
+      _hostState.lastPathAnchorCount = 0;
       try {
         polygons = _readPathAnchorPolygons(doc);
       } catch (readError) {
         polygons = null;
         _hostState.centroidSkip = "amRead:" + (readError && readError.message ? readError.message : String(readError));
       }
-      // Counting anchors is cheap; a noisy outline (screentone, artwork caught
-      // by the fill) is refused instead of stalling the host.
-      var anchors = 0;
-      if (polygons) {
-        for (var s = 0; s < polygons.length; s++) anchors += polygons[s].length;
-      }
+      // A noisy outline (screentone, artwork caught by the fill) is refused
+      // instead of stalling the host. The count comes from the reader, which
+      // measures the outline from list sizes and gives up before touching an
+      // anchor, so the budget costs nothing on the outlines it rejects.
+      var anchors = _hostState.lastPathAnchorCount || 0;
       var centroid = null;
       if (anchors <= 2 || anchors > _MAX_BALLOON_PATH_ANCHORS) {
         _hostState.centroidSkip = "anchors:" + anchors;
-      } else if (!_pathAnchorsMatchDom(workPath, polygons)) {
+      } else if (!polygons || !_pathAnchorsMatchDom(workPath, polygons)) {
         _hostState.centroidSkip = "unitMismatch";
       } else {
         centroid = _polygonCentroid(polygons);
@@ -3256,7 +3328,13 @@ function getCurrentSelectionShape(data) {
     return jamJSON.stringify({ error: "noSelection" });
   }
   var sampleCount = _normalizeShapeSampleCount(data && data.samples, 17);
-  var shape = _withSuspendedHistory("TypeR Shape Scan", function () {
+  // A region covering a quarter of the page is not a balloon, so there is no
+  // shape in it worth sampling — and sampling it is where the time goes: measured
+  // 2 698 ms on a wand that had swallowed 97,6% of a 6331x8882 page, because the
+  // path scan refuses and the legacy sampler then runs 21 selection operations on
+  // 56 megapixels. Falling straight through to the bounding-box profile costs
+  // nothing and says the same thing about a region that shape.
+  var shape = _regionCoversTooMuchPage(bounds) ? null : _withSuspendedHistory("TypeR Shape Scan", function () {
     return _withDialogsSuppressed(function () {
       return (
         _sampleSelectionShapeViaPath(bounds, sampleCount, true) ||
@@ -3618,7 +3696,17 @@ function getSelectionChanged() {
 
     var rawSelection = _getCurrentSelectionBounds();
     if (!rawSelection) {
-      return _selectionClearedResult(monitor, shiftPressed);
+      // An empty document usually means the user pressed Ctrl+D, and multi-bubble
+      // is right to drop its stored batch. But the capture stores the marquee in a
+      // temp channel and `Make Work Path` consumes the selection while tracing, so
+      // an interrupted capture (Esc during a slow trace, an engine error, a crash)
+      // leaves the marquee only in that channel. Finding it here is proof the
+      // document was not deselected by the user: put it back rather than let the
+      // panel read the wreckage as a deselect and wipe the batch.
+      rawSelection = _recoverSelectionFromTempChannel();
+      if (!rawSelection) {
+        return _selectionClearedResult(monitor, shiftPressed);
+      }
     }
 
     var selectionArray = Object.prototype.toString.call(rawSelection) === "[object Array]" ? rawSelection : [rawSelection];
