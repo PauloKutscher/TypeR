@@ -3926,10 +3926,12 @@ function _createTextLayersInStoredSelections() {
   
   for (var i = 0; i < maxCount; i++) {
     try {
-      var text = texts[i] || texts[texts.length - 1] || "";
-      var textRuns = state.data.richTextRuns
-        ? (state.data.richTextRuns[i] || state.data.richTextRuns[state.data.richTextRuns.length - 1])
-        : null;
+      var textIndex = texts[i] ? i : texts.length - 1;
+      var text = texts[textIndex] || "";
+      // Runs must follow the same index as the text they describe. Unformatted
+      // lines send `null`; borrowing another line's runs would paint its
+      // bold/italic offsets onto unrelated text.
+      var textRuns = state.data.richTextRuns ? state.data.richTextRuns[textIndex] : null;
       var baseStyle = styles[i] || styles[styles.length - 1] || null;
       var style = _ensureStyle(baseStyle);
       var selection = state.selections[i];
