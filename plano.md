@@ -92,6 +92,12 @@ Baseline da medição: `resizeTextBoxOnCenter` desligado e `internalPadding = 0`
 | 16 | Guardas de área dependiam da unidade da régua do usuário | concluída |
 | 17 | Travamento e perda da seleção no multi-bolhas: o custo estava na abertura, não no traçado | concluída |
 | 18 | Multi-bolhas morto fora de 72 dpi: unidade das âncoras e `undefined` no payload | concluída |
+| 19 | Balões duplos: partir a região entre os textos que a compartilham | substituída pela Tarefa 20 |
+| 20 | Balões duplos, múltiplos e quadros duplos: fechar cada balão de forma imaginária | concluída, com duas pendências medidas |
+| 21 | Balão quádruplo e o balanço causado pela tinta das vizinhas | concluída, com uma pendência medida |
+| 22 | A fala vizinha jogada por cima: a mordida que a tinta dela tira da região | concluída |
+| 23 | Nível `overlap` na bancada: a página com uma fala em cima da outra | concluída |
+| 24 | Impedir que a limpeza invente um corte que a página não sustenta | rejeitada, medida |
 
 ## Registro do que já foi feito
 
@@ -457,9 +463,258 @@ Gate de centralização revalidado nas 10 páginas de referência, cenário mais
 
 Testes: `scripts/testBalloonCentroid.js` ganhou (a) âncoras em `pixelsUnit` num documento a 300 dpi, que não podem ser reescaladas, e (b) o comportamento de `getSelectionChanged` com um serializador que rejeita `undefined` como o do host: sem centroide a captura tem de chegar ao painel sem a chave e sem erro; com centroide as duas coordenadas viajam. Verificado que os dois falham no motor anterior — o (b) devolve exatamente o `{"error":true,...}` que o usuário via.
 
-## Próximos passos imediatos
+### Tarefa 19 — a região partida entre os textos que a compartilham (substituída)
 
-1. **Balões duplos (fora do escopo atual):** não há mais recusa, então os 24 casos movem sempre. A mediana caiu de 159/178 px para 20/12 px, mas a cauda continua ruim (p95 136/159 px) e o balão "That's…" da 0003 erra 243/396 px. O caminho medido segue sendo a partição da região pela camada de texto mais próxima, que no laboratório derruba o erro mediano desses casos de 159/178 px para 12/26 px.
+A primeira tentativa contra o balão duplo semeava a partição com as caixas de tinta **das outras camadas de texto**: cada texto recebia sua célula da região por BFS multi-origem, e a camada ativa era centralizada na dela. Medida nas 14 páginas de referência, ela melhorava `texts:2` e `texts:3+` e não mexia em `texts:1`.
+
+O usuário instalou e reprovou. O sintoma decisivo: **o alvo mudava a cada vez que ele apertava Align**. Muda porque a regra lê a posição atual das vizinhas, e as vizinhas se movem conforme vão sendo alinhadas.
+
+E o laboratório nunca teria visto isso. Nas 14 páginas de referência as outras camadas estão **exatamente no ground truth** — a página já foi diagramada por um profissional —, e só a camada ativa era deslocada pelo offset fantasma. A Tarefa 19 foi medida com as vizinhas perfeitamente posicionadas, que é o oposto do fluxo real: o tipógrafo joga todas as falas de qualquer jeito dentro dos balões e só depois manda alinhar uma a uma.
+
+Três coisas boas ficaram dela e continuam valendo: o contorno traçado guardado em `_hostState.lastOutline` com a chave da seleção; o eixo de topologia (`texts:1|2|3+`) no laboratório; e o conserto do harness que deixava cada camada medida escondida (visíveis iam 9, 8, 7 … 1 ao longo da página). O resto do código foi removido.
+
+### Tarefa 20 — fechar cada balão de forma imaginária (concluída, com duas pendências medidas)
+
+**A regra.** Dois convexos sobrepostos se encontram em exatamente **duas cúspides** — os pontos onde um contorno mergulha para dentro do outro — e a corda entre elas é a linha que fecharia cada balão sozinho. O motor reamostra o contorno já traçado em 400 pontos igualmente espaçados, mede o ângulo de virada num vão de 1/24 do contorno, junta os cantos côncavos fortes e corta pela **corda mais curta** entre dois deles. O texto fica com o lado em que está.
+
+Mais curta, não mais funda. Numa região de quatro balões as duas cúspides mais fundas podem pertencer a junções diferentes, e a corda entre elas atravessa um balão em vez de passar entre dois: medido, trocar "mais funda" por "mais curta" derruba o erro vertical das regiões de quatro balões de 14/91 px para 6/22 px e para de disparar em balão simples.
+
+**Nada disso lê onde estão as outras camadas.** É o ponto: o alvo passa a depender só da forma da região e da camada que está sendo centralizada, então apertar Align duas vezes cai no mesmo pixel.
+
+**O laboratório teve que ser consertado antes.** `measureCentering.jsx` ganhou `-Scatter none|mid|full`, que joga cada fala para um lugar pseudoaleatório determinístico dentro do próprio balão antes do Align, e uma segunda passada do Align para medir idempotência. Três defeitos apareceram no caminho:
+
+1. **A cerca errada.** Bagunçar dentro do bounding box da região joga a fala dentro do balão vizinho quando a região funde dois — e aí nenhuma regra pode acertar, porque o ground truth diz um balão e a página diz outro. O limite passou a ser um quarto da distância até a fala mais próxima.
+2. **A semente do sorteio vinha do caminho do arquivo**, que muda de pasta a cada run, então a mesma página era bagunçada de um jeito na base e de outro no candidato. Passou a vir do nome do arquivo.
+3. **ExtendScript fecha um literal de regex na primeira barra sem escape, mesmo dentro de uma classe de caracteres**, então `/^.*[\\/]/` matou quatro runs inteiras. O basename é extraído na mão.
+
+**Resultado medido.** Base: o motor publicado (`develop`), mesmo sorteio de bagunça, seleção viva e offset fantasma de 15%.
+
+Página arrumada (`070-tidy` × `078-tidy`):
+
+| topologia | n | \|dX\| med/p95 | \|dY\| med/p95 | PASS |
+| --- | --- | --- | --- | --- |
+| texts:1 | 56 | 2/11 → 2/11 | 4/33 → 4/33 | 24 → 24 |
+| texts:2 | 30 | 22/136 → **11/81** | 12/159 → **7/61** | 4 → 6 |
+| texts:3+ | 12 | 96/152 → **44/74** | 22/59 → **19/49** | 0 → 0 |
+
+Bagunça moderada (`075-mid` × `078-mid`):
+
+| topologia | n | \|dX\| med/p95 | \|dY\| med/p95 | PASS |
+| --- | --- | --- | --- | --- |
+| texts:1 | 56 | 2/11 → 2/11 | 4/34 → 4/34 | 24 → 24 |
+| texts:2 | 30 | 38/189 → **19,5/161** | 42/158 → **15,5/79** | 3 → 5 |
+| texts:3+ | 12 | 101/226 → **67/194** | 18/60 → 17,5/**106** | 0 → 0 |
+
+Bagunça total, o fluxo real (`075-full` × `078-full`):
+
+| topologia | n | \|dX\| med/p95 | \|dY\| med/p95 | PASS |
+| --- | --- | --- | --- | --- |
+| texts:1 | 56 | 2/11 → 2/11 | 4/33 → 4/33 | 22 → 22 |
+| texts:2 | 30 | 48/138 → **16,5/120** | 38/174 → **14**/174 | 5 → 6 |
+| texts:3+ | 12 | 94/220 → **59,5/121** | 16/52 → **13,5/45** | 0 → 0 |
+
+Por forma, `normal`, `cut` e `scream` ficam **idênticos** nos três níveis; toda a diferença cai em `leak`, que é onde o balão duplo é classificado. 0 recusas novas. O corte dispara em 16 a 19 das 98 camadas e em **nenhuma** das 56 de um texto só.
+
+**Duas pendências, medidas e não escondidas:**
+
+- Com bagunça moderada, o p95 de `dY` em `texts:3+` vai de 60 para 106 px, por causa de dois casos da página `11` e `13` em que o corte devolve metade de uma região de quatro balões e o centro dessa metade não é o centro de balão nenhum.
+- Com bagunça total, `11#2` passa a se mover 60/151 px quando o Align é apertado de novo: o primeiro Align o leva para o outro lado da corda e o segundo corta diferente. Nas outras 97 camadas a segunda passada não move nada — e as 4 camadas que já se mexiam (`0010#6/#7`, `育成…0007#3/#4`) se mexiam igual no motor publicado, porque a região em si muda depois do primeiro movimento.
+
+**Alternativas medidas e rejeitadas:**
+
+| alternativa | veredito |
+| --- | --- |
+| semear com as caixas das outras camadas (Tarefa 19) | rejeitada: depende de a página já estar diagramada e move o alvo a cada Align |
+| watershed na transformada de distância, com a célula da camada ativa | rejeitada: parte 23 a 31 dos 56 balões simples e piora `texts:1` |
+| fundir lobos pelo colo (saddle) | rejeitada: em balões sobrepostos o corredor é tão largo quanto o menor dos dois, e a partir de 0,75 funde tudo num lobo só |
+| dois cortes por região | rejeitada: sobre as 24 camadas de quatro balões, todo caso em que o segundo corte mordeu de verdade saiu pior; `texts:2` também piora (p95 de `dX` 105 → 161) |
+| corda entre as duas cúspides mais fundas | rejeitada: p95 de `dY` em `texts:3+` 45 contra 121 px a favor da corda mais curta |
+| um corte, cúspides mais fundas, sem guarda cumulativa | rejeitada: dois cortes legais de um sexto cada deixam um quadragésimo da região, e foi exatamente o que quebrou `13#1` e `14#2` |
+
+**Guardas.** Sem corte, cai no centroide de hoje e nunca recusa: menos de dois cantos côncavos fortes em lados opostos; o pedaço fica abaixo de 15% ou acima de 85% da região; o centro cai fora do contorno; ou não há contorno. `Paste` e multi-bolhas não mudaram.
+
+### Tarefa 21 — três cordas por região, e a tinta das vizinhas medida (concluída, com uma pendência medida)
+
+O usuário instalou a Tarefa 20 e apontou duas coisas: o balão quádruplo da `11.psd` continuava ruim, e **o alvo ainda se movia conforme a fala vizinha mudava de lugar**, menos que antes. A hipótese dele — *"talvez se o texto do balão vizinho invadir o que ele considera parte do outro balão ele usa o texto em conta"* — estava certa, por um caminho que não é o das coordenadas.
+
+**O motor não lê mais onde as vizinhas estão, mas lê a tinta delas.** O Align esconde só a camada que centraliza, então os glifos de todas as outras estão pintados quando a varinha amostra a página: a tinta delas não faz parte da região, e a abertura erode em volta desses buracos. Medido com a camada ativa parada e só as vizinhas mudando de lugar, sobre as 38 camadas que dividem região: **a resposta anda 81 px de mediana e 228 px no p95 em X** (66/297 em Y), e o corte liga e desliga — em vários casos ele dispara em 2 de 7 posicionamentos das vizinhas e não nos outros 5.
+
+**A cura foi medida e rejeitada pelo custo.** Amostrar o balão com todas as camadas de texto escondidas (um `Hide` em lote, uma varinha, um `Show` em lote, sem segundo `Make Work Path`) custou **861,5 s contra ~250 s nas mesmas 14 páginas, 3,4×** — muito acima do teto de 15% combinado com o usuário — e, medido na página arrumada, **não mudou os números**: `texts:2` ficou em 11/81 px e `texts:3+` em 45/74 px, iguais aos do motor sem ela. Alternar a visibilidade força o Photoshop a recompor a imagem mesclada da página inteira duas vezes por Align. Revertida.
+
+**O que entrou é barato e resolveu boa parte:** a região passa a aceitar **até três cordas** em vez de uma. Uma região de quatro balões precisa de três cortes para deixar um balão sozinho, e o segundo e o terceiro só são seguros porque a corda é a **mais curta** entre duas cúspides fortes, não a mais funda — com a corda mais funda, medido antes, o segundo corte atravessava um balão em vez de passar entre dois.
+
+O número saiu de uma varredura sobre a região que o motor realmente vê — vizinhas pintadas, ativa escondida, abertura aplicada —, com 275 amostras de região de um texto e 60 de quatro: de uma corda para três, a mediana de `|dX|` das regiões de quatro balões cai de 34 px para 14 px, o balão simples continua em 2/11 px e **continua sendo cortado zero vezes**, e a região de dois textos não se mexe. Uma quarta e uma quinta corda não mudam nada.
+
+**Resultado medido** (base: o motor publicado do `develop`, mesmo sorteio de bagunça, seleção viva e offset fantasma de 15%):
+
+| nível | topologia | n | \|dX\| med/p95 | \|dY\| med/p95 | PASS |
+| --- | --- | --- | --- | --- | --- |
+| arrumada | texts:1 | 56 | 2/11 → 2/11 | 4/33 → 4/33 | 24 → 24 |
+| arrumada | texts:2 | 30 | 22/136 → **11/70** | 12/159 → **8/61** | 4 → 6 |
+| arrumada | texts:3+ | 12 | 96/152 → **19/61** | 22/59 → **8**/71 | 0 → 1 |
+| moderada | texts:2 | 30 | 38/189 → **16/161** | 42/158 → **15,5/79** | 3 → 5 |
+| moderada | texts:3+ | 12 | 101/226 → **28/194** | 18/60 → **16,5**/90 | 0 → 0 |
+| total | texts:2 | 30 | 48/138 → **13/120** | 38/174 → **14**/174 | 5 → 7 |
+| total | texts:3+ | 12 | 94/220 → **52/121** | 16/52 → **7,5**/105 | 0 → 0 |
+
+`texts:1` fica idêntico nos três níveis. `normal`, `cut` e `scream` idênticos. 0 recusas.
+
+A `11.psd`, que era a queixa: `#2` sai de 74/−49 px para **10/7 px** na página arrumada.
+
+**Custo: nenhum.** Medido na mesma sessão, alternando as duas builds na mesma página: três cordas 79,8 s e 71,9 s, uma corda 83,1 s. As cordas extras são aritmética sobre 400 pontos reamostrados.
+
+**Pendência: o p95 de `dY` em `texts:3+` piora** — 59 → 71 px na arrumada, 60 → 90 na moderada, 51,5 → 104,5 na total. Sempre um caso por nível, sempre a mesma região: os quatro balões da `11.psd` se sobrepõem tanto que a união é quase convexa (solidez 0,92), e lá as cordas são chute. Uma guarda exigindo que o pedaço ainda comporte a caixa de tinta foi medida e não separa os casos bons dos ruins.
+
+**Segurança do multi-bolhas.** A amostragem sem texto foi revertida, então nada do caminho do monitor mudou; o corte continua sendo aritmética sobre o contorno já traçado, e `getSelectionChanged`, o `Paste` e o `Paste` em seleções guardadas não chamam nada dele. O `_hostState.lastOutline` continua sendo um contorno só, com a chave da seleção de que veio.
+
+### Tarefa 22 — a mordida que a tinta da vizinha tira da região (concluída)
+
+O usuário mandou um print: moveu o "if you" da `0029` para bem em cima da fala de baixo, apertou Align nela, e o texto foi parar fora do balão. A leitura dele — *"claramente ainda está sendo usado as outras falas para centralizar o balão"* — está certa, e o caminho é o da tinta, não o das coordenadas.
+
+**Correção da Tarefa 21.** Lá ficou escrito que amostrar sem texto custa 3,4× e não muda nada. As duas metades estão erradas para o que se mede aqui: os 3,4× eram de uma versão que escondia **todas** as camadas da página em **toda** chamada e ainda fazia uma varinha e um traçado a mais; e o "não muda nada" foi medido na página arrumada, que é exatamente a página onde nenhuma fala está por cima de outra. Nas 14 páginas de referência com uma vizinha jogada em cima de cada fala, o motor da Tarefa 21 erra assim:
+
+| página | erro somado das falas | pior caso |
+| --- | --- | --- |
+| `0029` (6 falas) | 1218 px | 411 px |
+| `11.psd` (11 falas) | 1755 px | 501 px |
+
+As mesmas páginas, sem nada por cima, centralizam **tudo dentro de 25 px**. O defeito é inteiramente causado pela vizinha.
+
+**O mecanismo é a mordida, não a sondagem.** A varinha amostra a imagem mesclada com só a camada ativa escondida. Onde a tinta da vizinha cruza a borda do balão, ela arranca um pedaço da região, e o centro do que sobra não é o centro do balão. Medido na `0029` com a região do motor gravada em telemetria: as falas 3, 4 e 5 recebem uma região com **a mesma caixa** de antes (429×681 contra 433×681) e um alvo 174 px e 188 px deslocado. Não é a varinha caindo no glifo — isso também acontece, e é o que leva a fala 1 a 411 px, mas é o caso menor.
+
+**Cinco mecanismos foram medidos:**
+
+| tentativa | invasora (`0029`/`11`) | laboratório |
+| --- | --- | --- |
+| motor da Tarefa 21 | 1218 / 1755 px | referência |
+| sondar em cinco pontos da caixa do texto | 1218 / 1755 px | sem regressão, ganho marginal |
+| esconder todas as falas da página | — | funde balões: p95 de `\|dX\|` de 70 para 207 px |
+| devolver a tinta da vizinha à seleção | 658 / 472 px | mediana das regiões compartilhadas de 13 para 29 px |
+| devolver só a tinta dentro da caixa do texto | 831 / 1082 px | conserta pouco |
+| esconder só as sobrepostas, com trava por tamanho | 77 / 100 px | trava nunca dispara; uma fala vai 913 px para o balão errado |
+| esconder só as sobrepostas, com trava por centroide | **77 / 101 px** | um caso pior em 98, página arrumada idêntica |
+
+**O que ficou.** Antes da varinha, o motor lista as camadas de texto **cuja tinta se sobrepõe à caixa desta fala** — só essas, nunca a página inteira. Esconde essas, inunda o balão de novo, e compara as duas regiões. A região limpa só é aceita se **o centro dela ficar mais perto da fala** do que o centro da região suja: devolver uma mordida sempre puxa o centro na direção do texto, porque a mordida está onde o texto está, enquanto atravessar para o balão vizinho empurra o centro para dentro de um balão em que esta fala não está.
+
+**A trava precisou de três tentativas, e as duas primeiras falharam por motivo medido.** Comparar a área crua não funciona: onde dois balões se tocam, a inundação suja **já pega os dois**, e é a abertura morfológica que os separa depois, porque a tinta da vizinha estreita a passagem entre eles. As duas regiões têm a mesma caixa até o pixel — a telemetria leu 788544 contra 788544 enquanto a fala ia 913 px para o balão errado. Comparar a área **depois da abertura** também não funciona, pelo mesmo motivo: 664×1183 nas duas. Só o centro se move, e por isso é o centro que é comparado.
+
+**Cinco pontos de sondagem** entraram junto e continuam: se o ponto do meio da caixa cair num glifo alheio, a varinha pega o traço e o preenchimento foge pela arte; os outros quatro ficam nos quartos da caixa. Uma região que não contenha o próprio texto, ou que cubra página demais, é descartada. Quando o ponto do meio funciona — a página normal — o laço para ali, e o custo continua sendo **uma** varinha.
+
+**Ferramenta nova.** `scripts/lab/diagInvader.jsx` e `runInvader.ps1`: para cada fala da página, movem a vizinha mais próxima até o centro dela, apertam Align, e comparam com um passe de controle na página intacta. Sem esse controle não dá para saber se o erro veio da invasora ou se a página já o tinha — foi ele que mostrou que a `0029` erra 411 px com invasora e 7 px sem.
+
+O laboratório também ganhou `_hostState.lastAlignRegion` e `_hostState.probe` em telemetria: a região que o motor de fato usou e por que a sondagem parou onde parou. Sem elas, uma fala que caiu no balão errado é indistinguível de uma que pegou o balão certo e errou o centro — foi o que travou o diagnóstico por três rodadas.
+
+**Resultado medido** (base: o motor da Tarefa 21, sem marquee — que é como o usuário aperta o botão; as duas builds medidas na mesma sessão, uma atrás da outra):
+
+Nível `overlap`, que é o defeito relatado — a vizinha mais próxima em cima de cada fala:
+
+| topologia | n | \|dX\| med/p95 | \|dY\| med/p95 | PASS |
+| --- | --- | --- | --- | --- |
+| texts:1 | 56 | 5/116 → **2/11** | 14/250 → **4/17** | 9 → **24** |
+| texts:2 | 30 | 55/325 → **5/106** | 80/581 → **6/70** | 5 → **11** |
+| texts:3+ | 12 | 5/356 → 11/**128** | 0/96 → 5/**34** | 1 → 2 |
+| scream | 2 | 501/501 → **8/8** | 111/111 → **6/6** | 0 → 1 |
+
+A limpeza dispara em 73 das 98 camadas, a trava recusa em 21, e nenhuma chamada lança. `texts:3+` tem a mediana um pouco pior e a cauda muito melhor: 356 → 128 px em `dX` e 96 → 34 px em `dY`.
+
+Nível `full`, onde nada fica em cima de nada: **sem regressão**. `texts:1` e `texts:3+` idênticos, `texts:2` de 13 para 11 px de mediana, `leak` de 17/13,5 para 16,5/12. Uma camada a mais se move na segunda apertada, 1 px. Só 2 das 98 camadas têm sobreposição suficiente para acionar a limpeza, e a trava recusa as duas — por isso a página arrumada e a bagunçada não mudam.
+
+**Custo: +2,2%** — 668,7 s contra 654,1 s. Medir entre sessões nesta máquina não vale nada: a mesma build mediu de +2% a +24% conforme a sessão, e uma corrida chegou a medir **mais** tempo fazendo **menos** trabalho.
+
+Três coisas trouxeram o custo para lá:
+
+- **A decisão saiu da varinha e foi para o Align.** Abrir as duas regiões dentro da varinha custava duas aberturas por camada sobreposta, e a abertura é a metade cara do caminho. O Align já abre a região suja; a varinha entrega só o candidato limpo, já aberto, com a distância dele e com o contorno traçado junto.
+- **A limpeza só roda quando duas falas se cobrem de verdade**, em pelo menos 25% da caixa **menor** das duas. Menor, não a própria: uma fala curta jogada sobre uma longa cobre 3% da caixa longa e quase toda a caixa dela mesma, e a mordida é igualmente ruim nos dois sentidos.
+- **A varredura de camadas é por Action Manager**, um descritor por camada em vez de uma ida ao DOM por propriedade. Ela roda em toda chamada do Align.
+
+### Tarefa 23 — o nível `overlap` na bancada (concluída)
+
+`-Scatter overlap`, ao lado de `none|mid|full`. Os três primeiros cercam cada fala dentro do próprio balão de propósito: uma fala jogada no balão do lado não tem ground truth alcançável, e o número não significaria nada. Só que essa mesma cerca faz com que **nenhum deles jamais ponha uma fala em cima de outra**, que é o que o tipógrafo faz antes de apertar Align — e foi por isso que a mordida da Tarefa 22 passou despercebida por duas tarefas inteiras.
+
+O `overlap` faz o inverso: a fala que está sendo centralizada **fica em casa**, onde o ground truth dela vale, e a vizinha mais próxima é movida para cima dela, uma de cada vez. É o `diagInvader.jsx` promovido a nível medido, então o defeito passa a reprovar o gate em vez de viver num diagnóstico solto.
+
+Nada muda para as corridas antigas: o `compareRuns` sempre compara corrida contra corrida no mesmo nível, e `none`, `mid` e `full` continuam idênticos.
+
+**E ele se pagou no primeiro uso.** Pegou um motor quebrado que `none` e `full` tinham dado como aprovado: a reescrita da varredura para Action Manager apagou `_distanceFromCentroid` junto com o bloco que ela substituiu, e **a limpeza vinha lançando exceção em toda chamada havia três corridas**. Como o `catch` só zerava o candidato, o resultado era indistinguível de um balão que não precisava de limpeza — `none` e `full` mediram "sem regressão" porque o motor tinha silenciosamente parado de trabalhar. Duas defesas novas nos testes: toda função que a sondagem chama tem que existir, e uma exceção na limpeza tem que ser **registrada**.
+
+### Tarefa 24 — impedir que a limpeza invente um corte (rejeitada, medida)
+
+No nível `overlap`, `texts:3+` ficou com a mediana pior que a do motor de base — 5 → 11 px em `dX` — enquanto a cauda melhorava muito. Olhando camada a camada, o padrão parecia claro: das 6 camadas de quatro balões que a limpeza tocou, **as 5 que pioraram pioraram do mesmo jeito**, com o contorno limpo produzindo um corte que a região da própria página não sustentava (`11#3` de nenhum corte para um, `14#3` com um corte que a região suja recusava por cair fora do contorno passando a ser aceito), e a única que melhorou muito melhorou no sentido oposto, com a limpeza **desligando** um corte ruim (`11#5`, 452 → 23 px).
+
+A regra medida: aceitar o contorno limpo só quando o contorno sujo também produz um corte utilizável — mesmo teste que o Align aplica logo abaixo, `_centreInsideOutline` incluído. Nunca forçar um corte, só recusar um novo. A região limpa continua em uso de qualquer jeito.
+
+**Rejeitada. A premissa está de cabeça para baixo.** Numa página com uma fala em cima da outra, a região suja é justamente a que **não consegue** cortar — o contorno dela está mordido —, então exigir concordância joga fora o corte exatamente onde ele é necessário. A regra descartou o corte em **59 das 98 camadas**, e as regiões de dois balões dependem dele:
+
+| | com o corte limpo | exigindo concordância |
+| --- | --- | --- |
+| texts:2, `\|dX\|` med/p95 | 5/106 | 52/219 |
+| texts:2, `\|dY\|` med/p95 | 6/70 | 58/349 |
+| texts:3+, `\|dX\|` med/p95 | 11/128 | 15/152 |
+
+Camadas individuais de `texts:2` pagaram de 280 a 630 px cada. Nível `full` não mudou, como esperado — só 2 camadas ali são limpas.
+
+**O que fica sabido:** o corte sobre o contorno limpo não é um efeito colateral da Tarefa 22, é metade do ganho dela. As 5 camadas de `texts:3+` que pioraram continuam pendentes, e o caminho não é desligar o corte — é fazê-lo decidir melhor sobre a região de quatro balões, que é a pendência número 1.
+
+### Task 25 — baseline e dataset exato (concluída)
+
+**Hipótese.** A bancada precisava observar a geometria que o Align realmente usou, e não reconstruir depois um contorno parecido. A previsão era que wrappers só de laboratório conseguiriam capturar outline dirty/clean, candidatos, cordas, peça, centroide, fonte, fallback, exceções e segunda passada sem tocar no algoritmo de produção.
+
+**Implementação.** `runMeasure.ps1` ganhou `-HostJsx`, `-TraceGeometry`, SHA-1 do bundle/harness, tempo por página/run e guarda SHA-1 dos 14 arquivos em `psd/` e dos 14 em `true/`. O manifesto antigo de 10 arquivos foi substituído pelo snapshot completo. `measureCentering.jsx` envolve as funções globais já carregadas pelo host somente quando `LAB.traceGeometry` está ligado; nenhuma decisão do solver muda. Um target de telemetria é limpo antes de cada Align para `smallSelection` não herdar o target da camada anterior.
+
+**Runs.** `106-trace-smoke` foi inválido porque `-Root .` chegava relativo ao Photoshop; o driver passou a resolver a raiz uma vez. `107-trace-smoke` validou `11.psd` (12 camadas, zero erros). Os datasets finais são `110-none`, `111-mid`, `112-full` e `113-overlap`; os três primeiros usam seleção viva e `PhantomRatio=0.15`, e o último usa `Scatter=overlap` sem marquee/phantom. `114-trace-final` confirmou a telemetria final: o `smallSelection` de `0010#7` agora registra target nulo e fallback `notReached`, sem herdar estado.
+
+**Métricas.** Cada cenário mede 98 falas e ignora a mesma camada oculta. Tempos: 367,6/639,8/690,1/739,3 s. Em `texts:3+`, X med/p95 foi 19/61, 28/194, 52/121 e 11/128 px; Y foi 8/71, 16,5/90, 7,5/104,5 e 5/34 px. Os quatro cenários somaram respectivamente 29/26/24/27 cordas, zero falsos cortes em `texts:1` e 4/4/4/8 segundas passadas de pelo menos 1 px. O cenário overlap registrou 94 outlines clean. A reprodução aritmética do corte/peça/centroide coincidiu em 0,000 px em 81 cortes comparáveis; target previsto versus movimento real ficou em no máximo 0,5 px.
+
+**Conclusão e rejeições.** O dataset é fiel e completo. `psd/` e `true/` permaneceram idênticos ao snapshot após cada run. As tabelas por cenário/categoria/topologia e a tabela separada das 12 falas de `11`, `13` e `14` estão em `.centering-lab/partition-report.md`.
+
+### Task 26 — H25-A/F, concavidade multi-escala (concluída)
+
+**Hipótese e previsão.** Cúspides rasas mas persistentes entre escalas poderiam recuperar a região quase convexa de `11.psd` sem baixar globalmente o limiar que já produziu falsos cortes.
+
+**Implementação.** `scripts/lab/scorePartitions.js` extrai máximos nos gaps 1/48, 1/32, 1/24, 1/16 e 1/12 dos 400 pontos, agrupa por distância circular e registra profundidade normalizada, ângulo, persistência, estabilidade, posição e distâncias. O fechamento barato mede tangentes e os quatro turnos corda-borda. O solver recebe somente contorno e caixa ativa; nomes, índices, outras caixas e ground truth não entram nele. O script contém um self-check executável para área/centroide, corte e rejeição de cordas cruzadas.
+
+**Varredura e métricas.** Nas 13 páginas de treino, tolerâncias 4/8/12 produziram 2,25/2,05/1,97 candidatos de média, p95 8/7/7 e máximo 13/13/12. O menor ponto da faixa estável foi congelado: agrupamento 4 e limite 8. A escolha é geométrica e não usa o score isolado de `11.psd`.
+
+**Conclusão e rejeições.** A persistência separa melhor os endpoints úteis (AUC 0,852 para profundidade e 0,745 para persistência), mas multi-escala isolada ainda piora gates de `texts:2`/`texts:3+` e cria dois falsos cortes na melhor configuração. Fechamento ficou apenas como feature experimental: AUC 0,314, sinal inverso ao esperado.
+
+### Task 27 — H25-B, busca global (concluída)
+
+**Hipótese e previsão.** Pontuar o conjunto inteiro de 0–3 cordas deveria evitar que uma segunda corda local cortasse uma lasca e permitir separar quatro lobos de uma vez.
+
+**Implementação.** A busca enumera conjuntos não cruzados, rejeita corda fora da região, endpoint repetido, corte redundante, centroide externo e qualquer peça abaixo de 15% da área. O score combina ganhos médios de solidez, compacidade, aspecto e concavidade residual, features dos endpoints, comprimento total, quantidade de cortes, fechamento, DT e concordância clean/dirty quando habilitados. A solução de zero cordas mantém score 0 e toda variante exige margem positiva.
+
+**Varredura e métricas.** Limites 12 e 18 deram a mesma fonte/conjunto/peça/target em 97,7% dos casos de treino, então 12 foi o menor valor na faixa estável. A melhor busca global reduziu o p95 X de `texts:3+` no treino de 121 para 94 px, mas elevou p95 Y de 28 para 36,4 px e criou um falso corte. Multi-escala + global chegou a p95 X 57,6 px, mas p95 Y 91 px e dois falsos cortes. Nenhuma margem 0,04/0,08/0,12/0,16 passou os gates.
+
+**Conclusão e rejeições.** A busca global melhora uma cauda, mas troca o eixo/caso que falha. Foram rejeitadas as variantes multi-escala isolada, global isolada e combinada: todas violam ao menos `texts:2`, `texts:3+` ou `texts:1` em algum cenário.
+
+### Task 28 — H25-C/E, DT e clean/dirty (concluída)
+
+**Hipótese e previsão.** Máximos DT em lados opostos, raio dos lobos, largura relativa do pescoço e ridge ao longo da corda poderiam ordenar melhor cordas geometricamente plausíveis; concordância dirty/clean deveria ser no máximo uma penalidade leve.
+
+**Métricas.** Grades 128 e 256 preservaram 99,14% da fonte/conjunto/peça/target no treino, portanto 128 seria a única grade portável. AUC por feature: DT 0,723; profundidade 0,852; persistência 0,745; clean/dirty 0,550; fechamento 0,314. A ausência no dirty nunca vetou uma corda e recebeu só peso leve.
+
+**Conclusão e rejeições.** DT tem sinal útil isolado, mas nenhuma configuração DT passou os gates held-out de treino: a melhor `combined+dt256` ficou em X 10/57,6 e Y 4,3/91 px em `texts:3+`, com dois falsos cortes e uma rejeição fixed-point. Concordância clean/dirty foi praticamente neutra e fechamento pior que acaso. As três features foram descartadas para produção porque não melhoraram o resultado held-out sem regressões.
+
+### Task 29 — H25-D, fixed-point e seleção final (concluída, resultado negativo)
+
+**Implementação.** Toda solução candidata é resolvida novamente após transladar virtualmente a caixa ativa ao target. Mudança de fonte, conjunto, peça ou target acima de 0,5 px rejeita a solução e volta a zero cortes. `11.psd` foi excluído de toda escolha de tolerância, limite, margem e feature; a seleção lexicográfica usa o pior p95 de `texts:3+`, mediana, quantidade de cortes/features e custo nas outras 13 páginas.
+
+**Métricas e conclusão.** Foram avaliadas 32 configurações (quatro margens em oito combinações de multi-escala/global/fechamento/DT/dirty). **0/32** passou todos os gates nas 13 páginas de treino, portanto nenhuma configuração foi congelada e o holdout de `11.psd` não foi usado para escolher ou salvar uma candidata. As falhas mais frequentes foram `texts:2`/`texts:3+` em none, `texts:3+` em mid/full, e `texts:1`/`texts:3+` em overlap. Os cinco casos registrados da Task 24 foram `13#4`, `14#3`, `11#5`, `14#4` e `11#3` no cenário overlap.
+
+**Rejeição final.** Não existe vencedor robusto. `app_src/host.js` permanece exatamente com o solver anterior; nenhum estado, histerese ou regra calibrada para `11.psd` foi adicionado. Resultados completos e configuração de cada tentativa: `.centering-lab/partition-report.md` e `.centering-lab/partition-scores.json`.
+
+### Task 30 — porte mínimo e gate real (encerrada sem porte)
+
+Como a Task 29 não produziu vencedor, a condição de entrada da Task 30 não foi satisfeita. Não houve alteração no painel, payload público, Paste, Multi Bubble, solver de produção nem `_hostState.partition`; também não foram acrescentados testes de um algoritmo rejeitado. Os quatro cenários reais já medidos são o A/B suficiente para rejeitar as candidatas offline; rodar Paste/Multi Bubble/DPI e uma matriz candidata no Photoshop não poderia aprovar uma configuração que falhou antes do holdout.
+
+`npm run verify` passou (testes, build de produção e teste do bundle). O SHA-1 do bundle medido nos quatro runs foi `48906BB37721887DB6CB72331F977EA71413F5E8`; os 28 PSDs permaneceram iguais ao manifesto completo. A decisão ponytail aqui foi não portar código sem vencedor: adicionar uma segunda implementação ao host só criaria regressão já demonstrada.
+
+
+## Decisões feitas
+
+1. **Consolidar a decisão negativa das Tasks 25–30.** A bancada agora reproduz a geometria real, os artefatos estão em `.centering-lab/partition-report.md` e `.centering-lab/partition-scores.json`, e `npm run verify` passou. Das 32 configurações avaliadas com leave-one-page-out, nenhuma passou todos os gates (`0/32`); `11.psd` permaneceu holdout.
+2. **Manter o motor publicado.** Não portar multi-escala, busca global, DT, clean/dirty ou fixed-point para `app_src/host.js`; não adicionar estado/histerese, mudanças no painel/payload ou alterações em Paste/Multi Bubble. O SHA-1 do host e os 28 PSDs devem continuar sendo conferidos antes/depois de novas medições.
+3. **Só reabrir a investigação com evidência nova.** Se for necessário tentar novamente, acrescentar ground truth ou páginas held-out independentes e repetir os quatro cenários e os mesmos gates, congelando a configuração antes de revelar `11.psd`. Não ajustar parâmetros ao caso holdout nem selecionar o melhor valor isolado.
 
 ## Como reproduzir
 

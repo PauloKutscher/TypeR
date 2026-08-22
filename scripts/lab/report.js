@@ -11,6 +11,11 @@
  *   scream      low solidity: spikes and serrations (shout balloons)
  *   normal      everything else
  *
+ * A second, independent axis counts how many text layers share the region
+ * (texts:1 | texts:2 | texts:3+). It lives in caseClass.js together with the
+ * shape classes above, because the two answer different questions and a double
+ * panel would otherwise be filed as a scream.
+ *
  * PASS is per axis: |delta| <= max(1 px, 1% of the region's shorter side).
  *
  * Usage: node scripts/lab/report.js [run]
@@ -18,30 +23,11 @@
 
 const fs = require("fs");
 const path = require("path");
+const { classify, topology, tolerance, CATEGORIES, TOPOLOGIES } = require("./caseClass");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const RUN = process.argv[2] || "000-baseline";
 const RUN_DIR = path.join(ROOT, ".centering-lab", "runs", RUN);
-
-const LEAK_PAGE_SHARE = 0.15;
-const CUT_FLAT_SIDE = 0.35;
-const SCREAM_SOLIDITY = 0.85;
-
-function classify(c) {
-  const m = c.region.metrics;
-  const pageArea = c.canvas.width * c.canvas.height;
-  if (c.region.textLayersInside > 1) return "leak";
-  if (m.area / pageArea > LEAK_PAGE_SHARE) return "leak";
-  const touch = m.touchesCanvas;
-  const flat = Math.max(m.straightRuns.flatLeft || 0, m.straightRuns.flatRight || 0);
-  if (flat >= CUT_FLAT_SIDE || touch.left || touch.right || touch.top || touch.bottom) return "cut";
-  if (m.solidity < SCREAM_SOLIDITY) return "scream";
-  return "normal";
-}
-
-function tolerance(c) {
-  return Math.max(1, 0.01 * Math.min(c.region.nodeBbox.width, c.region.nodeBbox.height));
-}
 
 function quantile(values, p) {
   if (!values.length) return NaN;
@@ -68,7 +54,7 @@ function fmt(n, digits = 1) {
 function main() {
   const data = JSON.parse(fs.readFileSync(path.join(RUN_DIR, "cases.json"), "utf8"));
   const cases = data.cases.filter((c) => !c.skipped);
-  for (const c of cases) c.category = classify(c);
+  for (const c of cases) { c.category = classify(c); c.topology = topology(c); }
 
   const lines = [];
   lines.push("# Fase 2 — erro real da centralização atual");
@@ -87,8 +73,7 @@ function main() {
   lines.push("");
   lines.push("| Categoria | Casos | viés X | \\|X\\| med | \\|X\\| p95 | \\|X\\| max | viés Y | \\|Y\\| med | \\|Y\\| p95 | \\|Y\\| max | PASS |");
   lines.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
-  const categories = ["normal", "cut", "scream", "leak"];
-  for (const cat of categories.concat(["TOTAL"])) {
+  for (const cat of CATEGORIES.concat(["TOTAL"])) {
     const list = cat === "TOTAL" ? cases : cases.filter((c) => c.category === cat);
     if (!list.length) continue;
     const sx = summarize(list, (c) => c.plugin.deltaX);
@@ -99,6 +84,51 @@ function main() {
   lines.push("");
   lines.push("Erros em pixels, medidos no centro da tinta do texto. `viés` é a média assinada: separa erro sistemático de dispersão.");
   lines.push("");
+
+  // Second axis: how many text layers share the region. A region holding two
+  // texts cannot be centred for one of them alone, and the shape classes above
+  // hide those cases (a double panel has solidity 0.69-0.72, which a shape-first
+  // classifier calls a scream).
+  lines.push("## Agregado por topologia (camadas de texto na região)");
+  lines.push("");
+  lines.push("| Topologia | Casos | viés X | \|X\| med | \|X\| p95 | \|X\| max | viés Y | \|Y\| med | \|Y\| p95 | \|Y\| max | PASS |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+  for (const topo of TOPOLOGIES.concat(["TOTAL"])) {
+    const list = topo === "TOTAL" ? cases : cases.filter((c) => c.topology === topo);
+    if (!list.length) continue;
+    const sx = summarize(list, (c) => c.plugin.deltaX);
+    const sy = summarize(list, (c) => c.plugin.deltaY);
+    const pass = list.filter((c) => Math.abs(c.plugin.deltaX) <= tolerance(c) && Math.abs(c.plugin.deltaY) <= tolerance(c)).length;
+    lines.push(`| ${topo} | ${list.length} | ${fmt(sx.bias)} | ${fmt(sx.median)} | ${fmt(sx.p95)} | ${fmt(sx.max, 0)} | ${fmt(sy.bias)} | ${fmt(sy.median)} | ${fmt(sy.p95)} | ${fmt(sy.max, 0)} | ${pass}/${list.length} |`);
+  }
+  lines.push("");
+
+  // Pressing Align twice must land on the same pixel. A rule that reads where
+  // the other text layers are cannot: they move as they are aligned, so the
+  // answer moves with them and the typesetter sees the text jump.
+  const repeated = cases.filter((c) => c.plugin.repeatX !== null && c.plugin.repeatX !== undefined);
+  if (repeated.length) {
+    const moved = repeated.filter((c) => Math.abs(c.plugin.repeatX) >= 1 || Math.abs(c.plugin.repeatY) >= 1);
+    const rx = summarize(repeated, (c) => c.plugin.repeatX);
+    const ry = summarize(repeated, (c) => c.plugin.repeatY);
+    lines.push("## Idempotência (segunda passada do Align)");
+    lines.push("");
+    lines.push(`Camadas medidas duas vezes: ${repeated.length} · que se movem 1 px ou mais na segunda passada: **${moved.length}**`);
+    lines.push("");
+    lines.push("| eixo | \|d\| med | \|d\| p95 | \|d\| max |");
+    lines.push("| --- | --- | --- | --- |");
+    lines.push(`| X | ${fmt(rx.median)} | ${fmt(rx.p95)} | ${fmt(rx.max, 0)} |`);
+    lines.push(`| Y | ${fmt(ry.median)} | ${fmt(ry.p95)} | ${fmt(ry.max, 0)} |`);
+    lines.push("");
+    if (moved.length) {
+      lines.push("Piores: " + moved.slice()
+        .sort((a, b) => (Math.abs(b.plugin.repeatX) + Math.abs(b.plugin.repeatY)) - (Math.abs(a.plugin.repeatX) + Math.abs(a.plugin.repeatY)))
+        .slice(0, 8)
+        .map((c) => `${c.page.slice(-6)}#${c.index} ${c.plugin.repeatX}/${c.plugin.repeatY}`)
+        .join(" · "));
+      lines.push("");
+    }
+  }
 
   lines.push("## Veredito de causa raiz");
   lines.push("");
@@ -156,8 +186,11 @@ function main() {
 
   const counts = {};
   for (const c of cases) counts[c.category] = (counts[c.category] || 0) + 1;
+  const topoCounts = {};
+  for (const c of cases) topoCounts[c.topology] = (topoCounts[c.topology] || 0) + 1;
   console.log("report -> " + outFile);
   console.log("categorias: " + JSON.stringify(counts));
+  console.log("topologia: " + JSON.stringify(topoCounts));
   const pass = cases.filter((c) => Math.abs(c.plugin.deltaX) <= tolerance(c) && Math.abs(c.plugin.deltaY) <= tolerance(c)).length;
   console.log("PASS do plugin: " + pass + "/" + cases.length);
 }

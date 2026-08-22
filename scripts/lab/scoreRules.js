@@ -18,6 +18,7 @@
 const fs = require("fs");
 const path = require("path");
 const L = require("./labImage");
+const { classify, topology, tolerance, CATEGORIES, TOPOLOGIES } = require("./caseClass");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const RUN = process.argv[2] && !process.argv[2].startsWith("--") ? process.argv[2] : "000-baseline";
@@ -27,21 +28,6 @@ const DETAIL = (() => {
   const i = process.argv.indexOf("--detail");
   return i >= 0 ? process.argv[i + 1] : null;
 })();
-
-const LEAK_PAGE_SHARE = 0.15;
-const CUT_FLAT_SIDE = 0.35;
-const SCREAM_SOLIDITY = 0.85;
-
-function classify(c) {
-  const m = c.region.metrics;
-  if (c.region.textLayersInside > 1) return "leak";
-  if (m.area / (c.canvas.width * c.canvas.height) > LEAK_PAGE_SHARE) return "leak";
-  const t = m.touchesCanvas;
-  const flat = Math.max(m.straightRuns.flatLeft || 0, m.straightRuns.flatRight || 0);
-  if (flat >= CUT_FLAT_SIDE || t.left || t.right || t.top || t.bottom) return "cut";
-  if (m.solidity < SCREAM_SOLIDITY) return "scream";
-  return "normal";
-}
 
 /* ---------- isolation stages ---------- */
 
@@ -115,8 +101,185 @@ function dtMax(region) {
   return { cx, cy };
 }
 
+/* ---------- cutting the region where two balloons were drawn over each other ---------- */
+
+/*
+ * The engine's rule, reproduced offline so the bench can sweep its thresholds.
+ *
+ * Two overlapping convex shapes meet at exactly two cusps, and the chord between
+ * them closes each balloon on its own. Nothing here reads where the other text
+ * layers are: an earlier version did, and it measured well only on pages that
+ * were already typeset, which is the opposite of the page this plugin is for.
+ *
+ * The host does this on the traced outline; here it is the mask boundary, which
+ * is the same curve sampled differently.
+ */
+const CUSP_CONCAVITY = 0.6;
+const CUSP_MIN_PIECE_SHARE = 0.15;
+const CUSP_MAX_CUTS = 3;
+const CUSP_CONTOUR_POINTS = 400;
+const CUSP_SPAN_DIVISOR = 24;
+const CUSP_MIN_GAP = 0.20;
+
+/* Moore-neighbour boundary walk, 8-connected. */
+function traceContour(region) {
+  const { mask, width, height, bbox } = region;
+  let start = -1;
+  for (let y = bbox.top; y < bbox.bottom && start < 0; y++) {
+    for (let x = bbox.left; x < bbox.right; x++) {
+      if (mask[y * width + x]) { start = y * width + x; break; }
+    }
+  }
+  if (start < 0) return [];
+  const dirs = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+  const out = [];
+  const px = start % width;
+  const py = (start - px) / width;
+  let cx = px, cy = py, dir = 6, guard = 0;
+  do {
+    out.push([cx, cy]);
+    let found = false;
+    for (let k = 0; k < 8; k++) {
+      const d = (dir + 1 + k) % 8;
+      const nx = cx + dirs[d][0];
+      const ny = cy + dirs[d][1];
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+      if (!mask[ny * width + nx]) continue;
+      // The backtrack direction, not the travel direction: starting the next
+      // search at the travel direction walks straight back and the trace
+      // ping-pongs between two pixels instead of going round the shape.
+      cx = nx; cy = ny; dir = (d + 4) % 8; found = true; break;
+    }
+    if (!found) break;
+    guard++;
+  } while ((cx !== px || cy !== py) && guard < 4000000);
+  return out;
+}
+
+function resampleClosed(points, count) {
+  if (points.length < 3) return null;
+  const step = Math.max(1, Math.round(points.length / count));
+  const out = [];
+  for (let i = 0; i < points.length; i += step) out.push(points[i]);
+  return out.length >= 12 ? out : null;
+}
+
+/*
+ * The narrowest waist: the shortest chord between two strong concave corners on
+ * opposite sides of the shape. Narrowest and not deepest, because in a region of
+ * four balloons the two deepest corners can belong to different junctions and
+ * the chord then slices through a balloon instead of between two.
+ */
+function cuspPair(points) {
+  const n = points.length;
+  const span = Math.max(2, Math.round(n / CUSP_SPAN_DIVISOR));
+  if (n < span * 4) return null;
+  const turn = new Array(n);
+  let total = 0;
+  for (let i = 0; i < n; i++) {
+    const a = points[(i - span + n + n) % n];
+    const b = points[i];
+    const c = points[(i + span) % n];
+    const ux = b[0] - a[0], uy = b[1] - a[1];
+    const vx = c[0] - b[0], vy = c[1] - b[1];
+    turn[i] = Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+    total += turn[i];
+  }
+  const winding = total >= 0 ? 1 : -1;
+  const concavity = turn.map((v) => -winding * v);
+
+  // One representative per corner, or the shortest chord joins a corner to
+  // itself.
+  const corners = [];
+  for (let i = 0; i < n; i++) {
+    if (concavity[i] < CUSP_CONCAVITY) continue;
+    let top = true;
+    for (let k = -span; k <= span; k++) {
+      if (concavity[(i + k + n + n) % n] > concavity[i]) { top = false; break; }
+    }
+    if (top) corners.push(i);
+  }
+  if (corners.length < 2) return null;
+
+  let best = null;
+  for (let a = 0; a < corners.length; a++) {
+    for (let b = a + 1; b < corners.length; b++) {
+      let gap = Math.abs(corners[a] - corners[b]);
+      if (gap > n / 2) gap = n - gap;
+      if (gap < n * CUSP_MIN_GAP) continue;
+      const length = Math.hypot(
+        points[corners[a]][0] - points[corners[b]][0],
+        points[corners[a]][1] - points[corners[b]][1]
+      );
+      if (!best || length < best.length) {
+        best = {
+          length,
+          a: points[corners[a]],
+          b: points[corners[b]],
+          first: concavity[corners[a]],
+          second: concavity[corners[b]],
+        };
+      }
+    }
+  }
+  return best;
+}
+
+/* Everything on the text's side of the chord, as a region of its own. */
+function keepSideOfChord(region, a, b, box) {
+  const { mask, width, height, bbox } = region;
+  const ux = b[0] - a[0], uy = b[1] - a[1];
+  const bx = (box.left + box.right) / 2;
+  const by = (box.top + box.bottom) / 2;
+  const wanted = Math.sign((bx - a[0]) * uy - (by - a[1]) * ux) || 1;
+  const out = new Uint8Array(width * height);
+  let n = 0, other = 0, x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1;
+  for (let y = bbox.top; y < bbox.bottom; y++) {
+    for (let x = bbox.left; x < bbox.right; x++) {
+      if (!mask[y * width + x]) continue;
+      const side = Math.sign((x - a[0]) * uy - (y - a[1]) * ux) || 1;
+      if (side !== wanted) { other++; continue; }
+      out[y * width + x] = 1; n++;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+  }
+  if (!n || !other) return null;
+  return {
+    share: n / (n + other),
+    region: { mask: out, width, height, count: n, bbox: L.makeBox(x0, y0, x1 + 1, y1 + 1) },
+  };
+}
+
+function cuspCut(region, ctx) {
+  const box = ctx.activeBox;
+  if (!box) return areaCentroid(region);
+  let current = region;
+  let cuts = 0;
+  let share = 1;
+  for (let pass = 0; pass < CUSP_MAX_CUTS; pass++) {
+    const points = resampleClosed(traceContour(current), CUSP_CONTOUR_POINTS);
+    if (!points) break;
+    const pair = cuspPair(points);
+    if (!pair) break;
+    const kept = keepSideOfChord(current, pair.a, pair.b, box);
+    if (!kept) break;
+    if (kept.share < CUSP_MIN_PIECE_SHARE || kept.share > 1 - CUSP_MIN_PIECE_SHARE) break;
+    current = kept.region;
+    share *= kept.share;
+    cuts++;
+  }
+  // Two cuts can each keep a legal sixth and still leave a fortieth of the
+  // region, which is a sliver and not a balloon.
+  if (!cuts || share < CUSP_MIN_PIECE_SHARE) return areaCentroid(region);
+  return areaCentroid(current);
+}
+
 const centres = {
   bbox: (region) => ({ cx: region.bbox.xMid, cy: region.bbox.yMid }),
+  cuspCut: cuspCut,
   centroid: areaCentroid,
   // The tail sits on the side of a balloon far more often than above or below
   // it, so the horizontal centroid follows the tail while the vertical one
@@ -187,6 +350,34 @@ function summaryOf(sub) {
   };
 }
 
+/*
+ * The engine does not centre on a fill that escaped the balloon: when the region
+ * covers more than a quarter of the page it narrows the selection to the text's
+ * neighbourhood first (`_narrowSelectionToTextNeighbourhood`, host.js:1876) —
+ * the ink box grown by half its own width and height on each side, intersected
+ * with what was selected. Scoring a rule on the un-narrowed region measures a
+ * region the plugin never sees, and the two leaked cases then dominate the tail.
+ */
+const MAX_PAGE_SHARE = 0.25;
+
+function narrowToTextNeighbourhood(region, box, canvas) {
+  if (region.count <= canvas.width * canvas.height * MAX_PAGE_SHARE) return region;
+  const marginX = box.width / 2;
+  const marginY = box.height / 2;
+  const left = Math.max(0, Math.round(box.left - marginX));
+  const top = Math.max(0, Math.round(box.top - marginY));
+  const right = Math.min(canvas.width, Math.round(box.right + marginX));
+  const bottom = Math.min(canvas.height, Math.round(box.bottom + marginY));
+  if (right - left < 2 || bottom - top < 2) return region;
+  const mask = new Uint8Array(region.mask.length);
+  for (let y = top; y < bottom; y++) {
+    const row = y * region.width;
+    for (let x = left; x < right; x++) mask[row + x] = region.mask[row + x];
+  }
+  const narrowed = L.withMask(region, mask);
+  return narrowed.count ? narrowed : region;
+}
+
 function loadPages(cases) {
   const pages = {};
   for (const c of cases) {
@@ -200,7 +391,7 @@ function loadPages(cases) {
 function main() {
   const data = JSON.parse(fs.readFileSync(path.join(RUN_DIR, "cases.json"), "utf8"));
   const cases = data.cases.filter((c) => !c.skipped);
-  for (const c of cases) c.category = classify(c);
+  for (const c of cases) { c.category = classify(c); c.topology = topology(c); }
   const pages = loadPages(cases);
 
   const jitters = WANT_JITTER
@@ -216,7 +407,7 @@ function main() {
 
   for (const c of cases) {
     const gt = c.groundTruth.ink;
-    const tol = Math.max(1, 0.01 * Math.min(c.region.nodeBbox.width, c.region.nodeBbox.height));
+    const tol = tolerance(c);
     for (const [jx, jy] of jitters) {
       const seedX = Math.round(c.probe.x + jx);
       const seedY = Math.round(c.probe.y + jy);
@@ -224,14 +415,28 @@ function main() {
       if (seedX < 0 || seedY < 0 || seedX >= img.width || seedY >= img.height) continue;
       // A jittered seed can land on ink of the artwork; skip it, the plugin
       // would not sample there either (it samples inside the balloon).
-      const region = L.floodFill(img, seedX, seedY, 20);
-      if (!region.count || region.count > img.width * img.height * 0.6) continue;
+      const filled = L.floodFill(img, seedX, seedY, 20);
+      if (!filled.count || filled.count > img.width * img.height * 0.6) continue;
+      const region = narrowToTextNeighbourhood(filled, gt, c.canvas);
+      // The boxes of the text layers that share this region. The active layer's
+      // own box is where the plugin knows the text is; the neighbours get the
+      // same jitter as the seed, because in real use they may not have been
+      // centred yet and a rule that only works when they are is not usable.
+      const shared = c.region.textBoxes || [];
+      const boxes = shared.map((entry) => (entry.active
+        ? entry.box
+        : { left: entry.box.left + jx, right: entry.box.right + jx, top: entry.box.top + jy, bottom: entry.box.bottom + jy }));
       const ctx = {
         seedX,
         seedY,
         textWidth: gt.width,
         textHeight: gt.height,
         dtSeed: dtAt(region, seedX, seedY),
+        boxes,
+        activeIndex: shared.findIndex((entry) => entry.active),
+        // Where the plugin knows this text is, jittered like the panel's own
+        // phantom offset. The cusp cut needs only this one box.
+        activeBox: { left: gt.left + jx, right: gt.right + jx, top: gt.top + jy, bottom: gt.bottom + jy },
       };
       for (const [isoName, iso] of Object.entries(isolations)) {
         let isolated;
@@ -244,6 +449,7 @@ function main() {
             page: c.page,
             index: c.index,
             category: c.category,
+            topology: c.topology,
             jitter: jx !== 0 || jy !== 0,
             dx: point.cx - gt.xMid,
             dy: point.cy - gt.yMid,
@@ -254,7 +460,7 @@ function main() {
     }
   }
 
-  const categories = ["normal", "cut", "scream", "leak"];
+  const categories = CATEGORIES;
   const rows = [];
   for (const [name, list] of Object.entries(results)) {
     const base = list.filter((r) => !r.jitter);
@@ -267,6 +473,14 @@ function main() {
     for (const cat of categories.concat(["all"])) {
       const sub = cat === "all" ? base : base.filter((r) => r.category === cat);
       row[cat] = sub.length ? summaryOf(sub) : null;
+    }
+    // Second axis: how many texts share the region. The shape classes hide these
+    // cases — a double panel has solidity 0.69-0.72, which a shape-first
+    // classifier files as a scream.
+    row.topology = {};
+    for (const topo of TOPOLOGIES) {
+      const sub = base.filter((r) => r.topology === topo);
+      row.topology[topo] = sub.length ? summaryOf(sub) : null;
     }
     if (WANT_JITTER) {
       const j = list.filter((r) => r.jitter && r.category !== "leak");

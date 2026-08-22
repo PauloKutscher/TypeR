@@ -584,4 +584,356 @@ const withCentroid = JSON.parse(captureWith({ x: 55, y: 75 }));
 assert.strictEqual(withCentroid.multiSelection[0].centroidX, 55, "a centroid must still travel with the selection");
 assert.strictEqual(withCentroid.multiSelection[0].centroidY, 75, "on both axes");
 
+/* ---------- cutting a region where two balloons were drawn over each other ---------- */
+
+/*
+ * A region that merges two balloons has one centroid and two texts, so both are
+ * thrown at the same point: measured on the reference pages, a region holding one
+ * text is off by 2/4 px at the median while a region holding two is off by 54/46
+ * px and one holding four by 104/17 px, out to 346 px.
+ *
+ * The cut that fixes it reads nothing but the shape. That is the point: an
+ * earlier version seeded the split with the ink boxes of the other text layers,
+ * which measured well on pages that were already typeset and moved the answer
+ * every time the button was pressed on a page that was not. Every case here
+ * fails on the previous engine, where the functions lifted below do not exist.
+ */
+function tuning(name) {
+  const match = hostSource.match(new RegExp(name + " = ([\\d.]+)"));
+  assert.ok(match, name + " must be a tuning constant in host.js");
+  return Number(match[1]);
+}
+
+const CONCAVITY = tuning("_CUSP_CONCAVITY");
+const MIN_PIECE_SHARE = tuning("_CUSP_MIN_PIECE_SHARE");
+const MAX_CUTS = tuning("_CUSP_MAX_CUTS");
+const CONTOUR_POINTS = tuning("_CUSP_CONTOUR_POINTS");
+const SPAN_DIVISOR = tuning("_CUSP_SPAN_DIVISOR");
+const MIN_GAP = tuning("_CUSP_MIN_GAP");
+
+const signedArea = lift("_polygonSignedArea(poly)", [])();
+const areaCentroid = lift("_polygonAreaCentroid(poly)", [])();
+const largestContour = lift("_largestContour(polygons)", ["_polygonSignedArea"])(signedArea);
+const resampleContour = lift("_resampleContour(poly, count)", [])();
+const findCuspPair = lift("_findCuspPair(points)", ["_CUSP_SPAN_DIVISOR", "_CUSP_MIN_GAP", "_CUSP_CONCAVITY"])(SPAN_DIVISOR, MIN_GAP, CONCAVITY);
+const splitContourAtChord = lift("_splitContourAtChord(points, a, b)", [])();
+const pieceOnSideOf = lift("_pieceOnSideOf(pieces, a, b, x, y)", [
+  "_polygonSignedArea", "_polygonAreaCentroid",
+])(signedArea, areaCentroid);
+const centreInsideOutline = lift("_centreInsideOutline(polygons, point)", ["_pointInPolygon"])(pointInPolygon);
+const splitAtCusps = lift("_splitOutlineAtCusps(polygons, activeBox, report)", [
+  "_CUSP_CONCAVITY", "_CUSP_MIN_PIECE_SHARE", "_CUSP_MAX_CUTS", "_CUSP_CONTOUR_POINTS",
+  "_CUSP_SPAN_DIVISOR", "_largestContour", "_resampleContour", "_findCuspPair", "_splitContourAtChord",
+  "_pieceOnSideOf", "_polygonAreaCentroid",
+])(CONCAVITY, MIN_PIECE_SHARE, MAX_CUTS, CONTOUR_POINTS,
+  SPAN_DIVISOR, largestContour, resampleContour, findCuspPair, splitContourAtChord,
+  pieceOnSideOf, areaCentroid);
+
+function textBox(left, top, right, bottom) {
+  return { left: left, top: top, right: right, bottom: bottom, width: right - left, height: bottom - top };
+}
+
+/* The union outline of two overlapping discs: the shape a double balloon is. */
+function fusedDiscs(ax, ay, ar, bx, by, br, steps) {
+  steps = steps || 240;
+  const d = Math.hypot(bx - ax, by - ay);
+  assert.ok(d < ar + br && d > Math.abs(ar - br), "the discs must actually overlap");
+  const base = Math.atan2(by - ay, bx - ax);
+  const half = Math.acos((d * d + ar * ar - br * br) / (2 * d * ar));
+  const halfB = Math.acos((d * d + br * br - ar * ar) / (2 * d * br));
+  const points = [];
+  for (let i = 0; i <= steps; i++) {
+    const a = base + half + ((2 * Math.PI - 2 * half) * i) / steps;
+    points.push([ax + ar * Math.cos(a), ay + ar * Math.sin(a)]);
+  }
+  for (let i = 0; i <= steps; i++) {
+    const a = base + Math.PI + halfB + ((2 * Math.PI - 2 * halfB) * i) / steps;
+    points.push([bx + br * Math.cos(a), by + br * Math.sin(a)]);
+  }
+  return points;
+}
+
+const twin = fusedDiscs(0, 0, 100, 150, 0, 100);
+
+/*
+ * Two texts in the same fused shape must get two different targets, each on its
+ * own side of the waist, with no neighbour box anywhere in the input.
+ */
+const leftTarget = splitAtCusps([twin], textBox(-60, -20, 20, 20), {});
+const rightTarget = splitAtCusps([twin], textBox(130, -20, 210, 20), {});
+assert.ok(leftTarget && rightTarget, "a fused pair of balloons must be cut");
+assert.ok(leftTarget.x < 75, "the left text must be centred in the left balloon");
+assert.ok(rightTarget.x > 75, "and the right text in the right one");
+assert.ok(rightTarget.x - leftTarget.x > 80, "the two targets must be a balloon apart, not the same point");
+
+/*
+ * And the whole shape's centroid, which is what the engine used to answer, sits
+ * in neither balloon: it is the point both texts used to be thrown at.
+ */
+const merged = centroid([twin]);
+assert.ok(Math.abs(merged.x - 75) < 15, "the merged centroid falls in the waist, belonging to neither text");
+
+/*
+ * Idempotency: the typesetter drops the line anywhere inside the balloon and
+ * presses Align, then presses it again. The answer must not move.
+ */
+const dropped = splitAtCusps([twin], textBox(-90, -30, -10, 10), {});
+assert.ok(Math.abs(dropped.x - leftTarget.x) < 0.001 && Math.abs(dropped.y - leftTarget.y) < 0.001,
+  "moving the text inside its own balloon must not move the target");
+const afterAlign = splitAtCusps([twin],
+  textBox(leftTarget.x - 40, leftTarget.y - 20, leftTarget.x + 40, leftTarget.y + 20), {});
+assert.ok(Math.abs(afterAlign.x - leftTarget.x) < 0.001,
+  "pressing Align a second time must land on the same pixel");
+
+/* A single balloon has no waist and must be left exactly as it was. */
+const disc = [];
+for (let i = 0; i < 360; i++) {
+  const a = (i / 360) * Math.PI * 2;
+  disc.push([200 + 150 * Math.cos(a), 200 + 120 * Math.sin(a)]);
+}
+const discReport = {};
+assert.strictEqual(splitAtCusps([disc], textBox(150, 180, 250, 220), discReport), null,
+  "an ordinary balloon must not be cut");
+assert.ok(/^(noCusp|shallow)/.test(discReport.skip), "and must say why: " + discReport.skip);
+
+/*
+ * One concave corner is a bite out of the outline, not two balloons. Cutting on
+ * it would move a text that has nothing wrong with it.
+ */
+const bitten = [];
+for (let i = 0; i < 360; i++) {
+  const a = (i / 360) * Math.PI * 2;
+  const r = Math.abs(a - Math.PI / 2) < 0.25 ? 60 : 150;
+  bitten.push([200 + r * Math.cos(a), 200 + r * Math.sin(a)]);
+}
+assert.strictEqual(splitAtCusps([bitten], textBox(150, 180, 250, 220), {}), null,
+  "a single concave corner is a bite, not a waist");
+
+/*
+ * A cut that leaves almost the whole region on one side has separated nothing.
+ * Two discs of very different sizes: the small one is below the minimum share,
+ * so the region keeps its own centroid.
+ */
+const lopsided = fusedDiscs(0, 0, 200, 210, 0, 40);
+const lopsidedReport = {};
+const lopsidedTarget = splitAtCusps([lopsided], textBox(-60, -20, 20, 20), lopsidedReport);
+assert.ok(lopsidedTarget === null || lopsidedReport.share >= MIN_PIECE_SHARE,
+  "a sliver must never become the answer: " + JSON.stringify(lopsidedReport));
+
+/* The report has to say how much of the region the answer came from. */
+const twinReport = {};
+splitAtCusps([twin], textBox(-60, -20, 20, 20), twinReport);
+assert.ok(twinReport.cuts >= 1 && twinReport.cuts <= MAX_CUTS, "the number of cuts must be reported and bounded");
+assert.ok(twinReport.share > 0 && twinReport.share < 1, "so must the share of the region that was kept");
+
+/* The centre has to land inside the shape it came from. */
+assert.ok(centreInsideOutline([twin], leftTarget), "the cut centre must be inside the region");
+
+/*
+ * Cost. The anchor budget allows 30 000 anchors and Align pays this on every
+ * press, so the whole cut runs on a fixed number of resampled points rather than
+ * on the anchors themselves.
+ */
+const dense = [];
+for (let i = 0; i < 20000; i++) {
+  const a = (i / 20000) * Math.PI * 2;
+  dense.push([500 + 400 * Math.cos(a), 500 + 300 * Math.sin(a)]);
+}
+const denseStart = Date.now();
+splitAtCusps([dense], textBox(400, 450, 600, 550), {});
+const denseCost = Date.now() - denseStart;
+assert.ok(denseCost < 150, "a 20 000 anchor outline must still cut in well under a frame: " + denseCost + " ms");
+
+/* Resampling must not depend on where the tracing dropped its anchors. */
+const sparse = resampleContour([[0, 0], [400, 0], [400, 400], [0, 400]], 200);
+const uneven = resampleContour([[0, 0], [10, 0], [400, 0], [400, 400], [200, 400], [0, 400]], 200);
+assert.ok(Math.abs(sparse.length - uneven.length) <= 2,
+  "the same shape must resample to the same number of points however it was traced");
+const sparseCentre = areaCentroid(sparse);
+assert.ok(Math.abs(sparseCentre.x - 200) < 2 && Math.abs(sparseCentre.y - 200) < 2,
+  "and must still describe the same square");
+
+/* The largest contour is the balloon; the others are its holes. */
+assert.strictEqual(largestContour([[[0, 0], [10, 0], [10, 10], [0, 10]], twin]), twin,
+  "the balloon is the contour with the most area");
+
+/* A chord too close to its own ends leaves no piece to keep. */
+assert.strictEqual(splitContourAtChord(sparse, 10, 12), null,
+  "a chord between neighbouring points cuts nothing");
+
+/* ---------- the outline has to survive, and only where it is free ---------- */
+
+const alignSplitBody = hostSource.match(
+  /function _alignCurrentTextLayerToSelection\(\) \{([\s\S]*?)\n\}/
+);
+assert.ok(alignSplitBody, "the align entry point must exist");
+assert.ok(
+  /if \(outline\) \{[\s\S]*_splitOutlineAtCusps\(/.test(alignSplitBody[1]),
+  "the cut must only be attempted when an outline was actually traced"
+);
+assert.ok(
+  alignSplitBody[1].indexOf("var target = selection.centroid") <
+    alignSplitBody[1].indexOf("_splitOutlineAtCusps(outline, bounds, report)"),
+  "the cut must refine the centroid, never replace the fallback that a single balloon relies on"
+);
+assert.ok(
+  /_centreInsideOutline\(outline, split\)/.test(alignSplitBody[1]),
+  "a cut centre outside the region it came from must be refused"
+);
+assert.ok(
+  /_hostState\.lastOutlineKey === _selectionBoundsKey\(selection\)/.test(alignSplitBody[1]),
+  "the outline must be matched to the selection it came from: Align traces more than once"
+);
+assert.ok(
+  alignSplitBody[1].indexOf("_hostState.lastOutline = null;") < alignSplitBody[1].indexOf("if (outline)"),
+  "and must be dropped before it is used, so nothing keeps it after the call"
+);
+
+/*
+ * The centring path must not read where any other layer is. This is the whole
+ * reason the rule was rewritten: a target that depends on the neighbours moves
+ * every time one of them is aligned, and the typesetter sees the text jump.
+ */
+const forbidden = ["_visibleTextInkBoxes", "_collectTextLayerIds", "_getLayerBoundsById"];
+for (let f = 0; f < forbidden.length; f++) {
+  assert.ok(
+    alignSplitBody[1].indexOf(forbidden[f]) < 0,
+    "the align path must not read the other layers' positions (" + forbidden[f] + ")"
+  );
+}
+const splitBody = hostSource.match(/function _splitOutlineAtCusps\(polygons, activeBox, report\) \{([\s\S]*?)\n\}/);
+assert.ok(splitBody, "the cut must exist");
+assert.ok(
+  splitBody[1].indexOf("app.activeDocument") < 0 && splitBody[1].indexOf("executeAction") < 0,
+  "the cut must be arithmetic on the outline already traced: no Photoshop call"
+);
+
+/*
+ * The probe that finds the balloon samples the merged image with only the layer
+ * being centred hidden, so a neighbouring line dropped across the middle of this
+ * one is what the wand lands on: the fill then runs out into whatever artwork
+ * that glyph touches. It has to be able to try somewhere else.
+ */
+const wandStart = hostSource.indexOf("function _createBalloonWandSelection(");
+assert.ok(wandStart >= 0, "the balloon probe must exist");
+const wandBody = hostSource.slice(wandStart, hostSource.indexOf("\n}", wandStart));
+assert.ok(
+  /var probes = \[[\s\S]*?\]/.test(wandBody),
+  "the probe must have more than one point to try"
+);
+assert.ok(
+  (wandBody.match(/bounds\.(left|top) \+ bounds\.(width|height) \*/g) || []).length >= 8,
+  "and those points must be inside the text's own box, four corners plus the middle"
+);
+assert.ok(
+  wandBody.indexOf("layer.visible = false") >= 0 && wandBody.indexOf("layer.visible = true") >= 0,
+  "the layer being centred is hidden for the probe and put back afterwards"
+);
+
+const pickStart = hostSource.indexOf("function _bestBalloonProbe(");
+assert.ok(pickStart >= 0, "the probe has to be able to say that a point missed");
+const pickBody = hostSource.slice(pickStart, hostSource.indexOf("\n}", pickStart));
+assert.ok(
+  pickBody.indexOf("_regionCoversTooMuchPage(found)") >= 0,
+  "a probe that escaped the balloon must be discarded, not centred on"
+);
+assert.ok(
+  pickBody.indexOf("found.left > bounds.xMid || found.right < bounds.xMid") >= 0,
+  "and so must a region that does not even hold the text it belongs to"
+);
+assert.ok(
+  pickBody.indexOf("if (p === 0) break;") >= 0,
+  "a page with nothing lying over the line must still cost exactly one wand"
+);
+
+/*
+ * The bite the lines lying over this one take out of the balloon is taken out of
+ * the region too: they are hidden and the balloon is filled again. That fill is
+ * only ever a candidate — where two balloons touch, the neighbours' ink is the
+ * only thing narrowing the gap between them, and without it the fill takes both.
+ */
+assert.ok(
+  wandBody.indexOf("_collectOverlappingTextLayerIds(") >= 0 &&
+    wandBody.indexOf("_setLayerVisibilityByIds(textIds, false)") >= 0,
+  "the lines lying over this one must be taken out of the page before the second fill"
+);
+assert.ok(
+  wandBody.indexOf("_hostState.cleanCandidate = {") > 0,
+  "and what that fill found is handed on as a candidate, not used on the spot"
+);
+assert.ok(
+  /finally \{[\s\S]*_setLayerVisibilityByIds\(textIds, true\)/.test(wandBody),
+  "a throw between the hide and the show would leave those lines invisible"
+);
+assert.ok(
+  wandBody.lastIndexOf("_wandAt(") > wandBody.indexOf("_setLayerVisibilityByIds(textIds, true)"),
+  "the region the caller reads is filled again after the page is whole"
+);
+assert.ok(
+  wandBody.indexOf("outline: _hostState.lastOutline") >= 0,
+  "the outline traced with it travels with it, or the cut runs on a region that was thrown away"
+);
+
+/*
+ * The choice is made in Align, where the region the page really has has just been
+ * opened and its centre is already paid for. Deciding inside the probe meant
+ * opening twice and measured 20,3% over the engine it replaced, against a
+ * ceiling of 15%.
+ */
+assert.ok(
+  alignBody.indexOf("candidate.away < plainAway") >= 0,
+  "whichever centre sits closer to the line being centred is the balloon it is in"
+);
+assert.ok(
+  alignBody.indexOf("_hostState.cleanCandidate = null;") <
+    alignBody.indexOf("var candidate = _hostState.cleanCandidate;"),
+  "a candidate left over from the call before must never decide this one"
+);
+assert.ok(
+  alignBody.indexOf("_hostState.lastOutlineKey = candidate.outlineKey") >= 0,
+  "and taking the candidate takes its outline with it"
+);
+assert.ok(
+  hostSource.indexOf("_getAdaptiveOpenedSelectionBounds", hostSource.indexOf("_setLayerVisibilityByIds(textIds, false)")) <
+    hostSource.indexOf("_setLayerVisibilityByIds(textIds, true)"),
+  "the candidate has to be opened while the page is still clean"
+);
+
+const idsStart = hostSource.indexOf("function _collectOverlappingTextLayerIds(");
+assert.ok(idsStart >= 0, "finding the lines that lie over this one must exist");
+const idsBody = hostSource.slice(idsStart, hostSource.indexOf("\n}", idsStart));
+assert.ok(
+  idsBody.indexOf("_boxOverlapShare(other, box) >= _PROBE_OVERLAP_SHARE") >= 0,
+  "only the lines that cover a real part of this one, never the whole page"
+);
+assert.ok(
+  idsBody.indexOf("container.layers") < 0 && idsBody.indexOf("_getLayerByIndex(") >= 0,
+  "walked through the Action Manager: the DOM walk ran on every Align and cost about 100 s over the reference pages"
+);
+
+/*
+ * Every helper the probe leans on has to be there. Rewriting the layer walk once
+ * deleted this one along with the block it replaced: the clean pass threw on
+ * every call for three whole measurement runs, and the numbers looked like a
+ * clean bill of health because the engine had quietly stopped doing the work.
+ */
+for (const helper of ["_distanceFromCentroid", "_boxOverlapShare", "_collectOverlappingTextLayerIds", "_bestBalloonProbe"]) {
+  assert.ok(
+    hostSource.indexOf("function " + helper + "(") >= 0,
+    helper + " must exist: the probe calls it and a throw there is silent"
+  );
+}
+assert.ok(
+  wandBody.indexOf("_hostState.probe.threw") >= 0,
+  "and a throw in the clean pass has to be recorded, or it reads as a balloon that needed no cleaning"
+);
+
+const shareStart = hostSource.indexOf("function _boxOverlapShare(");
+assert.ok(shareStart >= 0, "measuring how far two lines cover each other must exist");
+const shareBody = hostSource.slice(shareStart, hostSource.indexOf("\n}", shareStart));
+assert.ok(
+  shareBody.indexOf("Math.min(mine") >= 0,
+  "measured against the smaller box: a short line dropped across a long one covers 3% of it and all of itself"
+);
+
 console.log("balloon centroid tests passed");

@@ -159,6 +159,73 @@ var _MAX_BALLOON_PAGE_SHARE = 0.25;
 // still yields a centroid 10 px from where the typesetter put the text.
 var _MAX_BALLOON_PATH_ANCHORS = 30000;
 
+// How sharp a concave corner has to be, in radians of turn, before it counts as
+// the place two balloons were drawn over each other.
+//
+// Two overlapping convex shapes always meet at exactly two of these cusps, and
+// the chord between them is the line the artist would have drawn if the balloons
+// had been closed separately. That is the whole rule: nothing here reads where
+// the other text layers are, so pressing Align twice lands on the same pixel and
+// a page whose lines have merely been dumped inside their balloons measures the
+// same as a page already typeset.
+//
+// Swept over the 93 reference layers on the page the host really sees — every
+// other text painted, the active one hidden, the region opened: below 0.45 the
+// cut starts firing on single balloons (2 of 55 at 0.2), and above 0.9 it stops
+// finding four of the real ones. Between them the numbers are flat, so the
+// middle of the plateau is the value.
+var _CUSP_CONCAVITY = 0.6;
+
+// How much two lines have to cover each other before the balloon is worth probing
+// again with the other one hidden.
+//
+// Refilling the balloon costs an opening, and the opening is the expensive half
+// of the path. Two lines whose boxes merely graze each other take no bite worth
+// the price: measured over the reference pages, the check accepted the clean
+// region in 1 of the 10 layers that had any overlap at all and paid for the other
+// nine. What the typesetter actually creates — a line dropped across another —
+// covers most of the box, and that is what this keeps.
+var _PROBE_OVERLAP_SHARE = 0.25;
+
+
+
+// A cut that leaves almost everything on one side did not separate anything: it
+// shaved a bump off. Measured, widening this window past 0.15 buys no accuracy
+// and starts cutting single balloons.
+var _CUSP_MIN_PIECE_SHARE = 0.15;
+
+// Up to three cuts per region: a region of four balloons needs three chords to
+// leave one balloon on its own.
+//
+// The number is measured, not assumed. On the region the engine really sees —
+// every other line painted, the active one hidden, the opening applied — over
+// 275 samples of single-text regions and 60 of four-text ones, going from one
+// chord to three takes the median |dX| of the four-balloon regions from 34 px to
+// 14 px and touches nothing else: single balloons stay at 2/11 px and are still
+// cut zero times, and two-balloon regions do not move at all. A fourth and a
+// fifth chord change nothing, because by then there is nothing left to separate.
+//
+// Cutting more than once was tried before with the chord taken between the two
+// *deepest* cusps, and measured badly: that chord does not have to separate the
+// balloons two and two, so the second one slices through a balloon instead of
+// between two, and every four-balloon case where it took a real bite came out
+// worse than not cutting at all. The narrowest-waist rule below is what makes
+// the extra cuts safe.
+var _CUSP_MAX_CUTS = 3;
+
+// The traced contour is resampled to this many evenly spaced points before the
+// turn angles are measured, so the answer does not depend on where `Make Work
+// Path` happened to drop its anchors, and the turn is measured across a span of
+// a 24th of the contour: short enough to be a corner, long enough to ignore the
+// jitter the tracing leaves behind.
+var _CUSP_CONTOUR_POINTS = 400;
+var _CUSP_SPAN_DIVISOR = 24;
+
+// The two cusps have to be on opposite sides of the shape. Anything closer along
+// the contour is one corner measured twice.
+var _CUSP_MIN_GAP = 0.20;
+
+
 // Bubble detection and outline sampling fire dozens of selection, channel
 // and modify operations, and Photoshop records every one of them as a
 // history state: on a full-resolution page each state holds a snapshot, so
@@ -975,6 +1042,114 @@ function _createMagicWandSelection(tolerance) {
  * whenever the text nearly filled the balloon, because the probe landed outside
  * and the fill grabbed the panel instead.
  */
+/*
+ * Which of these points lands in the balloon. Returns its index, or -1 when none
+ * of them does.
+ */
+function _bestBalloonProbe(probes, bounds, tolerance) {
+  var best = { probe: -1, area: 0 };
+  for (var p = 0; p < probes.length; p++) {
+    var found = null;
+    try {
+      _wandAt(Math.round(probes[p][0]), Math.round(probes[p][1]), tolerance);
+      found = _getCurrentSelectionBounds() || null;
+    } catch (probeError) {
+      found = null;
+    }
+    if (!found || found.width * found.height < 200) continue;
+    if (_regionCoversTooMuchPage(found)) continue;
+    var area = found.width * found.height;
+    // The balloon holds the text it belongs to. A glyph the fill mistook for a
+    // region does not, and neither does a strip of panel beside the balloon.
+    if (found.left > bounds.xMid || found.right < bounds.xMid) continue;
+    if (found.top > bounds.yMid || found.bottom < bounds.yMid) continue;
+    if (area > best.area) {
+      best.area = area;
+      best.probe = p;
+    }
+    // The middle of the text box is the probe that has always been used, and on
+    // a page with nothing lying over this line it already found the balloon.
+    // Stopping here keeps that page at exactly one wand.
+    if (p === 0) break;
+  }
+  return best;
+}
+
+/*
+ * How far a region's centre sits from the line being centred. -1 when there is
+ * no centre to measure.
+ */
+function _distanceFromCentroid(region, bounds) {
+  if (!region) return -1;
+  var centre = region.centroid || { x: region.xMid, y: region.yMid };
+  if (!isFinite(centre.x) || !isFinite(centre.y)) return -1;
+  var dx = centre.x - bounds.xMid;
+  var dy = centre.y - bounds.yMid;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+/*
+ * How much two boxes cover each other, as a fraction of the one they cover most.
+ *
+ * Of the smaller one, in practice. A short line dropped across a long one covers
+ * only a few per cent of it — 3% measured on 0029 — while the long one covers
+ * almost all of the short one, and the bite it takes out of the balloon is just
+ * as bad either way round.
+ */
+function _boxOverlapShare(other, box) {
+  var width = Math.min(other.right, box.right) - Math.max(other.left, box.left);
+  var height = Math.min(other.bottom, box.bottom) - Math.max(other.top, box.top);
+  if (width <= 0 || height <= 0) return 0;
+  var overlap = width * height;
+  var mine = box.width * box.height;
+  var theirs = other.width * other.height;
+  var smallest = Math.min(mine > 0 ? mine : theirs, theirs > 0 ? theirs : mine);
+  return smallest > 0 ? overlap / smallest : 0;
+}
+
+/*
+ * The visible text layers lying across `box`, by id.
+ *
+ * Walked through the Action Manager rather than the DOM, and reading one
+ * descriptor per layer instead of one round trip per property. The DOM version
+ * of this — `container.layers`, `.typename`, `.kind`, `.visible`, then the
+ * bounds — ran on every Align whether or not anything overlapped, and measured
+ * about 100 s across the 14 reference pages: more than the balloon refill it was
+ * there to decide, which fires on two layers in ninety-eight.
+ */
+function _collectOverlappingTextLayerIds(box, ids, limit) {
+  var numberOfLayers = stringIDToTypeID("numberOfLayers");
+  var layerSection = stringIDToTypeID("layerSection");
+  var layerSectionStart = stringIDToTypeID("layerSectionStart");
+  var layerSectionEnd = stringIDToTypeID("layerSectionEnd");
+  var boundsId = stringIDToTypeID("bounds");
+  var index = _getCurrent(charID.Document, numberOfLayers).getInteger(numberOfLayers);
+  var stopIndex = _documentHasBackgroundLayer() ? 0 : 1;
+  var parentVisibility = [];
+
+  while (index > stopIndex && ids.length < limit) {
+    var layer = _getLayerByIndex(index);
+    var section = layer.getEnumerationValue(layerSection);
+    if (section === layerSectionStart) {
+      parentVisibility.push(layer.getBoolean(charID.Visible));
+    } else if (section === layerSectionEnd) {
+      parentVisibility.pop();
+    } else if (layer.hasKey(charID.Text) && layer.getBoolean(charID.Visible)) {
+      var parentsVisible = true;
+      for (var i = 0; i < parentVisibility.length; i++) {
+        parentsVisible = parentsVisible && parentVisibility[i];
+      }
+      if (parentsVisible && layer.hasKey(boundsId)) {
+        var other = _getBoundsFromDescriptor(layer.getObjectValue(boundsId));
+        if (_boxOverlapShare(other, box) >= _PROBE_OVERLAP_SHARE) {
+          ids.push(layer.getInteger(charID.LayerID));
+        }
+      }
+    }
+    index--;
+  }
+}
+
 function _createBalloonWandSelection(tolerance) {
   var layer = null;
   var wasVisible = true;
@@ -985,6 +1160,37 @@ function _createBalloonWandSelection(tolerance) {
     return;
   }
   if (!bounds) return;
+
+  // Probe the balloon from several points inside the text box, not only its
+  // middle.
+  //
+  // The wand samples the merged image, and only the layer being centred is
+  // hidden. A neighbouring line dropped across the middle of this one — which is
+  // what the typesetter has after throwing the lines roughly into place — is
+  // still painted there, so the probe lands on a glyph, the fill runs out into
+  // whatever artwork that glyph touches, and the text ends up nowhere near the
+  // balloon.
+  //
+  // Hiding every text layer instead was measured and is much worse: where two
+  // balloons touch, the neighbours' ink is what stops the wand crossing from one
+  // into the other, and without it the region becomes both balloons at once —
+  // the 95th percentile of |dX| in the shared regions went from 70 px to 207 px,
+  // with whole lines landing in the wrong balloon. Hiding only the lines that
+  // overlap this one has the same failure in miniature, and it makes the answer
+  // move when the neighbours move, which is exactly what the geometry rewrite
+  // was for.
+  //
+  // Extra probes cost nothing: the page is composed once, and each retry is one
+  // more wand on the image already in memory. On a page where nothing overlaps,
+  // every probe finds the same balloon and the result is what it always was.
+  var probes = [
+    [bounds.xMid, bounds.yMid],
+    [bounds.left + bounds.width * 0.25, bounds.top + bounds.height * 0.25],
+    [bounds.left + bounds.width * 0.75, bounds.top + bounds.height * 0.25],
+    [bounds.left + bounds.width * 0.25, bounds.top + bounds.height * 0.75],
+    [bounds.left + bounds.width * 0.75, bounds.top + bounds.height * 0.75]
+  ];
+
   try {
     layer = app.activeDocument.activeLayer;
     wasVisible = layer.visible;
@@ -994,9 +1200,95 @@ function _createBalloonWandSelection(tolerance) {
   try {
     if (layer && wasVisible) layer.visible = false;
   } catch (hideError) {}
+
+  // Why the probe ended up where it did, and whether the bite had to be given
+  // back. Without it a balloon the first point found looks the same as one that
+  // needed repairing.
+  _hostState.probe = { chosen: -1, hidden: 0, cleaned: false, refused: false };
+  _hostState.cleanCandidate = null;
+
+  var found = _bestBalloonProbe(probes, bounds, tolerance);
+  _hostState.probe.chosen = found.probe;
+
+  // The caller reads the live selection, so the chosen point has to be the last
+  // one probed. With no winner at all the middle is probed again, which is
+  // exactly the selection this used to hand back.
+  var last = found.probe >= 0 ? found.probe : 0;
   try {
-    _wandAt(Math.round(bounds.xMid), Math.round(bounds.yMid), tolerance);
-  } catch (wandError) {}
+    if (last !== probes.length - 1) {
+      _wandAt(Math.round(probes[last][0]), Math.round(probes[last][1]), tolerance);
+    }
+  } catch (reselectError) {}
+
+  // Take the bite out of the region that the lines lying over this one left in it.
+  //
+  // The wand samples the merged image with only this layer hidden, so every other
+  // line is painted: where their ink crosses the balloon it is missing from the
+  // region, and the centre of what is left is not the centre of the balloon.
+  // Measured on the reference pages with one neighbour dropped over the middle of
+  // each line, that bite moved the answer 174 px, 188 px and 411 px on three of
+  // the six lines of 0029 and 237 px, 356 px and 501 px on 11, while the same
+  // pages centre every line inside 25 px with nothing lying over them.
+  //
+  // Hiding those lines and flooding the balloon again is what fixes it. Adding
+  // their ink back to the region instead was measured twice and is worse both
+  // ways: a whole line's ink pulls the region towards the balloon that line is
+  // really in (the median error of the shared regions went from 13 px to 29 px),
+  // and cutting it to this line's own box gives back too little.
+  //
+  // The balloon found this way is only a candidate: it is opened here, and the
+  // caller decides between it and the one the page really has. The caller is
+  // where the dirty region gets opened anyway, so comparing there costs one
+  // opening instead of two — measured, doing both here put the page 20,3% over
+  // the engine it replaced, against a ceiling of 15%.
+  var textIds = [];
+  try {
+    _collectOverlappingTextLayerIds(bounds, textIds, 80);
+  } catch (collectError) {
+    textIds = [];
+  }
+
+  _hostState.probe.hidden = textIds.length;
+  if (!textIds.length) {
+    try {
+      if (layer && wasVisible) layer.visible = true;
+    } catch (showNoneError) {}
+    return;
+  }
+
+  try {
+    _setLayerVisibilityByIds(textIds, false);
+    var clean = _bestBalloonProbe(probes, bounds, tolerance);
+    if (clean.probe >= 0) {
+      var cleanOpened = _getAdaptiveOpenedSelectionBounds(_getCurrentSelectionBounds());
+      if (cleanOpened && cleanOpened.centroid) {
+        _hostState.cleanCandidate = {
+          region: cleanOpened,
+          away: _distanceFromCentroid(cleanOpened, bounds),
+          probe: clean.probe,
+          // The outline traced during that opening, which the cut needs and
+          // which the caller's own opening is about to overwrite.
+          outline: _hostState.lastOutline,
+          outlineKey: _hostState.lastOutlineKey
+        };
+        _hostState.probe.chosen = clean.probe;
+      }
+    }
+  } catch (cleanError) {
+    _hostState.probe.threw = String(cleanError && cleanError.message ? cleanError.message : cleanError);
+    _hostState.cleanCandidate = null;
+  } finally {
+    // A throw between the two would leave those lines invisible, which reads as
+    // the plugin having deleted the typesetter's work.
+    try { _setLayerVisibilityByIds(textIds, true); } catch (showAllError) {}
+  }
+
+  // The opening left the selection opened rather than filled, and the caller
+  // reads the live selection, so the region has to be taken again.
+  try {
+    _wandAt(Math.round(probes[last][0]), Math.round(probes[last][1]), tolerance);
+  } catch (restoreError) {}
+
   try {
     if (layer && wasVisible) layer.visible = true;
   } catch (showError) {}
@@ -1929,6 +2221,10 @@ function _alignCurrentTextLayerToSelection() {
     return "layer";
   }
 
+  // Only the probe below leaves one, and it never runs when the typesetter is
+  // holding a marquee. Left over from the call before, it would decide this one.
+  _hostState.cleanCandidate = null;
+
   var selection = _checkSelection({ adaptiveOpen: true });
   if (selection.error) {
     if (selection.error === "noSelection") {
@@ -1947,6 +2243,41 @@ function _alignCurrentTextLayerToSelection() {
     }
     if (selection.error) {
       return selection.error;
+    }
+  }
+
+  // Between the balloon as the page has it and the balloon with the lines lying
+  // over this one taken away, whichever centre sits closer to the line being
+  // centred is the one this line is in.
+  //
+  // Giving a bite back always pulls the centre towards the text, because the bite
+  // is where the text is. Running into the balloon next door pushes it away, into
+  // a balloon this line is not in — and that is the whole risk of taking the ink
+  // away, because where two balloons touch the neighbours' ink is the only thing
+  // narrowing the gap between them, and it is that narrowing the opening relies on
+  // to tell them apart. Comparing sizes cannot see it: the two regions share a
+  // bounding box to the pixel, before and after the opening alike, while the
+  // answer moves 590 px.
+  //
+  // This is the cheap place to decide it. The region above has just been opened,
+  // so its centre is already paid for.
+  var candidate = _hostState.cleanCandidate;
+  _hostState.cleanCandidate = null;
+  if (candidate && !selection.error) {
+    var here = null;
+    try { here = _getCurrentTextLayerBounds(); } catch (hereError) { here = null; }
+    var plainAway = here ? _distanceFromCentroid(selection, here) : -1;
+    var takeIt = candidate.away >= 0 && (plainAway < 0 || candidate.away < plainAway);
+    _hostState.probe.before = Math.round(plainAway);
+    _hostState.probe.after = Math.round(candidate.away);
+    _hostState.probe.cleaned = !!takeIt;
+    _hostState.probe.refused = !takeIt;
+    if (takeIt) {
+      selection = candidate.region;
+      // The outline that came with it, or the cut would run on the outline of a
+      // region that was thrown away.
+      _hostState.lastOutline = candidate.outline;
+      _hostState.lastOutlineKey = candidate.outlineKey;
     }
   }
 
@@ -1975,6 +2306,53 @@ function _alignCurrentTextLayerToSelection() {
   // The balloon's area centroid, traced when the selection was opened. A shape
   // layer bubble has no live selection, so it keeps the bounding-box centre.
   var target = selection.centroid || null;
+
+  // When two balloons were drawn over each other the region's centroid is the
+  // centre of the merged shape and belongs to neither. Cut it at the corners
+  // where the two outlines meet and centre on the piece this layer sits in.
+  // Everything here falls back to the centroid above, so a balloon with nothing
+  // to cut follows exactly the path it followed before.
+  // Why a cut did or did not happen. Cheap to keep, and without it a case that
+  // silently kept the old target looks identical to one the cut never saw.
+  _hostState.partition = { skip: "noOutline", cuts: 0, share: 0, concavity: "", used: false };
+  // The outline belongs to the last region that was traced. It is only this
+  // selection's outline when the key matches: `_checkSelection` runs again on the
+  // `noSelection` retry and again after a leaked region is narrowed, and the
+  // wrong outline would split the wrong shape.
+  var outline = (_hostState.lastOutline && _hostState.lastOutlineKey === _selectionBoundsKey(selection))
+    ? _hostState.lastOutline
+    : null;
+  _hostState.lastOutline = null;
+  _hostState.lastOutlineKey = "";
+  if (outline) {
+    try {
+      var report = _hostState.partition;
+      var split = _splitOutlineAtCusps(outline, bounds, report);
+      if (split && isFinite(split.x) && isFinite(split.y)) {
+        if (_centreInsideOutline(outline, split)) {
+          target = split;
+          report.used = true;
+        } else {
+          report.skip = "outsideOutline";
+        }
+      }
+    } catch (splitError) {
+      _hostState.partition.skip = "threw:" + (splitError && splitError.message ? splitError.message : String(splitError));
+    }
+  }
+
+  // The region the engine actually settled on, and where it decided to put the
+  // text. The lab can reproduce the probes but not this, and without it a case
+  // that landed in the wrong balloon looks the same as one that got the centre
+  // of the right balloon wrong.
+  _hostState.lastAlignRegion = {
+    left: selection.left,
+    top: selection.top,
+    width: selection.width,
+    height: selection.height,
+    targetX: target ? target.x : selection.xMid,
+    targetY: target ? target.y : selection.yMid
+  };
 
   _deselect();
   _positionLayerWithinSelection(selection, bounds, state.phantomOffsetX, target);
@@ -3017,6 +3395,326 @@ function _pointInPolygon(x, y, poly) {
 }
 
 /*
+ * Even-odd test of a point against every contour at once: inside an odd number
+ * of them means inside the region, so a point that fell in a balloon's hole is
+ * rejected. A cell centroid can land outside its own cell when the cell is a
+ * horseshoe, and moving the text there would be worse than not splitting at all.
+ */
+function _centreInsideOutline(polygons, point) {
+  var inside = false;
+  for (var p = 0; p < polygons.length; p++) {
+    if (polygons[p].length >= 3 && _pointInPolygon(point.x, point.y, polygons[p])) inside = !inside;
+  }
+  return inside;
+}
+
+/*
+ * Split a traced region where two balloons were drawn over each other, and give
+ * back the centre of the piece the active layer sits in.
+ *
+ * Why this exists: `_polygonCentroid` above answers with the centroid of the
+ * largest contour, so in a region that merges two balloons every text gets the
+ * same target. Measured on the reference pages, a region holding one text is off
+ * by 2/4 px at the median while a region holding two is off by 54/46 px and one
+ * holding four by 104/17 px, out to 346 px.
+ *
+ * How it splits. Two overlapping convex shapes meet at exactly two cusps — the
+ * points where one outline dives inside the other — and the chord between them
+ * is the line that closes each balloon on its own. Finding those two corners is
+ * all the geometry needed, and the corners survive the opening: opening rounds
+ * convex corners, not concave ones.
+ *
+ * What it deliberately does not read: the other text layers. An earlier version
+ * seeded the split with their ink boxes, which measured well on pages that were
+ * already typeset and badly on the pages this plugin is for, where the lines have
+ * just been dumped inside their balloons. Worse, it moved the answer every time
+ * the button was pressed, because the neighbours had moved. Geometry alone is the
+ * same answer twice.
+ *
+ * Its ceiling, measured: of the 38 layers that share a region on the reference
+ * pages, 26 sit in a shape with a cusp pair and 12 do not — two balloons drawn as
+ * one blob, or two panels fused into a rectangle, have nothing to find. Those
+ * keep the whole region's centroid, which is what they had before.
+ *
+ * Everything here is arithmetic on the outline that was already traced: no
+ * Photoshop call, no second work path, and the user's selection is never touched.
+ */
+function _splitOutlineAtCusps(polygons, activeBox, report) {
+  if (report) { report.skip = ""; report.cuts = 0; report.share = 0; report.concavity = ""; }
+  if (!polygons || !polygons.length || !activeBox) {
+    if (report) report.skip = "noOutline";
+    return null;
+  }
+
+  var contour = _largestContour(polygons);
+  if (!contour) {
+    if (report) report.skip = "noContour";
+    return null;
+  }
+  var points = _resampleContour(contour, _CUSP_CONTOUR_POINTS);
+  if (!points || points.length < _CUSP_SPAN_DIVISOR) {
+    if (report) report.skip = "shortContour";
+    return null;
+  }
+
+  var cx = (activeBox.left + activeBox.right) / 2;
+  var cy = (activeBox.top + activeBox.bottom) / 2;
+  var cuts = 0;
+  var share = 1;
+
+  for (var pass = 0; pass < _CUSP_MAX_CUTS; pass++) {
+    var pair = _findCuspPair(points);
+    if (!pair) {
+      if (report && !cuts) report.skip = "noCusp";
+      break;
+    }
+    if (report) {
+      report.concavity += (report.concavity ? " " : "") +
+        Math.round(pair.first * 100) + "/" + Math.round(pair.second * 100);
+    }
+    if (pair.a < 0) {
+      if (report && !cuts) report.skip = "shallow:" + Math.round(pair.first * 100);
+      break;
+    }
+    var pieces = _splitContourAtChord(points, pair.a, pair.b);
+    if (!pieces) {
+      if (report && !cuts) report.skip = "noPiece";
+      break;
+    }
+    // Which side of the chord the text is on. The side test rather than a
+    // point-in-polygon test on purpose: the ink box can sit outside the opened
+    // region, and a text with nowhere to be still has to be given a side.
+    var chosen = _pieceOnSideOf(pieces, points[pair.a], points[pair.b], cx, cy);
+    if (!chosen) {
+      if (report && !cuts) report.skip = "noSide";
+      break;
+    }
+    if (chosen.share < _CUSP_MIN_PIECE_SHARE || chosen.share > 1 - _CUSP_MIN_PIECE_SHARE) {
+      if (report && !cuts) report.skip = "share:" + Math.round(chosen.share * 100);
+      break;
+    }
+    points = chosen.points;
+    share = share * chosen.share;
+    cuts++;
+  }
+
+  if (!cuts) return null;
+  if (report) { report.cuts = cuts; report.share = share; }
+  // Each cut is allowed to keep a sixth of what it was given, so two of them can
+  // legally end up holding a fortieth of the region. Measured on the reference
+  // pages, that is exactly what went wrong in the two four-balloon regions that
+  // got worse: the second cut sliced a sliver off the first piece and the text
+  // was centred on it. A piece that small is not a balloon.
+  if (share < _CUSP_MIN_PIECE_SHARE) {
+    if (report) report.skip = "thinPiece:" + Math.round(share * 100);
+    return null;
+  }
+  var centre = _polygonAreaCentroid(points);
+  if (!centre) {
+    if (report) report.skip = "noCentroid";
+    return null;
+  }
+  return centre;
+}
+
+/* The balloon is the contour with the most area; the rest are holes and specks. */
+function _largestContour(polygons) {
+  var best = null;
+  var bestArea = 0;
+  for (var p = 0; p < polygons.length; p++) {
+    if (polygons[p].length < 3) continue;
+    var area = Math.abs(_polygonSignedArea(polygons[p]));
+    if (area > bestArea) { bestArea = area; best = polygons[p]; }
+  }
+  return best;
+}
+
+function _polygonSignedArea(poly) {
+  var twice = 0;
+  for (var i = 0; i < poly.length; i++) {
+    var a = poly[i];
+    var b = poly[(i + 1) % poly.length];
+    twice += a[0] * b[1] - b[0] * a[1];
+  }
+  return twice / 2;
+}
+
+function _polygonAreaCentroid(poly) {
+  var twiceArea = 0;
+  var px = 0;
+  var py = 0;
+  for (var i = 0; i < poly.length; i++) {
+    var a = poly[i];
+    var b = poly[(i + 1) % poly.length];
+    var cross = a[0] * b[1] - b[0] * a[1];
+    twiceArea += cross;
+    px += (a[0] + b[0]) * cross;
+    py += (a[1] + b[1]) * cross;
+  }
+  if (twiceArea === 0) return null;
+  return { x: px / (3 * twiceArea), y: py / (3 * twiceArea) };
+}
+
+/*
+ * The contour walked at a constant step, so a turn angle means the same thing
+ * everywhere on it. `Make Work Path` drops anchors where the curve needs them —
+ * dense on a corner, sparse on a straight run — and measuring a turn across a
+ * fixed number of anchors would then measure a different length of outline at
+ * every point, which is exactly the wrong instrument for finding corners.
+ */
+function _resampleContour(poly, count) {
+  var perimeter = 0;
+  var i;
+  for (i = 0; i < poly.length; i++) {
+    var a = poly[i];
+    var b = poly[(i + 1) % poly.length];
+    perimeter += Math.sqrt((b[0] - a[0]) * (b[0] - a[0]) + (b[1] - a[1]) * (b[1] - a[1]));
+  }
+  if (!(perimeter > 0)) return null;
+
+  var step = perimeter / count;
+  var out = [];
+  var carry = 0;
+  for (i = 0; i < poly.length; i++) {
+    var from = poly[i];
+    var to = poly[(i + 1) % poly.length];
+    var dx = to[0] - from[0];
+    var dy = to[1] - from[1];
+    var length = Math.sqrt(dx * dx + dy * dy);
+    if (length <= 0) continue;
+    var travelled = carry;
+    while (travelled < length) {
+      var f = travelled / length;
+      out[out.length] = [from[0] + dx * f, from[1] + dy * f];
+      travelled += step;
+    }
+    carry = travelled - length;
+  }
+  return out.length >= 3 ? out : null;
+}
+
+/*
+ * The narrowest waist of the contour: the shortest line between two strong
+ * concave corners that sit on opposite sides of the shape.
+ *
+ * Narrowest, not deepest. In a region holding four balloons the two deepest
+ * corners can belong to two different junctions, and the chord between them then
+ * slices through a balloon instead of between two. Measured over the reference
+ * pages, taking the shortest chord instead cuts the vertical error of the
+ * four-balloon regions from 14/91 px to 6/22 px and stops the cut firing on
+ * single balloons at all.
+ *
+ * `first` and `second` are how far each corner turns back into the shape, in
+ * radians, kept for the report.
+ */
+function _findCuspPair(points) {
+  var n = points.length;
+  var span = Math.max(2, Math.round(n / _CUSP_SPAN_DIVISOR));
+  if (n < span * 4) return null;
+
+  var turn = [];
+  var total = 0;
+  var i;
+  for (i = 0; i < n; i++) {
+    var back = points[(i - span + n + n) % n];
+    var here = points[i];
+    var ahead = points[(i + span) % n];
+    var ux = here[0] - back[0];
+    var uy = here[1] - back[1];
+    var vx = ahead[0] - here[0];
+    var vy = ahead[1] - here[1];
+    turn[i] = Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+    total += turn[i];
+  }
+  // A closed contour turns a full circle one way or the other; whichever way it
+  // went, the convex corners carry that sign and the concave ones oppose it.
+  var winding = total >= 0 ? 1 : -1;
+  var concavity = [];
+  for (i = 0; i < n; i++) concavity[i] = -winding * turn[i];
+
+  // One representative per corner: the top of it. Without this, every sample
+  // along a single corner is its own candidate and the shortest chord is the one
+  // that joins a corner to itself.
+  var corners = [];
+  var deepest = 0;
+  for (i = 0; i < n; i++) {
+    if (concavity[i] > concavity[deepest]) deepest = i;
+    if (concavity[i] < _CUSP_CONCAVITY) continue;
+    var top = true;
+    for (var k = -span; k <= span; k++) {
+      if (concavity[(i + k + n + n) % n] > concavity[i]) { top = false; break; }
+    }
+    if (top) corners[corners.length] = i;
+  }
+  if (corners.length < 2) {
+    return { a: -1, b: -1, first: concavity[deepest], second: 0 };
+  }
+
+  var best = null;
+  for (var a = 0; a < corners.length; a++) {
+    for (var b = a + 1; b < corners.length; b++) {
+      var gap = Math.abs(corners[a] - corners[b]);
+      if (gap > n / 2) gap = n - gap;
+      if (gap < n * _CUSP_MIN_GAP) continue;
+      var dx = points[corners[a]][0] - points[corners[b]][0];
+      var dy = points[corners[a]][1] - points[corners[b]][1];
+      var length = Math.sqrt(dx * dx + dy * dy);
+      if (!best || length < best.length) {
+        best = {
+          length: length,
+          a: corners[a],
+          b: corners[b],
+          first: concavity[corners[a]],
+          second: concavity[corners[b]]
+        };
+      }
+    }
+  }
+  if (!best) return { a: -1, b: -1, first: concavity[deepest], second: 0 };
+  return best;
+}
+
+/*
+ * Cut the contour along the chord between two of its own points. Both ends are
+ * already vertices, so each piece is simply one of the two arcs closed by the
+ * chord — no clipping, no intersections to find.
+ */
+function _splitContourAtChord(points, a, b) {
+  var from = Math.min(a, b);
+  var to = Math.max(a, b);
+  if (to - from < 3) return null;
+  if (points.length - (to - from) < 3) return null;
+
+  var inner = [];
+  var outer = [];
+  var i;
+  for (i = from; i <= to; i++) inner[inner.length] = points[i];
+  for (i = to; i < points.length; i++) outer[outer.length] = points[i];
+  for (i = 0; i <= from; i++) outer[outer.length] = points[i];
+  return [inner, outer];
+}
+
+function _pieceOnSideOf(pieces, a, b, x, y) {
+  var ux = b[0] - a[0];
+  var uy = b[1] - a[1];
+  var wanted = (x - a[0]) * uy - (y - a[1]) * ux;
+  var areas = [Math.abs(_polygonSignedArea(pieces[0])), Math.abs(_polygonSignedArea(pieces[1]))];
+  var total = areas[0] + areas[1];
+  if (!(total > 0)) return null;
+
+  var best = null;
+  for (var p = 0; p < pieces.length; p++) {
+    var centre = _polygonAreaCentroid(pieces[p]);
+    if (!centre) continue;
+    var side = (centre.x - a[0]) * uy - (centre.y - a[1]) * ux;
+    // The text sits on one side of the chord; so does each piece's centre.
+    var matches = (wanted >= 0) === (side >= 0);
+    if (matches && !best) best = { points: pieces[p], share: areas[p] / total };
+  }
+  return best;
+}
+
+/*
  * Area centroid of the balloon whose opened selection is live right now, in
  * document pixels, or null when the outline cannot be trusted.
  *
@@ -3035,6 +3733,8 @@ function _openedSelectionCentroid(doc, openedBounds) {
   // Why a centroid was not produced. Cheap to keep and it took three rounds of
   // guessing to find the last cause without it.
   _hostState.centroidSkip = "";
+  _hostState.lastOutline = null;
+  _hostState.lastOutlineKey = "";
   if (!doc || !openedBounds || !(openedBounds.width > 0) || !(openedBounds.height > 0)) { _hostState.centroidSkip = "noBounds"; return null; }
   // Never clobber a work path the user is keeping around
   if (_findWorkPath(doc)) { _hostState.centroidSkip = "userWorkPath"; return null; }
@@ -3088,6 +3788,20 @@ function _openedSelectionCentroid(doc, openedBounds) {
       } else {
         centroid = _polygonCentroid(polygons);
         if (!centroid) _hostState.centroidSkip = "degenerateOutline";
+        // The contours are kept for the caller: a region that merges two
+        // balloons has to be split between the texts that share it, and this is
+        // the only moment the outline exists. Costs nothing — the polygons are
+        // already here and were about to be thrown away.
+        //
+        // They are parked here rather than hung on the bounds object, and only
+        // one is ever kept. A bounds object outlives this call: multi-bubble
+        // stores one per captured balloon and polls for a new one every 1.5 s,
+        // and the measurement harness serialises the ones it keeps — which took
+        // its reports from 33 KB to 360 KB the moment the outline rode along.
+        // An outline is thousands of anchor pairs; it has no business travelling
+        // with a rectangle.
+        _hostState.lastOutline = polygons;
+        _hostState.lastOutlineKey = _selectionBoundsKey(openedBounds);
       }
       // A centroid outside the selection it came from means the anchors were not
       // in document pixels after all: drop it rather than move the layer to a

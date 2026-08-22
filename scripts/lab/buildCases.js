@@ -139,14 +139,43 @@ function straightRuns(rows) {
   };
 }
 
-function pointInMask(region, x, y) {
-  if (x < 0 || y < 0 || x >= region.width || y >= region.height) return false;
-  return !!region.mask[Math.round(y) * region.width + Math.round(x)];
+/*
+ * Does this text belong to this region? Measured over the 66 layers of the
+ * reference pages, two predicates:
+ *
+ *   centre of the ink inside the mask     26/66
+ *   >=20% of the ink box inside the mask  66/66
+ *
+ * The point test fails because at runtime the plugin hides only the layer it is
+ * centring; the glyphs of the others are still painted, so the centre of their
+ * ink lands on a letter and falls outside the region. The box test is the
+ * predicate the host will use, so it is the one the bench must classify with.
+ */
+const TEXT_IN_REGION_OVERLAP = 0.20;
+
+function boxOverlapFraction(region, box) {
+  const left = Math.max(0, Math.round(box.left));
+  const top = Math.max(0, Math.round(box.top));
+  const right = Math.min(region.width, Math.round(box.right));
+  const bottom = Math.min(region.height, Math.round(box.bottom));
+  const area = (box.right - box.left) * (box.bottom - box.top);
+  if (area <= 0 || right <= left || bottom <= top) return 0;
+  let hits = 0;
+  for (let y = top; y < bottom; y++) {
+    const row = y * region.width;
+    for (let x = left; x < right; x++) {
+      if (region.mask[row + x]) hits++;
+    }
+  }
+  return hits / area;
 }
 
 function main() {
   const outDir = path.join(RUN_DIR, "out");
-  const pageDir = path.join(RUN_DIR, "pages");
+  // The composites live once for the whole lab now. Runs made before that
+  // still carry their own copy.
+  const ownPages = path.join(RUN_DIR, "pages");
+  const pageDir = fs.existsSync(ownPages) ? ownPages : path.join(RUN_DIR, "..", "..", "pages");
   const reports = fs.readdirSync(outDir).filter((f) => f.endsWith(".json")).sort();
   const cases = [];
   const pages = [];
@@ -159,8 +188,11 @@ function main() {
       console.error("missing raw for " + stem);
       continue;
     }
-    const img = L.readRaw(rawPath, rep.raw.width, rep.raw.height);
-    const canvas = { width: rep.raw.width, height: rep.raw.height };
+    // Only the first run of a series dumps the composites; the later ones reuse
+    // them, and then the size has to come from the document instead.
+    const size = rep.raw || rep.doc;
+    const img = L.readRaw(rawPath, size.width, size.height);
+    const canvas = { width: size.width, height: size.height };
     pages.push({ page: stem, doc: rep.doc, layers: rep.layers.length });
 
     const measured = [];
@@ -180,9 +212,16 @@ function main() {
     }
 
     for (const m of measured) {
-      // How many other text layers live inside the same region? A region that
-      // holds two texts cannot be centred for one of them alone.
-      const inside = measured.filter((o) => pointInMask(m.region, o.gt.xMid, o.gt.yMid));
+      // How many text layers live inside the same region? A region that holds
+      // two texts cannot be centred for one of them alone, and the partition
+      // rules need the boxes themselves, not just the count.
+      const inside = [];
+      for (let k = 0; k < measured.length; k++) {
+        const overlap = boxOverlapFraction(m.region, measured[k].gt);
+        if (overlap >= TEXT_IN_REGION_OVERLAP) {
+          inside.push({ index: measured[k].layer.index, box: measured[k].gt, overlap: overlap, active: measured[k] === m });
+        }
+      }
       const metrics = regionMetrics(m.region, canvas);
       const psRegion = m.layer.region.trueRegion.raw;
       cases.push({
@@ -207,6 +246,17 @@ function main() {
           alignResult: m.layer.align.result,
           deltaX: m.layer.delta.inkX,
           deltaY: m.layer.delta.inkY,
+          // How far a second press of Align moves the text. A rule that reads
+          // the other layers cannot hold still here.
+          repeatX: m.layer.delta.repeatX === undefined ? null : m.layer.delta.repeatX,
+          repeatY: m.layer.delta.repeatY === undefined ? null : m.layer.delta.repeatY,
+          scatter: m.layer.scatter || null,
+          partition: m.layer.region.partition || null,
+          geometry: m.layer.region.geometry || null,
+          geometry2: m.layer.region.geometry2 || null,
+          centroidSkip: m.layer.region.centroidSkip || "",
+          engineRegion: m.layer.region.engineRegion || null,
+          probe: m.layer.region.probe || null,
           after: m.layer.after.ink,
           restored: m.layer.restored,
         },
@@ -217,6 +267,7 @@ function main() {
           fidelityY: psRegion ? m.region.bbox.yMid - psRegion.yMid : null,
           metrics,
           textLayersInside: inside.length,
+          textBoxes: inside,
         },
       });
     }

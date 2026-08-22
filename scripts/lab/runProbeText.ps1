@@ -1,5 +1,5 @@
 <#
-  runDiag.ps1 — runs scripts/lab/diagCentroid.jsx on one page of a run.
+  runDiag.ps1 — runs scripts/lab/diagProbeText.jsx on one page of a run.
 
   Usage:
     powershell -NoProfile -File scripts/lab/runDiag.ps1 -Root "<repo>" `
@@ -20,9 +20,9 @@ function To-JsxPath([string]$p) { return ($p -replace '\\', '/') }
 # Opening it is safe: every diagnostic closes with DONOTSAVECHANGES.
 $inFile = Join-Path $Root ".centering-lab\runs\$Run\in\$Page.psd"
 if (-not (Test-Path $inFile)) { $inFile = Join-Path $Root "psd\$Page.psd" }
-$outFile = Join-Path $Root ".centering-lab\diag-$Page-$Index.json"
+$outFile = Join-Path $Root ".centering-lab\probe-$Page.json"
 $hostJsx = Join-Path $Root "app\host.jsx"
-$diag = Join-Path $Root "scripts\lab\diagCentroid.jsx"
+$diag = Join-Path $Root "scripts\lab\diagProbeText.jsx"
 
 foreach ($required in @($inFile, $hostJsx, $diag)) {
   if (-not (Test-Path $required)) { throw "missing: $required" }
