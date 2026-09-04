@@ -294,11 +294,16 @@ Ponta a ponta: **423 ms → 162–190 ms**. O critério da Fase 1 era abaixo de 
 
 **Balão do bubble-aware (Fase 2)** — `getActiveLayerBubbleShape`:
 
-| | antes | depois |
+> **Correção.** A primeira versão desta seção trazia 469 ms → 216 ms. Estava errada: os probes chamavam `selectLayerById({id:N})`, mas a função recebe um número — `parseInt({id:27}, 10)` dá `NaN` e ela retorna `"error"` sem trocar de camada. As nove medições eram da mesma camada. Os números abaixo são de camadas de verdade, com a camada ativa conferida a cada passo.
+
+| `_scanActiveLayerBubble` nas 9 camadas | antes | depois |
 |---|---|---|
-| `_scanActiveLayerBubble`, média nas 9 camadas | 469 ms | **216 ms** |
-| visto pelo painel (`typerPerf`) | 413 ms | **288 ms** |
-| linhas contra o amostrador legado | — | idênticas nas 9 camadas |
+| média | **775 ms** | **340 ms** |
+| mediana | 698 ms | 340 ms |
+| pior | 1406 ms | 441 ms |
+| melhor | 485 ms | 274 ms |
+
+**E não era só lentidão.** No build anterior o caminho rápido não caía no amostrador legado: ele devolvia linhas. Comparadas com o legado no mesmo balão, **5 dos 9 balões vinham com o perfil degenerado** — `avgSpan` 0 contra 1, `maxDelta` 1 numa escala normalizada, ou seja, o erro máximo possível. O TextShapeR moldava o texto num contorno de largura zero. A correção de precedência consertou a forma, não só o tempo. Depois dela as linhas batem com o amostrador legado nas 9 camadas (`rowsOver4px=0`).
 
 Duas mudanças, ambas em `_sampleSelectionShapeViaPath`:
 
@@ -325,14 +330,13 @@ O cenário "fonte diferente" virou o cenário "mesma fonte", que era exatamente 
 
 `jamText.getLayerText()` custava 89 ms no diagnóstico e mede 226–259 ms no fim da sessão, igual nas 9 camadas. Reconstruí o host com os arquivos jam anteriores à correção de precedência e medi 265 ms — ou seja, **não é regressão do código**: é o processo do Photoshop depois de horas de instrumentação (purgar caches e histórico não muda nada). Os números absolutos de `getTypeRPanelSnapshot` e `getSelectionChanged` nas tabelas acima carregam essa deriva; as comparações antes/depois foram todas medidas em sequência na mesma sessão e não carregam.
 
-Um benchmark limpo pede Photoshop recém-aberto.
+Um benchmark limpo pede Photoshop recém-aberto. A deriva piorou ao longo da sessão: as últimas medições de `getActiveLayerBubbleShape` pelo painel saíram em 525 ms com o mesmo código que antes media 288 ms. Por isso as comparações que valem são as de **contagem de chamadas** (8 → 6) e as medidas em sequência imediata, não os absolutos.
 
 ### O que ficou de fora, e por quê
 
 - **Baixar `samples` de 21 para 9** — refutado por medição (A3), e depois pela causa real: o custo era o caminho rápido não rodar.
 - **Subir o settle de 350 ms** (Fase 1, item 4) — o critério da fase já é cumprido com folga; subir o settle atrasa a forma sem reduzir trabalho.
 - **Adiar o scan do balão para o hover** (Fase 2, candidato 1) — as sugestões nascem com a forma do balão; adiar faria a lista aparecer sem forma e mudar sozinha depois. Isso é mudança de comportamento, não ganho.
-- **Reaproveitar o scan entre camadas do mesmo balão** (Fase 2, candidato 2) — o cache por camada já zera a segunda visita; com o scan em 216 ms o ganho restante não paga a chave nova.
 
 O critério "percorrer camadas com bubble-aware ON perto do custo com OFF" não foi atingido: 288 ms contra 56 ms. Ficou na metade do caminho, com a forma preservada.
 
@@ -348,8 +352,10 @@ O critério "percorrer camadas com bubble-aware ON perto do custo com OFF" não 
 Três itens do plano continuam sem implementação, por decisão e não por esquecimento:
 
 1. **Pular o scan enquanto o multi-bubble empilha seleções** (Fase 1, item 3). `inlineSelectionShape` não alimenta só as sugestões: `handleAlignLayer` tira dele o `phantomOffsetX` (`previewBlock.jsx:1050`). Deixar de escanear durante o empilhamento degradaria a centralização na hora de colar, que é justamente o que o usuário está preparando. Fazer isso direito significa disparar sob demanda antes do align, o que muda o desenho da interação — decisão de produto, não de performance.
-2. **Restaurar a seleção a partir do demarcador em vez do canal alfa** (Fase 1, item 1) para quem quer a seleção de volta. Um demarcador traçado é uma aproximação: devolveria ao usuário uma seleção diferente da que ele desenhou. Feito só para os chamadores da varinha, que descartam a seleção — que era onde estavam os 65 ms.
-3. **Reaproveitar o scan entre camadas do mesmo balão** (Fase 2, candidato 2). Não medido: exige um documento com duas camadas de texto dentro do mesmo balão. Uma regra por caixa envolvente arriscaria pegar o balão vizinho; a regra correta é testar se o centro da nova camada cai dentro do contorno já traçado, e isso pede guardar o contorno no cache. Vale 216 ms por camada extra em balão duplo ou triplo.
+2. **Restaurar a seleção a partir do demarcador em vez do canal alfa** (Fase 1, item 1) para quem quer a seleção de volta: **medido e recusado.** Restaurar do demarcador leva 20–28 ms contra os 65 ms do canal, mas não devolve a mesma seleção. Num losango de 700×600 a seleção volta com 694×600 e deslocada 5 px; retângulo e côncavo voltam idênticos. Traçar com tolerância 2,0 corta diagonal, e laço e varinha são quase só diagonal. Feito só para os chamadores da varinha, que descartam a seleção — que era onde estavam os 65 ms.
+3. ~~**Reaproveitar o scan entre camadas do mesmo balão**~~ — **feito** (`8cbea03`). A página de referência tem o caso: as camadas 25, 23, 21 e 19 dividem o balão em `93,1043 930x542` e as camadas 17 e 15 dividem o de `135,288 501x756`. Antes de rodar a varinha, o painel procura um balão já traçado nesta sessão cujo contorno contenha os quatro cantos da caixa de tinta da camada. A caixa envolvente sozinha não decide — balões vizinhos se sobrepõem em caixa com facilidade — então o teste é contra o perfil amostrado que já está no cache.
+
+   O reuso também exige **corpo de fonte igual**. O contorno traçado não é só o balão: a detecção cresce e encolhe a seleção por metade do corpo para fechar os buracos das letras. Medido: 25, 21 e 19 dividem o balão com corpo 17 e voltam bit a bit iguais; a 23, no mesmo balão com corpo 16, voltou até 0,15 mais estreita — 142 px ali. Ao vivo, percorrendo as 9 camadas: `getActiveLayerBubbleShape` cai de **8 para 6 chamadas** (seriam 5 sem a trava de corpo, ao custo de servir a forma errada para a 23).
 
 Fora isso, os itens da lista de regressão que dependem de mão humana continuam sem passagem ao vivo: aprendizado (estrela / Alt / Ctrl / Shift), batch multi-layer, multi-bubble de ponta a ponta, aplicar uma forma, prefixos e isolamento por pasta no painel, markdown. Todos têm cobertura nas 31 suítes de `npm test`, nenhum foi clicado à mão.
 
