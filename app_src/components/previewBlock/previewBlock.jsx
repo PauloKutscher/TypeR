@@ -6,7 +6,7 @@ import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
 
-import { csInterface, locale, nativeConfirm, setActiveLayerText, setLayerTextFast, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isHostActionPending, isPanelIdle, isPanelInteracting, notePanelActivity, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, getCurrentSelectionShape, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, getUserFonts, refreshUserFonts, scrollToLine, parseMarkdownRuns } from "../../utils";
+import { csInterface, locale, nativeConfirm, setActiveLayerText, setLayerTextFast, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isPhotoshopSelectionOnlyEvent, isHostActionPending, isPanelIdle, isPanelInteracting, notePanelActivity, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, getCurrentSelectionShape, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, alignTextLayerToSelection, changeActiveLayerTextSize, getStyleObject, getUserFonts, refreshUserFonts, scrollToLine, parseMarkdownRuns } from "../../utils";
 import { useContext } from "../../context";
 import { getScaledStyle } from "../../textLayerPayload";
 import { isDuplicateSelection } from "../../multiBubbleHistory";
@@ -20,6 +20,7 @@ let textShapeREnginePromise = null;
 let panelSnapshotPending = false;
 let panelSnapshotTimer = null;
 let panelSnapshotSignature = "";
+let panelSnapshotNeedsLayer = false;
 let panelSnapshotCallbacks = [];
 const schedulePanelSnapshot = () => {
   if (panelSnapshotPending || panelSnapshotTimer) return;
@@ -28,9 +29,11 @@ const schedulePanelSnapshot = () => {
     panelSnapshotPending = true;
     const requestedSignature = panelSnapshotSignature;
     const requestedCallbacks = panelSnapshotCallbacks;
+    const requestedLayer = panelSnapshotNeedsLayer;
     panelSnapshotSignature = "";
+    panelSnapshotNeedsLayer = false;
     panelSnapshotCallbacks = [];
-    csInterface.evalScript(`getTypeRPanelSnapshot(${JSON.stringify({ signature: requestedSignature })})`, (result) => {
+    csInterface.evalScript(`getTypeRPanelSnapshot(${JSON.stringify({ signature: requestedSignature, layer: requestedLayer })})`, (result) => {
       panelSnapshotPending = false;
       let snapshot = { activeLayer: null, selection: null, layers: [] };
       try {
@@ -43,8 +46,12 @@ const schedulePanelSnapshot = () => {
     });
   }, 0);
 };
-const requestPanelSnapshot = (signature, callback) => {
+// Reading the active layer's text dominates the snapshot (~95 ms on a page),
+// so callers say whether they need it. A coalesced batch asks for it as soon as
+// any one of them does.
+const requestPanelSnapshot = (signature, callback, needsLayer = true) => {
   panelSnapshotCallbacks.push(callback);
+  if (needsLayer) panelSnapshotNeedsLayer = true;
   if (signature) panelSnapshotSignature = signature;
   schedulePanelSnapshot();
 };
@@ -202,6 +209,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const inlineGeometryQueued = React.useRef(false);
   const inlineContentEventVersion = React.useRef(0);
   const inlineEventDebounce = React.useRef(null);
+  const inlineEventNeedsSource = React.useRef(false);
   const inlineMoveDebounce = React.useRef(null);
   const inlineLastRefreshAt = React.useRef(0);
   const inlineShapePending = React.useRef(false);
@@ -403,6 +411,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       );
     }
     inlineShapePending.current = true;
+    // Only the marquee matters here: the layer text is read by the source
+    // refresh, which runs on the events that can actually change it
     requestPanelSnapshot(inlineSourceSignature.current, ({ selection }) => {
       if (selection && selection.width && selection.height) {
         // Without an active text layer there is nothing to shape: skip the
@@ -524,7 +534,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           setInlineSelectionShape(shape);
         } catch (error) {}
       });
-    });
+    }, false);
   }, [bubbleAware, clearInlineShapeSettle]);
 
   // A Photoshop 'move' action changes history but not the text or style. Read
@@ -594,6 +604,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       return;
     }
     batchPending.current = true;
+    // Batch tracking diffs the layer selection; it never reads the layer text
     requestPanelSnapshot(inlineSourceSignature.current, ({ layers }) => {
       batchPending.current = false;
       const ids = (layers || []).map((layer) => layer.id).filter((id) => typeof id === "number");
@@ -612,7 +623,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         batchQueued.current = false;
         refreshBatchSelection();
       }
-    });
+    }, false);
   }, []);
 
   const goToBatchLayer = React.useCallback((layerId) => {
@@ -702,16 +713,26 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         }, 120);
         return;
       }
-      inlineContentEventVersion.current += 1;
-      inlineGeometryQueued.current = false;
-      if (inlineMoveDebounce.current) {
-        clearTimeout(inlineMoveDebounce.current);
-        inlineMoveDebounce.current = null;
+      // Drawing a marquee cannot change the layer's text or style, but it does
+      // create history states. Re-detect the shape and leave the layer read to
+      // the events that can actually invalidate it.
+      if (isPhotoshopSelectionOnlyEvent(event)) {
+        inlineLastRefreshAt.current = Date.now();
+      } else {
+        inlineContentEventVersion.current += 1;
+        inlineGeometryQueued.current = false;
+        if (inlineMoveDebounce.current) {
+          clearTimeout(inlineMoveDebounce.current);
+          inlineMoveDebounce.current = null;
+        }
+        inlineEventNeedsSource.current = true;
       }
       if (inlineEventDebounce.current) clearTimeout(inlineEventDebounce.current);
       inlineEventDebounce.current = setTimeout(() => {
         inlineEventDebounce.current = null;
-        refreshInlineLayerSource();
+        const needsSource = inlineEventNeedsSource.current;
+        inlineEventNeedsSource.current = false;
+        if (needsSource) refreshInlineLayerSource();
         refreshInlineSelectionShape();
       }, 120);
     });
@@ -745,6 +766,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         clearTimeout(inlineEventDebounce.current);
         inlineEventDebounce.current = null;
       }
+      inlineEventNeedsSource.current = false;
       if (inlineMoveDebounce.current) {
         clearTimeout(inlineMoveDebounce.current);
         inlineMoveDebounce.current = null;

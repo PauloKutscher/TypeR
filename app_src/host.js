@@ -4295,9 +4295,16 @@ function getTypeRSelectionSnapshot() {
 function getTypeRPanelSnapshot(data) {
   var activeLayer = null;
   var selectionSnapshot = { selection: null, layers: [] };
-  try {
-    activeLayer = jamJSON.parse(getActiveLayerTextIfChanged(data || {}));
-  } catch (activeLayerError) {}
+  // jamText.getLayerText() alone costs ~95 ms of Photoshop's main thread on a
+  // page-sized document, and the signature guard below it misses on every
+  // history state - which a marquee drag creates. Callers that only want the
+  // selection or the layer list (bubble outline, batch tracking) ask for
+  // layer:false and skip it entirely.
+  if (!data || data.layer !== false) {
+    try {
+      activeLayer = jamJSON.parse(getActiveLayerTextIfChanged(data || {}));
+    } catch (activeLayerError) {}
+  }
   try {
     selectionSnapshot = jamJSON.parse(getTypeRSelectionSnapshot()) || selectionSnapshot;
   } catch (selectionSnapshotError) {}
