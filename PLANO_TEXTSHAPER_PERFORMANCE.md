@@ -278,7 +278,30 @@ O mesmo erro afetava outros três lugares, todos de correção e não de perform
 
 `scripts/testBuildArtifacts.js` agora percorre a AST do `app/host.jsx` construído e falha em qualquer `||` cujo operando direito seja um `&&`. Essa classe de defeito não volta calada.
 
-### Resultados medidos
+### Resultados medidos — benchmark limpo
+
+Photoshop fechado e reaberto, `13.psd` recém-carregado. As medidas de host saem do mesmo processo com o código do host trocado em memória (`$.evalFile`), então os dois lados veem exatamente o mesmo Photoshop e o mesmo documento; as medidas de painel usam o `index.js` do respectivo build, cada uma depois de um reinício.
+
+| | antes (`88aaeb6`) | depois |
+|---|---|---|
+| `_scanActiveLayerBubble`, 9 camadas — média | 350 ms | **98 ms** |
+| — mediana / pior | 271 / 770 ms | 99 / 106 ms |
+| `getCurrentSelectionShape`, marquee retangular | **425 ms** (caía no legado, `emptyRows`) | **181 ms** |
+| — losango | 167 ms | 180 ms |
+| — côncavo | 167 ms | 199 ms |
+| **maior erro de linha contra o amostrador legado** | **1,0** (escala normalizada: erro máximo) | **0,0** |
+| balões com perfil degenerado (`avgSpan` 0) | **5 de 9** | **0 de 9** |
+| percorrer 9 camadas, bubble ON, cache frio — `getActiveLayerBubbleShape` | 8 chamadas · 437 ms média · 3497 ms | **6 chamadas · 208 ms média · 1250 ms** |
+| — até as sugestões aparecerem, frio / quente | 716 / 304 ms | **458 / 197 ms** |
+| troca de fonte — `sheetWrites` / `domMutations` | 16 / 16 | **0 / 0** |
+| — click→paint médio / pior | 3 / 4 ms | 3 / 3 ms |
+| poll ocioso — `getTypeRPanelSnapshot` | 3 ms | 3 ms |
+
+**O marquee diagonal ficou levemente mais lento, e isso é o preço de estar certo.** No build anterior o losango e o côncavo voltavam em 167 ms porque o caminho rápido *rodava* — devolvendo linhas com erro máximo. Só o retângulo degenerava a ponto de cair no amostrador legado, e é por isso que era ele que custava 425 ms. Agora as três formas voltam pelo caminho rápido em 180–199 ms com as linhas idênticas às do legado.
+
+**Erratas de medição.** O campo `rowsOver4px` que aparece nos scripts compara linhas com um limiar de 4, mas as linhas são normalizadas em 0..1: o limiar nunca dispara e o número não diz nada. O que vale é `maxDelta`, e é ele que está na tabela. A leitura anterior de "5 de 9 balões degenerados" continua de pé — foi reproduzida no Photoshop limpo.
+
+### Resultados medidos — sessão instrumentada
 
 Mesmo documento (1760×2560, 9 camadas de texto), mesmos styles, medindo antes e depois na mesma sessão.
 
@@ -330,7 +353,7 @@ O cenário "fonte diferente" virou o cenário "mesma fonte", que era exatamente 
 
 `jamText.getLayerText()` custava 89 ms no diagnóstico e mede 226–259 ms no fim da sessão, igual nas 9 camadas. Reconstruí o host com os arquivos jam anteriores à correção de precedência e medi 265 ms — ou seja, **não é regressão do código**: é o processo do Photoshop depois de horas de instrumentação (purgar caches e histórico não muda nada). Os números absolutos de `getTypeRPanelSnapshot` e `getSelectionChanged` nas tabelas acima carregam essa deriva; as comparações antes/depois foram todas medidas em sequência na mesma sessão e não carregam.
 
-Um benchmark limpo pede Photoshop recém-aberto. A deriva piorou ao longo da sessão: as últimas medições de `getActiveLayerBubbleShape` pelo painel saíram em 525 ms com o mesmo código que antes media 288 ms. Por isso as comparações que valem são as de **contagem de chamadas** (8 → 6) e as medidas em sequência imediata, não os absolutos.
+A tabela do benchmark limpo acima é a que vale; esta seção fica como registro de como a deriva distorce medidas absolutas. A deriva piorou ao longo da sessão: as últimas medições de `getActiveLayerBubbleShape` pelo painel saíram em 525 ms com o mesmo código que antes media 288 ms. Por isso as comparações que valem são as de **contagem de chamadas** (8 → 6) e as medidas em sequência imediata, não os absolutos.
 
 ### O que ficou de fora, e por quê
 
