@@ -358,7 +358,7 @@ A tabela do benchmark limpo acima é a que vale; esta seção fica como registro
 ### O que ficou de fora, e por quê
 
 - **Baixar `samples` de 21 para 9** — refutado por medição (A3), e depois pela causa real: o custo era o caminho rápido não rodar.
-- **Subir o settle de 350 ms** (Fase 1, item 4) — o critério da fase já é cumprido com folga; subir o settle atrasa a forma sem reduzir trabalho.
+- **Subir o settle de 350 ms** (Fase 1, item 4) — **medido.** Arrasto simulado contando os scans que o painel chega a disparar: 8 passos de 70 ms → **1 scan**; 8 passos de 150 ms → **1 scan**; 5 passos de 400 ms → 2 scans. Os 350 ms já colapsam o arrasto inteiro num scan só. Subir para 600 ms ganharia um scan num cenário em que o usuário fica 400 ms parado no meio do arrasto — indistinguível de ter soltado o mouse — e cobraria 250 ms de atraso na forma em todos os outros.
 - **Adiar o scan do balão para o hover** (Fase 2, candidato 1) — as sugestões nascem com a forma do balão; adiar faria a lista aparecer sem forma e mudar sozinha depois. Isso é mudança de comportamento, não ganho.
 
 O critério "percorrer camadas com bubble-aware ON perto do custo com OFF" não foi atingido: 288 ms contra 56 ms. Ficou na metade do caminho, com a forma preservada.
@@ -369,6 +369,26 @@ O critério "percorrer camadas com bubble-aware ON perto do custo com OFF" não 
 - **Startup e memória: iguais.** Reconstruí o commit anterior ao trabalho (`88aaeb6`), instalei e medi três recargas do painel de cada lado: **1689–1696 ms / 45 MB / 649 nós** antes, **1686–1691 ms / 45 MB / 649 nós** depois.
 - **A guarda de build funciona de verdade.** Ao trocar o `app_src` pelo baseline por engano, `testBuildArtifacts.js` reprovou o build e listou as seis expressões afetadas.
 - **Smoke funcional no painel ao vivo:** styles listados e clique trocando o ativo; aliases de preview aplicados (26 nós, 9 fontes distintas); folha nunca encolhe (5195 bytes estáveis); sugestões do TextShapeR renderizadas; preview da linha atual; bubble-aware liga e desliga; controles de tamanho presentes; zero erros de console. O auto-fit dos cards responde: escala 0,958 → 0,472 → 0,202 conforme o card estreita, e volta a 0,958 — com a altura mandando enquanto a largura ainda sobra, que é o comportamento certo.
+
+### Fechamento das fases 2 e 3, no Photoshop limpo
+
+**Fase 3 — o poll.** `getTypeRPanelSnapshot` medido dentro do host, trocando a camada ativa a cada leitura para que a assinatura nunca acerte de graça:
+
+| | antes | depois |
+|---|---|---|
+| pedido sem a camada (o que um marquee dispara) | 105–165 ms | **1 ms** |
+| pedido com a camada (troca de camada) | 89 → 155 ms | 120 → 183 ms |
+
+A segunda linha não é regressão: alternando os dois builds três vezes seguidas, a leitura completa cresceu monotonicamente nos dois (89, 120, 134, 155, 183) — é a deriva do processo, e cada rodada mediu o build que calhou de vir depois. A primeira linha ficou em 1 ms nas três rodadas do build novo e nunca abaixo de 89 ms no antigo.
+
+**Fase 2 — o critério.** Percorrer as 9 camadas, cache frio, dentro do ExtendScript:
+
+| | antes | depois |
+|---|---|---|
+| bubble-aware ON, por camada | 592 ms | **355 ms** |
+| bubble-aware OFF, por camada | 69 ms | 114 ms |
+
+O critério pedia o ON perto do OFF. Não foi atingido: o ON continua cerca de três vezes o OFF. O ganho é de 40% e a forma passou a estar correta, mas quem liga o bubble-aware ainda paga um wand scan por balão novo, e isso é o que ele é.
 
 ### Ainda em aberto
 
