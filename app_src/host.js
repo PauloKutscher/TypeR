@@ -140,6 +140,7 @@ var _hostState = {
   suspendedRun: null,
   pathScanFails: 0,
   pathScanBackoffAt: 0,
+  lastPathScanReader: "",
 };
 
 // How long the fast path-based shape scan stays disabled after 3 failures
@@ -3984,6 +3985,42 @@ function _deleteWorkPath() {
 // cause of "TypeR gets slower the longer it runs". Retrying every few minutes
 // costs one cheap probe and restores the fast path as soon as the host is happy
 // again.
+/*
+ * Outline of the current work path, read the cheap way when it can be trusted.
+ *
+ * `_readPathAnchorPolygons` already existed for the centroid: one
+ * executeActionGet instead of a DOM walk that costs about 5.7 ms per anchor.
+ * Measured on a traced balloon (12 contours, 678 flattened points) the DOM walk
+ * took 245-278 ms and the Action Manager read 48-79 ms, and the scanline rows
+ * the two produce agree to 0.2 px - the anchors alone are dense enough at this
+ * trace tolerance that skipping curve flattening does not move a row.
+ *
+ * The DOM walk stays as the fallback for a host that reports path coordinates in
+ * a unit the reader does not cover, which is what `_pathAnchorsMatchDom` checks.
+ * An outline over the anchor budget gets neither: the DOM walk would take
+ * minutes on it, and the caller's legacy sampler is the right answer there.
+ */
+function _readSelectionOutlinePolygons(doc, workPath) {
+  var polygons = null;
+  _hostState.lastPathAnchorCount = 0;
+  try {
+    polygons = _readPathAnchorPolygons(doc);
+  } catch (anchorReadError) {
+    polygons = null;
+  }
+  var anchors = _hostState.lastPathAnchorCount || 0;
+  if (anchors > _MAX_BALLOON_PATH_ANCHORS) {
+    _hostState.lastPathScanReader = "overBudget";
+    return null;
+  }
+  if (polygons && anchors > 2 && _pathAnchorsMatchDom(workPath, polygons)) {
+    _hostState.lastPathScanReader = "anchors";
+    return polygons;
+  }
+  _hostState.lastPathScanReader = "dom";
+  return _readPathPolygons(workPath);
+}
+
 function _sampleSelectionShapeViaPath(bounds, sampleCount, restoreSelection) {
   if ((_hostState.pathScanFails || 0) >= 3) {
     var now = new Date().getTime();
@@ -3994,10 +4031,25 @@ function _sampleSelectionShapeViaPath(bounds, sampleCount, restoreSelection) {
   var doc = app.activeDocument;
   // Never clobber a work path the user is keeping around
   if (_findWorkPath(doc)) return null;
-  var tempChannel = _createTempSelectionChannel(doc);
-  if (!tempChannel) return null;
-  var polygons = null;
+  // An alpha channel is the only way to give back the exact selection the user
+  // drew, anti-aliased fringe and all, so a caller that wants its selection back
+  // pays for one. It is not cheap - measured 47 ms to create and 18 ms to remove
+  // - and the wand callers throw their selection away the moment this returns,
+  // so they no longer pay it. If the scan fails, they get the traced path back
+  // as a selection instead, which is all the legacy sampler needs.
+  var tempChannel = null;
+  if (restoreSelection) {
+    tempChannel = _createTempSelectionChannel(doc);
+    if (!tempChannel) return null;
+  }
+  var rows = null;
   var failure = "";
+  // Pinned to pixels for the whole read: the DOM reports anchors in ruler units,
+  // and _pathAnchorsMatchDom weighs them against the Action Manager's pixels.
+  var oldUnits = app.preferences.rulerUnits;
+  try {
+    app.preferences.rulerUnits = Units.PIXELS;
+  } catch (unitsError) {}
   try {
     _makeWorkPathFromSelection(2.0);
   } catch (makeError) {
@@ -4006,10 +4058,24 @@ function _sampleSelectionShapeViaPath(bounds, sampleCount, restoreSelection) {
   if (!failure) {
     var workPath = _findWorkPath(doc);
     if (workPath) {
+      var polygons = null;
       try {
-        polygons = _readPathPolygons(workPath);
+        polygons = _readSelectionOutlinePolygons(doc, workPath);
       } catch (readError) {
         failure = "read:" + String(readError.message || readError);
+      }
+      if (!failure && polygons && polygons.length) {
+        rows = _buildPathShapeRows(polygons, sampleCount);
+        if (!rows) failure = "emptyRows";
+      } else if (!failure) {
+        failure = "noPolygons";
+      }
+      // Rows are built while the path still exists, so a caller that took no
+      // channel can hand the outline back as a selection for the fallback
+      if (!rows && !tempChannel) {
+        try {
+          workPath.makeSelection(0, true, SelectionType.REPLACE);
+        } catch (pathSelectionError) {}
       }
       try {
         _deleteWorkPath();
@@ -4022,23 +4088,21 @@ function _sampleSelectionShapeViaPath(bounds, sampleCount, restoreSelection) {
       failure = "noWorkPath";
     }
   }
-  var rows = null;
-  if (!failure && polygons && polygons.length) {
-    rows = _buildPathShapeRows(polygons, sampleCount);
-    if (!rows) failure = "emptyRows";
-  } else if (!failure) {
-    failure = "noPolygons";
-  }
+  try {
+    app.preferences.rulerUnits = oldUnits;
+  } catch (restoreUnitsError) {}
   // The conversion consumed the selection: bring it back whenever the caller
   // wants it or the legacy fallback is about to need it
-  if (restoreSelection || !rows) {
+  if (tempChannel) {
+    if (restoreSelection || !rows) {
+      try {
+        doc.selection.load(tempChannel);
+      } catch (loadError) {}
+    }
     try {
-      doc.selection.load(tempChannel);
-    } catch (loadError) {}
+      tempChannel.remove();
+    } catch (removeError) {}
   }
-  try {
-    tempChannel.remove();
-  } catch (removeError) {}
   if (!rows) {
     _hostState.pathScanFails = (_hostState.pathScanFails || 0) + 1;
     if (_hostState.pathScanFails >= 3) {
@@ -4056,7 +4120,6 @@ function _sampleSelectionShapeViaPath(bounds, sampleCount, restoreSelection) {
     fallback: false,
   };
 }
-
 function getCurrentSelectionShape(data) {
   if (!documents.length) {
     return jamJSON.stringify({ error: "doc" });
@@ -4086,6 +4149,7 @@ function getCurrentSelectionShape(data) {
   if (out.scan === "legacy" && _hostState.lastPathScanError) {
     out.scanError = _hostState.lastPathScanError;
   }
+  if (_hostState.lastPathScanReader) out.reader = _hostState.lastPathScanReader;
   out.bounds = shape.bounds;
   out.rows = shape.rows;
   out.fallback = shape.fallback;
@@ -4171,6 +4235,7 @@ function getActiveLayerBubbleShape(data) {
   if (out.scan === "legacy" && _hostState.lastPathScanError) {
     out.scanError = _hostState.lastPathScanError;
   }
+  if (_hostState.lastPathScanReader) out.reader = _hostState.lastPathScanReader;
   out.bounds = result.bounds;
   out.rows = result.rows;
   out.fallback = result.fallback;
