@@ -10,7 +10,7 @@ import { csInterface, locale, nativeConfirm, setActiveLayerText, setLayerTextFas
 import { useContext } from "../../context";
 import { getScaledStyle } from "../../textLayerPayload";
 import { isDuplicateSelection } from "../../multiBubbleHistory";
-import { getBubbleCacheKey, haveSameLayerSize } from "../../textShapeRTracking";
+import { getBubbleCacheKey, haveSameLayerSize, findEnclosingBubbleShape } from "../../textShapeRTracking";
 import { pasteInSelection, withShortcutHint } from "../../shortcutCommands";
 import { createFontPreviewRegistry, getFontPreviewFamily } from "../../fontPreview";
 import { notePerfRender } from "../../perfDebug";
@@ -71,6 +71,14 @@ const getNextUsableLineIndex = (lines, lineIndex) => {
     if (!lines[i].ignore) return { index: lines[i].rawIndex, advanced: true };
   }
   return { index: lineIndex, advanced: false };
+};
+
+// Mesmo campo que _getTextLayerSize lê no host, que é o que decide quanto a
+// detecção cresce e encolhe a seleção para fechar os buracos das letras
+const getLayerTextSize = (source) => {
+  const range = source?.style?.textProps?.layerText?.textStyleRange;
+  const size = Array.isArray(range) && range[0]?.textStyle ? Number(range[0].textStyle.size) : NaN;
+  return Number.isFinite(size) && size > 0 ? size : null;
 };
 
 const getLayerSourceKey = (source) => JSON.stringify({
@@ -215,6 +223,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const inlineShapePending = React.useRef(false);
   const inlineShapeKey = React.useRef("");
   const inlineLayerBoundsRef = React.useRef(null);
+  const inlineTextSizeRef = React.useRef(null);
   const bubbleShapeCache = React.useRef(new Map());
   const inlineShapeSettle = React.useRef({ hash: "", timer: null });
   const [inlineSelectionShape, setInlineSelectionShape] = React.useState(null);
@@ -364,6 +373,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       inlineLayerIdRef.current = source.layerId;
       inlineSourceSignature.current = source.signature || "";
       inlineLayerBoundsRef.current = source.bounds || null;
+      inlineTextSizeRef.current = getLayerTextSize(source);
       if (source.key === inlineSourceKey.current) {
         setInlineLayerSource((current) => {
           const sizeChanged = source.bounds && !haveSameLayerSize(current.bounds, source.bounds);
@@ -502,6 +512,22 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         setInlineSelectionShape(memoized);
         return;
       }
+      // Balão duplo ou triplo: se esta camada cabe inteira dentro de um balão
+      // já traçado nesta sessão, esse é o balão dela e não há um segundo wand
+      // scan a pagar. Medido na página de referência: 4 dos 9 scans eram
+      // repetição, a 340 ms cada.
+      const sharedBubble = findEnclosingBubbleShape(
+        bubbleShapeCache.current,
+        inlineLayerBoundsRef.current,
+        inlineTextSizeRef.current
+      );
+      if (sharedBubble) {
+        inlineShapePending.current = false;
+        inlineShapeKey.current = bubbleKey;
+        rememberBubbleShape(bubbleShapeCache.current, bubbleKey, sharedBubble);
+        setInlineSelectionShape(sharedBubble);
+        return;
+      }
       csInterface.evalScript(`getActiveLayerBubbleShape(${JSON.stringify({ samples: 21, tolerance: 20 })})`, (result) => {
         inlineShapePending.current = false;
         try {
@@ -524,6 +550,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                 height: data.bounds.height,
                 phantomOffsetX: geometry ? geometry.offsetX * data.bounds.width : 0,
                 source: "bubble",
+                textSize: inlineTextSizeRef.current,
               };
             })();
           rememberBubbleShape(bubbleShapeCache.current, bubbleKey, shape);

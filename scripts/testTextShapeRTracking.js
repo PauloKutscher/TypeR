@@ -16,7 +16,7 @@ const loadModule = (relativePath) => {
 };
 
 const { PS_EVENT_MOVE, isPhotoshopMoveEvent, isPhotoshopSelectionOnlyEvent } = loadModule("app_src/photoshopEvents.js");
-const { getBubbleCacheKey, haveSameLayerSize } = loadModule("app_src/textShapeRTracking.js");
+const { getBubbleCacheKey, haveSameLayerSize, findEnclosingBubbleShape, profileContainsPoint } = loadModule("app_src/textShapeRTracking.js");
 
 assert.strictEqual(PS_EVENT_MOVE, 1836021349);
 assert.strictEqual(isPhotoshopMoveEvent({ data: `{"eventID":${PS_EVENT_MOVE}}` }), true);
@@ -112,6 +112,91 @@ assert.strictEqual(
 assert.ok(
   /if \(!data \|\| data\.layer !== false\) \{[\s\S]*?getActiveLayerTextIfChanged/.test(hostSource),
   "The host must honour a layer-free snapshot request"
+);
+
+// Balão duplo: os três textos abaixo saem da página de referência 13.psd, onde
+// as camadas 25, 23 e 21 dividem o balão em 93,1043 930x542 e as camadas 17 e
+// 15 dividem o de 135,288 501x756.
+const bubbleShape = (bounds, rows, textSize = 17) => ({ source: "bubble", textSize, profile: { bounds, rows } });
+const wideBubble = bubbleShape(
+  { left: 93, top: 1043, right: 1023, bottom: 1585, width: 930, height: 542 },
+  [
+    { y: 0, left: 0.05, right: 0.95 },
+    { y: 0.5, left: 0, right: 1 },
+    { y: 1, left: 0.05, right: 0.95 },
+  ]
+);
+const otherBubble = bubbleShape(
+  { left: 135, top: 288, right: 636, bottom: 1044, width: 501, height: 756 },
+  [
+    { y: 0, left: 0, right: 1 },
+    { y: 1, left: 0, right: 1 },
+  ]
+);
+
+const cache = new Map([["bubble:25", wideBubble], ["bubble:17", otherBubble]]);
+
+// camada 23, dentro do balão largo
+assert.strictEqual(
+  findEnclosingBubbleShape(cache, { left: 370, top: 1231, right: 540, bottom: 1411, width: 170, height: 180 }, 17),
+  wideBubble,
+  "A second layer inside a traced bubble must reuse it"
+);
+// A camada 23 da mesma página tem corpo 16 e o contorno saiu até 0,15 mais
+// estreito: outro corpo, outro fechamento de buracos, outro contorno
+assert.strictEqual(
+  findEnclosingBubbleShape(cache, { left: 370, top: 1231, right: 540, bottom: 1411, width: 170, height: 180 }, 16),
+  null,
+  "A different body size must not borrow another layer's outline"
+);
+assert.strictEqual(
+  findEnclosingBubbleShape(cache, { left: 370, top: 1231, right: 540, bottom: 1411, width: 170, height: 180 }, null),
+  null,
+  "Without a known body size there is nothing safe to reuse"
+);
+// camada 15, dentro do outro balão
+assert.strictEqual(
+  findEnclosingBubbleShape(cache, { left: 404, top: 464, right: 573, bottom: 538, width: 169, height: 74 }, 17),
+  otherBubble,
+  "Each bubble must serve only the layers inside it"
+);
+// camada 27, em nenhum dos dois
+assert.strictEqual(
+  findEnclosingBubbleShape(cache, { left: 850, top: 1983, right: 1099, bottom: 2170, width: 249, height: 187 }, 17),
+  null,
+  "A layer outside every traced bubble must still pay for its own scan"
+);
+// dentro da caixa envolvente mas fora do contorno: o topo do balão afila
+assert.strictEqual(
+  findEnclosingBubbleShape(cache, { left: 100, top: 1045, right: 160, bottom: 1075, width: 60, height: 30 }, 17),
+  null,
+  "The bounding box alone must not decide: the profile has to contain the layer"
+);
+// falhas e formas de seleção manual em cache não dizem nada sobre onde a camada está
+assert.strictEqual(
+  findEnclosingBubbleShape(
+    new Map([["a", null], ["b", { source: "selection", textSize: 17, profile: wideBubble.profile }]]),
+    { left: 370, top: 1231, right: 540, bottom: 1411, width: 170, height: 180 },
+    17
+  ),
+  null,
+  "Only a detected bubble may be reused"
+);
+assert.strictEqual(findEnclosingBubbleShape(cache, null, 17), null);
+assert.strictEqual(findEnclosingBubbleShape(cache, { left: 0, top: 0, width: 0, height: 0 }, 17), null);
+
+// Interpola entre faixas em vez de arredondar para a mais próxima: os dois
+// pontos abaixo caem na mesma faixa do topo e só a interpolação os separa.
+assert.strictEqual(profileContainsPoint(wideBubble.profile, 200, 1178), true);
+assert.strictEqual(profileContainsPoint(wideBubble.profile, 116, 1070), false);
+
+assert.ok(
+  /findEnclosingBubbleShape\([\s\S]{0,120}inlineTextSizeRef\.current/.test(previewSource),
+  "The panel must look for an already traced bubble, body size included, before running the wand"
+);
+assert.ok(
+  /textSize: inlineTextSizeRef\.current/.test(previewSource),
+  "A cached bubble must carry the body size that produced it"
 );
 
 console.log("TextShapeR layer tracking tests passed");
