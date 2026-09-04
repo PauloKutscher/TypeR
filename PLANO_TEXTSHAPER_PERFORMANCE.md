@@ -336,6 +336,23 @@ Um benchmark limpo pede Photoshop recém-aberto.
 
 O critério "percorrer camadas com bubble-aware ON perto do custo com OFF" não foi atingido: 288 ms contra 56 ms. Ficou na metade do caminho, com a forma preservada.
 
+### Verificações de fechamento
+
+- **Guardas de região patológica (Fase 2, candidato 3): confirmadas.** Marquees crescentes no documento de referência: 4% da página 200 ms, 20% 165 ms, 49% **10 ms**, 97% **9 ms**. `_regionCoversTooMuchPage` recusa acima de 25% da página e cai direto no perfil da caixa, sem pagar scan nenhum. O `areaRatio > 60` do `_scanActiveLayerBubble` cobre o caso equivalente da varinha.
+- **Startup e memória: iguais.** Reconstruí o commit anterior ao trabalho (`88aaeb6`), instalei e medi três recargas do painel de cada lado: **1689–1696 ms / 45 MB / 649 nós** antes, **1686–1691 ms / 45 MB / 649 nós** depois.
+- **A guarda de build funciona de verdade.** Ao trocar o `app_src` pelo baseline por engano, `testBuildArtifacts.js` reprovou o build e listou as seis expressões afetadas.
+- **Smoke funcional no painel ao vivo:** styles listados e clique trocando o ativo; aliases de preview aplicados (26 nós, 9 fontes distintas); folha nunca encolhe (5195 bytes estáveis); sugestões do TextShapeR renderizadas; preview da linha atual; bubble-aware liga e desliga; controles de tamanho presentes; zero erros de console. O auto-fit dos cards responde: escala 0,958 → 0,472 → 0,202 conforme o card estreita, e volta a 0,958 — com a altura mandando enquanto a largura ainda sobra, que é o comportamento certo.
+
+### Ainda em aberto
+
+Três itens do plano continuam sem implementação, por decisão e não por esquecimento:
+
+1. **Pular o scan enquanto o multi-bubble empilha seleções** (Fase 1, item 3). `inlineSelectionShape` não alimenta só as sugestões: `handleAlignLayer` tira dele o `phantomOffsetX` (`previewBlock.jsx:1050`). Deixar de escanear durante o empilhamento degradaria a centralização na hora de colar, que é justamente o que o usuário está preparando. Fazer isso direito significa disparar sob demanda antes do align, o que muda o desenho da interação — decisão de produto, não de performance.
+2. **Restaurar a seleção a partir do demarcador em vez do canal alfa** (Fase 1, item 1) para quem quer a seleção de volta. Um demarcador traçado é uma aproximação: devolveria ao usuário uma seleção diferente da que ele desenhou. Feito só para os chamadores da varinha, que descartam a seleção — que era onde estavam os 65 ms.
+3. **Reaproveitar o scan entre camadas do mesmo balão** (Fase 2, candidato 2). Não medido: exige um documento com duas camadas de texto dentro do mesmo balão. Uma regra por caixa envolvente arriscaria pegar o balão vizinho; a regra correta é testar se o centro da nova camada cai dentro do contorno já traçado, e isso pede guardar o contorno no cache. Vale 216 ms por camada extra em balão duplo ou triplo.
+
+Fora isso, os itens da lista de regressão que dependem de mão humana continuam sem passagem ao vivo: aprendizado (estrela / Alt / Ctrl / Shift), batch multi-layer, multi-bubble de ponta a ponta, aplicar uma forma, prefixos e isolamento por pasta no painel, markdown. Todos têm cobertura nas 31 suítes de `npm test`, nenhum foi clicado à mão.
+
 ### Reproduzir
 
 As bancadas continuam fora do repositório, no scratchpad da sessão (`cdp.js`, `bench.js`, `benchSelect.js`, `benchMarquee.js`, `benchBubble.js`, `cmpShape.js`, `cmpBubble2.js`, `benchIdle.js`, `diagBubble3.js`, `benchLayerText.js`, `typerperf.js`). O `.debug` correto agora está versionado e o `install.ps1` o copia, então o debug remoto na porta 8001 funciona depois de uma instalação normal.
