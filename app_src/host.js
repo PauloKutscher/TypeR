@@ -1397,7 +1397,10 @@ function _getLayerStroke(layerIndex) {
  *                          position is forced to "outer".
  */
 function _setLayerStroke(stroke) {
-  if (!stroke || (stroke.size <= 0 && stroke.enabled !== true)) return;
+  // Two statements on purpose: see _polygonScanlineSpan for why a mixed
+  // &&/|| condition cannot survive the host build
+  if (!stroke) return;
+  if (stroke.size <= 0 && stroke.enabled !== true) return;
 
   var d = new ActionDescriptor();
   var r = new ActionReference();
@@ -3836,8 +3839,14 @@ function _polygonScanlineSpan(polygons, y) {
     for (var i = 0; i < poly.length; i++) {
       var a = poly[i];
       var b = poly[(i + 1) % poly.length];
-      // Half-open rule so scanlines crossing a vertex count it exactly once
-      if ((a[1] <= y && b[1] > y) || (b[1] <= y && a[1] > y)) {
+      // Half-open rule so scanlines crossing a vertex count it exactly once.
+      // Deliberately a single comparison rather than the mixed &&/|| form:
+      // ExtendScript's ES3 parser reads `X || Y && Z` as `(X || Y) && Z`, and
+      // the build's minifier drops the parentheses the source spells out. That
+      // made this test miss one side of every span, so _buildPathShapeRows
+      // always returned no rows and every selection fell back to the legacy
+      // 21-operation sampler - measured at 423-553 ms per scan.
+      if ((a[1] > y) !== (b[1] > y)) {
         var x = a[0] + ((y - a[1]) / (b[1] - a[1])) * (b[0] - a[0]);
         if (minX === null || x < minX) minX = x;
         if (maxX === null || x > maxX) maxX = x;

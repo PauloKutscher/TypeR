@@ -187,7 +187,11 @@ if (typeof jamHelpers !== 'object')
                                     break;
                                 case "color":
                                     var colorClass;
-                                    if ((("book" in value) && ("name" in value)) || (("bookID" in value) && ("bookKey" in value)))
+                                    // Hoisted out of one condition: the host build strips the parentheses
+                                    // and ExtendScript then reads `X || Y && Z` as `(X || Y) && Z`
+                                    var isNamedBookColor = ("book" in value) && ("name" in value);
+                                    var isIndexedBookColor = ("bookID" in value) && ("bookKey" in value);
+                                    if (isNamedBookColor || isIndexedBookColor)
                                     {
                                         colorClass = "bookColor";
                                     }

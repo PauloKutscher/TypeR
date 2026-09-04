@@ -53,7 +53,10 @@
   }
 
   function resolveTypeRFontVariant(textStyle, run, fonts) {
-    if (!textStyle || !run || (!run.bold && !run.italic)) return textStyle;
+    // Split on purpose: a mixed &&/|| condition changes meaning once the host
+    // build strips its parentheses (see _polygonScanlineSpan in host.js)
+    if (!textStyle || !run) return textStyle;
+    if (!run.bold && !run.italic) return textStyle;
     var records = getFontRecords(fonts);
     var base = findBaseFont(records, textStyle);
     var styleTraits = getTraits(textStyle.fontStyleName);
