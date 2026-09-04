@@ -35,6 +35,17 @@ const findNextMarker = (text, start) => {
   return best;
 };
 
+// Fim da linha que comeca em `start`: a primeira quebra, ou o fim do texto.
+// Comparado por codigo (10 = LF, 13 = CR) para cobrir tambem o CRLF que vem
+// do Photoshop e do Windows.
+const findLineEnd = (text, start) => {
+  for (let index = start; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code === 10 || code === 13) return index;
+  }
+  return text.length;
+};
+
 const unescapeMarkdownText = (text) => {
   return text.replace(/\\\\/g, "\\").replace(/\\\*/g, "*").replace(/\\_/g, "_");
 };
@@ -114,8 +125,14 @@ const parseMarkdownRuns = (input) => {
         pushOverlayText(before, style);
       }
       const afterOpen = match.index + match.marker.token.length;
+      // Um marcador só vale se fechar na própria linha. Sem isso, um "*" solto
+      // no meio do roteiro abre formatação que corre até a próxima linha que por
+      // acaso tenha o mesmo símbolo, e tudo entre as duas aparece formatado —
+      // inclusive falas que não têm nada a ver. Sem fechamento na linha, o
+      // símbolo é texto comum e aparece como o usuário digitou.
+      const lineEnd = findLineEnd(segment, afterOpen);
       const closeIndex = findUnescapedToken(segment, match.marker.token, afterOpen);
-      if (closeIndex === -1) {
+      if (closeIndex === -1 || closeIndex >= lineEnd) {
         const unmatched = segment.slice(match.index, afterOpen);
         pushRun(unmatched, style);
         pushOverlayText(unmatched, style);

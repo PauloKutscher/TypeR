@@ -210,4 +210,57 @@ assert.ok(
   "The highlight layer must render raw characters: stripping markdown markers makes it wrap before the textarea"
 );
 
+// Um marcador que nao fecha na propria linha nao formata nada: antes, um "*"
+// solto abria formatacao que corria ate a proxima linha que por acaso tivesse
+// o mesmo simbolo, e as falas do meio saiam formatadas sem motivo.
+const styles = (input) =>
+  parseMarkdownRuns(input).runs.map((r) => ({ text: r.text, bold: r.bold, italic: r.italic }));
+
+assert.deepStrictEqual(
+  styles("a *b\nc* d"),
+  [{ text: "a *b\nc* d", bold: false, italic: false }],
+  "A marker that only closes on a later line must not format anything"
+);
+assert.deepStrictEqual(
+  styles("**abre\nfecha** depois"),
+  [{ text: "**abre\nfecha** depois", bold: false, italic: false }],
+  "The same holds for bold"
+);
+assert.deepStrictEqual(
+  styles("um *so* aqui\noutro *so* la"),
+  [
+    { text: "um ", bold: false, italic: false },
+    { text: "so", bold: false, italic: true },
+    { text: " aqui\noutro ", bold: false, italic: false },
+    { text: "so", bold: false, italic: true },
+    { text: " la", bold: false, italic: false },
+  ],
+  "Markers that do close on their own line keep working, line after line"
+);
+assert.deepStrictEqual(
+  styles("*aberto e nunca fechado"),
+  [{ text: "*aberto e nunca fechado", bold: false, italic: false }],
+  "A marker with no closer at all stays literal, as before"
+);
+assert.deepStrictEqual(
+  styles("**negrito** e *solto\nfim"),
+  [
+    { text: "negrito", bold: true, italic: false },
+    { text: " e *solto\nfim", bold: false, italic: false },
+  ],
+  "A closed marker and an unclosed one on the same line do not interfere"
+);
+// CRLF conta como quebra: e o que chega do Photoshop e do Windows
+assert.deepStrictEqual(
+  styles("a *b\rc* d"),
+  [{ text: "a *b\rc* d", bold: false, italic: false }],
+  "CR must end the line just like LF"
+);
+// O texto exibido continua mostrando o simbolo que o usuario digitou
+assert.strictEqual(
+  parseMarkdownRuns("a *b\nc* d").overlaySegments.map((s) => s.text).join(""),
+  "a *b\nc* d",
+  "The overlay must still show every character the user typed"
+);
+
 console.log("markdown convert tests passed");
