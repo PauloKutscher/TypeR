@@ -254,8 +254,88 @@ Repetir as tabelas acima com as bancadas prontas no scratchpad da sessão (`cdp.
 
 ---
 
-## Estado desta investigação
+## Estado da implementação
 
-Este documento é o resultado da fase de diagnóstico. **Nenhuma alteração de código foi feita** — a implementação segue a ordem de commits acima.
+O plano foi executado. Sete commits em `develop`:
 
-As bancadas de medição usadas (cliente CDP para o painel CEP, benchmark de cliques de style, benchmark de seleção de camada, benchmark de marquee, breakdown das funções do host, sonda de `typerPerf`, e as bancadas Node do reducer e do `fontPreview.js`) ficaram fora do repositório. Para reproduzir as medições é preciso um `.debug` válido na extensão instalada — ver Fase 5.
+| commit | fase | o que entrou |
+|---|---|---|
+| `afdb8c2` | 4a | testes de estabilidade de alias e folha append-only (falhavam antes) |
+| `e9e27f9` | 4a | alias de `@font-face` por fonte, acumulador em `WeakMap`, teto de 512 faces |
+| `1e795ad` | 4b | `getUserFonts()` devolve a mesma referência, painel inteiro compartilha índice, cache e tabela |
+| `2445a04` | 3 | `getTypeRPanelSnapshot` deixa de ler a camada inteira quando quem chama não precisa dela |
+| `18ed149` | — | ExtendScript deixa de interpretar errado condições mistas `&&` / `\|\|` |
+| `1dc55c5` | 1 + 2 | leitura do contorno pelo Action Manager; canal alfa só para quem quer a seleção de volta |
+| `ad30f82` | 5 | identidade do array `lines`; `.debug` versionado |
+
+### O defeito que a Fase 1 encontrou
+
+O parser ES3 do ExtendScript lê `X || Y && Z` como `(X || Y) && Z`. O fonte escrevia os parênteses, mas o `host.jsx` é gerado pelo UglifyJS e parênteses não são nós da AST: saem no caminho. Todas as expressões desse formato no host publicado significavam outra coisa.
+
+Em `_polygonScanlineSpan` isso derrubava um lado de cada span, `_buildPathShapeRows` nunca devolvia linhas, `_sampleSelectionShapeViaPath` sempre reportava `emptyRows`, e **toda seleção caía no amostrador legado de 21 operações**. Era daí que vinham os 423 ms — não do algoritmo, de um caminho rápido que nunca rodou.
+
+O mesmo erro afetava outros três lugares, todos de correção e não de performance: `_setLayerStroke` aplicava um contorno que devia ignorar, `resolveTypeRFontVariant` podia sair cedo numa run que devia resolver, e o ramo de cor de catálogo da biblioteca jam (três cópias) escolhia a classe errada. Todos reescritos como instruções separadas.
+
+`scripts/testBuildArtifacts.js` agora percorre a AST do `app/host.jsx` construído e falha em qualquer `||` cujo operando direito seja um `&&`. Essa classe de defeito não volta calada.
+
+### Resultados medidos
+
+Mesmo documento (1760×2560, 9 camadas de texto), mesmos styles, medindo antes e depois na mesma sessão.
+
+**Seleção manual (Fase 1)** — `getCurrentSelectionShape`, dentro do ExtendScript:
+
+| marquee | contorno rápido | amostrador legado | linhas diferentes |
+|---|---|---|---|
+| retângulo 600×500 | 94–98 ms | 402–420 ms | 0 |
+| losango | 116–130 ms | 397–408 ms | 0 |
+| côncavo (entalhado) | 118–122 ms | 410–422 ms | 0 |
+
+Ponta a ponta: **423 ms → 162–190 ms**. O critério da Fase 1 era abaixo de 300 ms. A marquee do usuário volta com os mesmos limites exatos, e nem o caminho rápido nem o lento deixam demarcador ou canal para trás.
+
+**Balão do bubble-aware (Fase 2)** — `getActiveLayerBubbleShape`:
+
+| | antes | depois |
+|---|---|---|
+| `_scanActiveLayerBubble`, média nas 9 camadas | 469 ms | **216 ms** |
+| visto pelo painel (`typerPerf`) | 413 ms | **288 ms** |
+| linhas contra o amostrador legado | — | idênticas nas 9 camadas |
+
+Duas mudanças, ambas em `_sampleSelectionShapeViaPath`:
+
+1. **O contorno passa pelo Action Manager.** `_readPathAnchorPolygons` já existia para o centróide: um `executeActionGet` no lugar de uma caminhada pelo DOM que custa ~5,7 ms por âncora. Num balão traçado (12 contornos, 678 pontos), 245–278 ms pelo DOM contra 48–79 ms aqui, com as linhas concordando em 0,2 px. O DOM continua como reserva quando `_pathAnchorsMatchDom` reprova a unidade; um contorno acima do orçamento de âncoras não recebe nenhum dos dois, porque a caminhada pelo DOM levaria minutos.
+2. **O canal alfa temporário virou opcional.** Ele custa 47 ms para criar e 18 ms para remover, e existe só para devolver a seleção exata que o usuário desenhou. Quem usa a varinha joga a seleção fora ao voltar: agora não paga. Se o scan falhar, recebe o próprio demarcador traçado como seleção, que é tudo de que o amostrador legado precisa.
+
+**Troca de fonte (Fase 4)** — 16 cliques alternando entre 4 styles com fontes diferentes:
+
+| | antes (fontes diferentes) | alvo (mesma fonte) | depois |
+|---|---|---|---|
+| `sheetWrites` | 16 | 1 | **0** |
+| `aliasChanges` | 16 | 0 | **0** |
+| `cardStyleWrites` | 48 | 0 | **0** |
+| click→paint médio / pior | 6 / 9 ms | 3 / 5 ms | **3 / 7 ms** |
+| frames > 50 ms | 1 | 0 | **0** |
+| `Layout` | 56,4 ms | 24,3 ms | **23,3 ms** |
+| `EventDispatch` | 89,5 ms | 20,4 ms | **33,9 ms** |
+
+O cenário "fonte diferente" virou o cenário "mesma fonte", que era exatamente o alvo.
+
+**Poll ocioso (Fase 3)** — 45 s com o painel parado: `getTypeRPanelSnapshot` 7 chamadas, média **4 ms**; `getSelectionChanged` 30 chamadas, média 6,7 ms; 228 ms de main thread em 45 s, **0,5%**. O critério era abaixo de 10 ms.
+
+### Uma ressalva sobre os números absolutos
+
+`jamText.getLayerText()` custava 89 ms no diagnóstico e mede 226–259 ms no fim da sessão, igual nas 9 camadas. Reconstruí o host com os arquivos jam anteriores à correção de precedência e medi 265 ms — ou seja, **não é regressão do código**: é o processo do Photoshop depois de horas de instrumentação (purgar caches e histórico não muda nada). Os números absolutos de `getTypeRPanelSnapshot` e `getSelectionChanged` nas tabelas acima carregam essa deriva; as comparações antes/depois foram todas medidas em sequência na mesma sessão e não carregam.
+
+Um benchmark limpo pede Photoshop recém-aberto.
+
+### O que ficou de fora, e por quê
+
+- **Baixar `samples` de 21 para 9** — refutado por medição (A3), e depois pela causa real: o custo era o caminho rápido não rodar.
+- **Subir o settle de 350 ms** (Fase 1, item 4) — o critério da fase já é cumprido com folga; subir o settle atrasa a forma sem reduzir trabalho.
+- **Adiar o scan do balão para o hover** (Fase 2, candidato 1) — as sugestões nascem com a forma do balão; adiar faria a lista aparecer sem forma e mudar sozinha depois. Isso é mudança de comportamento, não ganho.
+- **Reaproveitar o scan entre camadas do mesmo balão** (Fase 2, candidato 2) — o cache por camada já zera a segunda visita; com o scan em 216 ms o ganho restante não paga a chave nova.
+
+O critério "percorrer camadas com bubble-aware ON perto do custo com OFF" não foi atingido: 288 ms contra 56 ms. Ficou na metade do caminho, com a forma preservada.
+
+### Reproduzir
+
+As bancadas continuam fora do repositório, no scratchpad da sessão (`cdp.js`, `bench.js`, `benchSelect.js`, `benchMarquee.js`, `benchBubble.js`, `cmpShape.js`, `cmpBubble2.js`, `benchIdle.js`, `diagBubble3.js`, `benchLayerText.js`, `typerperf.js`). O `.debug` correto agora está versionado e o `install.ps1` o copia, então o debug remoto na porta 8001 funciona depois de uma instalação normal.
