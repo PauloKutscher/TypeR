@@ -390,6 +390,32 @@ A segunda linha não é regressão: alternando os dois builds três vezes seguid
 
 O critério pedia o ON perto do OFF. Não foi atingido: o ON continua cerca de três vezes o OFF. O ganho é de 40% e a forma passou a estar correta, mas quem liga o bubble-aware ainda paga um wand scan por balão novo, e isso é o que ele é.
 
+### Lista de regressão: o que foi conferido ao vivo
+
+| item | estado |
+|---|---|
+| seleção de style e destaque do ativo | verificado |
+| preview de fonte no nome do style | verificado — 26 nós com alias, 9 fontes distintas |
+| preview da linha atual | verificado |
+| isolamento por pasta | verificado — 6 / 16 / 10 styles conforme a pasta aberta |
+| abas | verificado — trocam o roteiro e voltam |
+| sugestões do TextShapeR | verificado |
+| aplicar uma forma | verificado — clicar na segunda sugestão reescreveu o texto da camada |
+| bubble-aware on/off | verificado |
+| seleção manual | verificado |
+| quick size | verificado — o campo aceita edição |
+| redimensionar o painel / auto-fit dos cards | verificado — escala 0,958 → 0,472 → 0,202 e volta |
+| prefixos | **não conferido** — o roteiro carregado não tem prefixos |
+| markdown | **não conferido** |
+| aprendizado (estrela / Alt / Ctrl / Shift) | **não conferido** — depende de teclado e modificadores reais |
+| batch multi-layer | **não conferido** |
+| multi-bubble de ponta a ponta | **não conferido** |
+| size preset (os botões, não o campo) | **não conferido** |
+
+Os seis não conferidos têm cobertura nas 31 suítes de `npm test`, mas ninguém os exercitou no painel. Não afirmo que estão certos; afirmo que não olhei.
+
+Duas armadilhas do próprio harness apareceram aqui e valem registro, porque geraram falso negativo: `selectLayerById` recebe um número e devolve `"error"` calado para qualquer outra coisa, e um `.replace(/\s+/g, " ")` que perdeu a barra pelo caminho vira `/s+/g` e apaga todos os "s" do texto exibido — cheguei a achar que tinha corrompido o roteiro do usuário, que estava intacto.
+
 ### Ainda em aberto
 
 Dos três itens que ficaram em aberto, dois foram fechados depois (o reuso entre camadas do mesmo balão foi implementado; a restauração pelo demarcador foi medida e recusada). Sobra um:
