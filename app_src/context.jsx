@@ -1564,6 +1564,7 @@ const baseReducer = (state, action) => {
     // components skip re-rendering (e.g. selecting a style rebuilds lines
     // but most of them are identical)
     const prevLines = state.lines || [];
+    let reusedEveryLine = prevLines.length === nextLines.length;
     newState.lines = nextLines.map((line) => {
       const prev = prevLines[line.rawIndex];
       if (
@@ -1581,8 +1582,13 @@ const baseReducer = (state, action) => {
       ) {
         return prev;
       }
+      reusedEveryLine = false;
       return line;
     });
+    // Same objects in the same order means the array itself can be handed back:
+    // a fresh array with identical contents still re-renders every consumer that
+    // depends on `lines` by identity, which is what selecting a style does.
+    if (reusedEveryLine && state.lines) newState.lines = state.lines;
   }
 
   // Phase 3: Update currentLine (when lines or line index changed)

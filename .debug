@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Remote debugging descriptor for development.
+
+  The Extension Id has to match CSXS/manifest.xml exactly ("typer"). A file that
+  named the folder ("typertools") instead was installed on a dev machine, and CEP
+  silently opened no debug port at all for the panel.
+
+  build_release.cmd works from an allow-list that does not include this file, so
+  it never reaches the user zip; install.ps1 copies it when it is present, which
+  is how a dev machine gets a working port and how a stale wrong one is replaced.
+
+  With Photoshop running, the panel is at http://127.0.0.1:8001
+-->
+<ExtensionList>
+    <Extension Id="typer">
+        <HostList>
+            <Host Name="PHXS" Port="8001" />
+            <Host Name="PHSP" Port="8002" />
+        </HostList>
+    </Extension>
+</ExtensionList>

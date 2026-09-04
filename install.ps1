@@ -117,6 +117,14 @@ foreach ($folder in $FoldersToCopy) {
     }
 }
 
+# Cas particulier : descripteur de débogage distant
+# Absent du zip de release (build_release.cmd travaille sur une liste blanche) :
+# la copie ne concerne donc que les machines de développement, où elle remplace
+# aussi un ancien .debug dont l'Extension Id ne correspondait pas au manifeste.
+if (Test-Path "$ScriptDir\.debug") {
+    Copy-Item "$ScriptDir\.debug" -Destination (Join-Path $TargetDir ".debug") -Force
+}
+
 # Cas particulier : thèmes
 if (Test-Path "$ScriptDir\themes") {
     $ThemeDest = "$TargetDir\app\themes"
