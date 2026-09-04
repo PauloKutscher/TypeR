@@ -115,49 +115,88 @@ const findInstalledFont = (fonts, textStyle) => {
 
 const quoteFontFamily = (value) => `"${escapeCssString(value)}"`;
 
+// Aliases used to be numbered by their position in the rule list, so the same
+// font changed name whenever another font entered or left the registry - and a
+// renamed family means the browser resolves that face from scratch while the
+// whole <style> block is re-injected, forcing a full style recalculation of the
+// panel. Measured in a running CEP panel: 16 of 16 style clicks renamed the
+// active layer's alias, rewrote the sheet and re-fitted the TextShapeR cards.
+//
+// Now every font gets its alias once and the sheet only ever grows. The style
+// list and the preview block share one table per installed-font list, so a font
+// the style list registered at startup costs the preview nothing. A different
+// font list (fonts installed mid-session) starts a fresh table, which is what
+// re-resolves the faces after an install.
+const registryStores = typeof WeakMap === "function" ? new WeakMap() : null;
+// The styles referencing a library are far fewer than the library itself; this
+// only guards against a pathological document adding faces without end.
+const MAX_PREVIEW_FACES = 512;
+
+const getRegistryStore = (fonts, revision) => {
+  if (!registryStores) return null;
+  const list = fonts || [];
+  let byRevision = registryStores.get(list);
+  if (!byRevision) {
+    byRevision = new Map();
+    registryStores.set(list, byRevision);
+  }
+  let store = byRevision.get(revision);
+  if (!store) {
+    store = { aliases: {}, rules: [], css: "" };
+    byRevision.set(revision, store);
+  }
+  return store;
+};
+
+const buildFontFaceRule = (alias, textStyle, installedFont) => {
+  const localNames = [
+    installedFont.postScriptName,
+    installedFont.name,
+    installedFont.family && installedFont.style
+      ? `${installedFont.family} ${installedFont.style}`
+      : "",
+    textStyle.fontPostScriptName,
+    textStyle.fontName && textStyle.fontStyleName
+      ? `${textStyle.fontName} ${textStyle.fontStyleName}`
+      : "",
+    textStyle.fontName,
+    installedFont.family,
+  ].filter((name, index, names) => name && names.indexOf(name) === index);
+
+  return `@font-face{font-family:${quoteFontFamily(alias)};src:${localNames
+    .map((name) => `local(${quoteFontFamily(name)})`)
+    .join(",")};}`;
+};
+
 const createFontPreviewRegistry = (fonts, textStyles, revision = 0, namespace = "") => {
-  const aliases = {};
-  const rules = [];
-  const seen = new Set();
   const namespaceSuffix = String(namespace || "")
     .replace(/[^a-z0-9_-]+/gi, "_");
+  const store = getRegistryStore(fonts, revision);
+  // Without WeakMap, fall back to a per-call registry rather than leaking one
+  // keyed by a font list that could then never be released
+  const aliases = store ? store.aliases : {};
+  const rules = store ? store.rules : [];
+  let added = false;
 
   (textStyles || []).forEach((textStyle) => {
     const key = getTextStyleFontKey(textStyle);
-    if (!key || seen.has(key)) return;
-    seen.add(key);
+    if (!key || aliases[key]) return;
+    if (rules.length >= MAX_PREVIEW_FACES) return;
 
     const installedFont = findInstalledFont(fonts, textStyle);
     if (!installedFont) return;
 
     const alias = `TypeRPreview${namespaceSuffix ? `_${namespaceSuffix}` : ""}_${revision}_${rules.length}`;
-    const localNames = [
-      installedFont.postScriptName,
-      installedFont.name,
-      installedFont.family && installedFont.style
-        ? `${installedFont.family} ${installedFont.style}`
-        : "",
-      textStyle.fontPostScriptName,
-      textStyle.fontName && textStyle.fontStyleName
-        ? `${textStyle.fontName} ${textStyle.fontStyleName}`
-        : "",
-      textStyle.fontName,
-      installedFont.family,
-    ].filter((name, index, names) => name && names.indexOf(name) === index);
-
     aliases[key] = alias;
-    rules.push(
-      `@font-face{font-family:${quoteFontFamily(alias)};src:${localNames
-        .map((name) => `local(${quoteFontFamily(name)})`)
-        .join(",")};}`
-    );
+    rules.push(buildFontFaceRule(alias, textStyle, installedFont));
+    added = true;
   });
 
-  return {
-    aliases,
-    css: rules.join("\n"),
-    revision,
-  };
+  if (store) {
+    if (added) store.css = rules.join("\n");
+    return { aliases: store.aliases, css: store.css, revision };
+  }
+  return { aliases, css: rules.join("\n"), revision };
 };
 
 const getFontPreviewFamily = (textStyle = {}, registry = {}) => {

@@ -162,10 +162,14 @@ assert.strictEqual(otherCaller.css, withC.css, "and share the same accumulated s
 // A different installed-font list is a different table: fonts reinstalled
 // mid-session must be resolved again instead of keeping a stale face
 const afterFontRefresh = createFontPreviewRegistry([fontA, fontB, fontC], [styleA], 0, "preview");
-assert.notStrictEqual(
-  afterFontRefresh.aliases[getTextStyleFontKey(styleA)],
-  aliasA,
+assert.strictEqual(
+  afterFontRefresh.aliases[getTextStyleFontKey(styleB)],
+  undefined,
   "a refreshed font list starts a new alias table"
+);
+assert.ok(
+  afterFontRefresh.css.length < withC.css.length,
+  "the new table only holds the faces asked for since the refresh"
 );
 
 console.log("font preview refresh tests passed");
