@@ -566,8 +566,15 @@ let userFonts = null;
 let userFontsRequestPending = false;
 let userFontsCallbacks = [];
 
+// Every caller gets the same array, on purpose: the font index, the resolved
+// font lookups and the @font-face alias table are all cached per list identity,
+// so handing out copies made the style list and the preview block each build
+// their own — two full passes over a typesetter's library, and two separate
+// sets of preview faces for the same fonts. Callers only ever read this list.
+const emptyUserFonts = [];
+
 const getUserFonts = () => {
-  return Array.isArray(userFonts) ? userFonts.concat([]) : [];
+  return Array.isArray(userFonts) ? userFonts : emptyUserFonts;
 };
 
 const refreshUserFonts = (callback, rescanHost) => {
@@ -586,7 +593,7 @@ const refreshUserFonts = (callback, rescanHost) => {
 
     const callbacks = userFontsCallbacks;
     userFontsCallbacks = [];
-    callbacks.forEach((fontCallback) => fontCallback(fonts.concat([])));
+    callbacks.forEach((fontCallback) => fontCallback(fonts));
   });
 };
 
