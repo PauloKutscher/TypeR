@@ -1,3 +1,4 @@
+import { parsePageMarker } from "../../pageMarker";
 import "./textBlock.scss";
 
 import React from "react";
@@ -71,7 +72,7 @@ const LineItem = React.memo(function LineItem({ line, direction, isCurrent, disp
   const className = "text-line" +
     (line.ignore ? " m-empty" : "") +
     (isCurrent ? " m-current" : "") +
-    (line.rawText.match(/Page [0-9]+/i) ? " m-page" : "");
+    (parsePageMarker(line.rawText) ? " m-page" : "");
 
   const handleSelect = React.useCallback(() => {
     dispatch({ type: "setCurrentLineIndex", index: line.rawIndex });
@@ -265,9 +266,9 @@ const TextBlock = React.memo(function TextBlock() {
     let image = context.state.images[0] || null;
     for (const line of context.state.lines) {
       if (line.ignore) {
-        const page = line.rawText.match(/Page ([0-9]+)/i);
+        const page = parsePageMarker(line.rawText);
         const pageImage = page
-          ? getImageForPage(context.state.images, Number(page[1]), pageImageLookup)
+          ? getImageForPage(context.state.images, page, pageImageLookup)
           : null;
         if (pageImage) image = pageImage;
       }
@@ -287,9 +288,9 @@ const TextBlock = React.memo(function TextBlock() {
     return context.state.lines.map((line) => {
       let lineNum;
       if (line.ignore) {
-        const page = line.rawText.match(/Page ([0-9]+)/i);
+        const page = parsePageMarker(line.rawText);
         const currentImage = page
-          ? getImageForPage(context.state.images, Number(page[1]), pageImageLookup)
+          ? getImageForPage(context.state.images, page, pageImageLookup)
           : null;
         if (currentImage) {
           lineNum = currentImage.name;

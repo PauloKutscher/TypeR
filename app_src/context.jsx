@@ -1,3 +1,4 @@
+import { parsePageMarker } from "./pageMarker";
 import React from "react";
 import PropTypes from "prop-types";
 import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, getUpdateTestConfig, clearUpdateTestConfig, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, nativeAlert } from "./utils";
@@ -516,7 +517,7 @@ const baseReducer = (state, action) => {
       let foundNextPage = false;
       for (let i = state.currentLineIndex + 1; i < state.lines.length; i++) {
         const line = state.lines[i];
-        if (line.rawText.match(/Page [0-9]+/i)) {
+        if (parsePageMarker(line.rawText)) {
           // Select the first usable line after that page marker.
           for (let j = i + 1; j < state.lines.length; j++) {
             if (!state.lines[j].ignore) {
@@ -539,13 +540,13 @@ const baseReducer = (state, action) => {
       if (!state.text) break;
       const pageMarkers = [];
       for (let i = 0; i < state.currentLineIndex; i++) {
-        if (state.lines[i].rawText.match(/Page [0-9]+/i)) pageMarkers.push(i);
+        if (parsePageMarker(state.lines[i].rawText)) pageMarkers.push(i);
       }
       // The nearest marker is the current page; move to the one before it.
       const targetMarker = pageMarkers.length > 1 ? pageMarkers[pageMarkers.length - 2] : -1;
       if (targetMarker < 0) break;
       for (let i = targetMarker + 1; i < state.lines.length; i++) {
-        if (state.lines[i].rawText.match(/Page [0-9]+/i)) break;
+        if (parsePageMarker(state.lines[i].rawText)) break;
         if (!state.lines[i].ignore) {
           newState.currentLineIndex = state.lines[i].rawIndex;
           thenScroll = true;
@@ -1285,12 +1286,6 @@ const baseReducer = (state, action) => {
     case "setMultiTabEnabled": {
       const enabled = action.value !== false;
       newState.multiTabEnabled = enabled;
-      if (!enabled && state.tabs.length > 1) {
-        // Disabling multi-tab keeps only the first tab; the rest is discarded
-        const firstTab = state.tabs[0];
-        newState.tabs = [firstTab];
-        loadTabIntoState(newState, firstTab);
-      }
       break;
     }
 
@@ -1514,7 +1509,7 @@ const baseReducer = (state, action) => {
         text = text.replace(ignoreTagsRegex, "");
       }
       text = text.trim();
-      const isPage = rawText.match(/Page [0-9]+/i);
+      const isPage = parsePageMarker(rawText);
       const ignore = !!ignorePrefix || !text || isPage;
       if (isPage && newState.images.length && lastTextLine) lastTextLine.last = true;
       const lineNumberState = getNextLineNumberState({
