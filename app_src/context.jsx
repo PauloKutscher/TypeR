@@ -1823,7 +1823,7 @@ const ContextProvider = React.memo(function ContextProvider(props) {
             // Silent install failed: fall back to the interactive modal
             dispatch({ type: "setModal", modal: "update", data });
           },
-          { inPlaceOnly: true }
+          { expectedVersion: data.version }
         );
         return;
       }
@@ -1831,7 +1831,7 @@ const ContextProvider = React.memo(function ContextProvider(props) {
       // Fetch the zip in the background so the Install click is instant
       prefetchUpdateZip(data.downloadUrl);
       dispatch({ type: "setModal", modal: "update", data });
-    });
+    }).catch(error => console.warn("Automatic update check failed:", error));
   }, [state.checkUpdates, state.autoUpdate]);
   return <Context.Provider value={contextValue}>{props.children}</Context.Provider>;
 });

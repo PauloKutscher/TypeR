@@ -1,10 +1,11 @@
+import { fetchBody } from "./network";
 import { createLatestTaskQueue } from "./latestTaskQueue";
 import { mergeLocaleBundle } from "./localeBundle";
 import { readJsonStorage, writeJsonStorage, reportStorageIssue } from "./storageIO";
 import "./lib/CSInterface";
 import { resolveStylePointText } from "./textLayerPayload";
 import { findNewerReleases, pickUpdateDownloadUrl } from "./updateLogic";
-import { installUpdateInPlace, uint8ToBase64 } from "./updateInstaller";
+import { installUpdateInPlace } from "./updateInstaller";
 import { UPDATE_TEST_CONFIG_FILE, parseUpdateTestConfig } from "./updateTestMode";
 import {
   PS_EVENT_SELECT,
@@ -46,12 +47,11 @@ const checkUpdate = async (currentVersion) => {
       ? testConfig.releasesUrl
       : "https://api.github.com/repos/ScanR/TypeR/releases";
     const comparisonVersion = testConfig ? testConfig.currentVersion : currentVersion;
-    const response = await fetch(
+    const releases = await fetchBody(
       releasesUrl,
       { headers: { Accept: "application/vnd.github.v3.html+json" } }
     );
-    if (!response.ok) return null;
-    const releases = await response.json();
+    if (!Array.isArray(releases)) throw new Error("invalidResponse");
     const newerReleases = findNewerReleases(releases, comparisonVersion);
     if (newerReleases.length > 0) {
       return {
@@ -67,6 +67,7 @@ const checkUpdate = async (currentVersion) => {
     }
   } catch (e) {
     console.error("Update check failed", e);
+    throw e;
   }
   return null;
 };
@@ -78,11 +79,7 @@ const fetchUpdateZip = (downloadUrl) => {
   if (cachedUpdateZip.url === downloadUrl && cachedUpdateZip.promise) {
     return cachedUpdateZip.promise;
   }
-  const promise = fetch(downloadUrl, { headers: { Accept: "application/octet-stream" } })
-    .then((response) => {
-      if (!response.ok) throw new Error(`Download failed: ${response.status}`);
-      return response.arrayBuffer();
-    })
+  const promise = fetchBody(downloadUrl, { headers: { Accept: "application/octet-stream" } }, 'arrayBuffer', 120000)
     .then((arrayBuffer) => new Uint8Array(arrayBuffer));
   cachedUpdateZip = { url: downloadUrl, promise };
   promise.catch(() => {
@@ -144,8 +141,8 @@ const notePanelInteraction = () => {
 const isPanelInteracting = () => Date.now() - lastPanelInteractionAt < PANEL_INTERACTION_WINDOW;
 
 if (window.addEventListener) {
-  window.addEventListener("pointerdown", notePanelInteraction, true);
-  window.addEventListener("pointerup", notePanelInteraction, true);
+  window.addEventListener(window.PointerEvent ? "pointerdown" : "mousedown", notePanelInteraction, true);
+  window.addEventListener(window.PointerEvent ? "pointerup" : "mouseup", notePanelInteraction, true);
   window.addEventListener("keydown", notePanelActivity, true);
   window.addEventListener("wheel", notePanelInteraction, { capture: true, passive: true });
   window.addEventListener("focus", notePanelActivity);
@@ -173,218 +170,16 @@ const trackHostAction = (callback) => {
   };
 };
 
-const evalScriptAsync = (script) =>
-  new Promise((resolve) => csInterface.evalScript(script, resolve));
-
-// Windows fallback installer: fully unattended. Waits for Photoshop to close,
-// installs, relaunches Photoshop, cleans itself up. No Read-Host anywhere.
-const buildWindowsInstallScript = () => `# TypeR Auto-Update Script
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$ErrorActionPreference = "Stop"
-
-$ScriptDir = $PSScriptRoot
-$zipPath = Join-Path $ScriptDir "TypeR.zip"
-$extractPath = Join-Path $ScriptDir "extracted"
-$TargetDir = Join-Path $env:APPDATA "Adobe\\CEP\\extensions\\typertools"
-
-Write-Host "+------------------------------------------------------------------+" -ForegroundColor Cyan
-Write-Host "|                      TypeR Auto-Updater                          |" -ForegroundColor Cyan
-Write-Host "+------------------------------------------------------------------+" -ForegroundColor Cyan
-Write-Host ""
-
-$psProc = Get-Process -Name "Photoshop" -ErrorAction SilentlyContinue | Select-Object -First 1
-$psExe = $null
-if ($psProc) {
-    $psExe = $psProc.Path
-    Write-Host "[*] Waiting for Photoshop to close..." -ForegroundColor Yellow
-    Write-Host "    Close Photoshop - the update will then install itself automatically."
-    while (Get-Process -Name "Photoshop" -ErrorAction SilentlyContinue) { Start-Sleep -Seconds 2 }
-}
-
-Write-Host "[*] Installing update..." -ForegroundColor Cyan
-
-if (Test-Path $extractPath) { Remove-Item $extractPath -Recurse -Force }
-New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
-Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
-
-# Locate the folder that contains CSXS (zip may nest content one level down)
-if (Test-Path "$extractPath\\CSXS") {
-    $sourcePath = $extractPath
-} else {
-    $contentFolder = Get-ChildItem -Path $extractPath -Directory | Where-Object { Test-Path "$($_.FullName)\\CSXS" } | Select-Object -First 1
-    if ($contentFolder) { $sourcePath = $contentFolder.FullName } else { $sourcePath = $extractPath }
-}
-
-# Replace only the application folders; user settings (storage*) are never touched
-New-Item -Path $TargetDir -ItemType Directory -Force | Out-Null
-foreach ($folder in @("app", "CSXS", "icons", "locale")) {
-    $src = Join-Path $sourcePath $folder
-    $dst = Join-Path $TargetDir $folder
-    if (Test-Path $src) {
-        if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
-        Copy-Item $src -Destination $dst -Recurse -Force
-    }
-}
-if (Test-Path "$sourcePath\\themes") {
-    $themeDest = Join-Path $TargetDir "app\\themes"
-    New-Item -Path $themeDest -ItemType Directory -Force | Out-Null
-    Copy-Item "$sourcePath\\themes\\*" -Destination $themeDest -Recurse -Force
-}
-
-Write-Host ""
-Write-Host "+------------------------------------------------------------------+" -ForegroundColor Green
-Write-Host "|                      Update Complete!                            |" -ForegroundColor Green
-Write-Host "+------------------------------------------------------------------+" -ForegroundColor Green
-Write-Host ""
-
-if ($psExe) {
-    Write-Host "[*] Relaunching Photoshop..." -ForegroundColor Cyan
-    Start-Process $psExe
-}
-Start-Sleep -Seconds 3
-
-Set-Location (Split-Path $ScriptDir -Parent)
-Remove-Item $ScriptDir -Recurse -Force -ErrorAction SilentlyContinue
-`;
-
-// macOS fallback installer: same unattended behavior as the Windows script
-const buildMacInstallScript = () => `#!/bin/bash
-# TypeR Auto-Update Script
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ZIP_PATH="$SCRIPT_DIR/TypeR.zip"
-EXTRACT_PATH="$SCRIPT_DIR/extracted"
-DEST_DIR="$HOME/Library/Application Support/Adobe/CEP/extensions/typertools"
-
-echo "+------------------------------------------------------------------+"
-echo "|                      TypeR Auto-Updater                          |"
-echo "+------------------------------------------------------------------+"
-echo ""
-
-PS_PID=$(pgrep -f "Adobe Photoshop.app/Contents/MacOS" | head -1)
-PS_APP=""
-if [ -n "$PS_PID" ]; then
-    PS_BIN=$(ps -o comm= -p "$PS_PID")
-    PS_APP="\${PS_BIN%%.app/*}.app"
-    echo "[*] Waiting for Photoshop to close..."
-    echo "    Close Photoshop - the update will then install itself automatically."
-    while pgrep -f "Adobe Photoshop.app/Contents/MacOS" > /dev/null; do sleep 2; done
-fi
-
-echo "[*] Installing update..."
-
-rm -rf "$EXTRACT_PATH"
-mkdir -p "$EXTRACT_PATH"
-unzip -o -q "$ZIP_PATH" -d "$EXTRACT_PATH"
-
-# Locate the folder that contains CSXS (zip may nest content one level down)
-if [ -d "$EXTRACT_PATH/CSXS" ]; then
-    SOURCE_PATH="$EXTRACT_PATH"
-else
-    CONTENT_FOLDER=$(find "$EXTRACT_PATH" -maxdepth 2 -type d -name "CSXS" | head -1 | xargs dirname 2>/dev/null)
-    if [ -n "$CONTENT_FOLDER" ]; then SOURCE_PATH="$CONTENT_FOLDER"; else SOURCE_PATH="$EXTRACT_PATH"; fi
-fi
-
-# Replace only the application folders; user settings (storage*) are never touched
-mkdir -p "$DEST_DIR"
-for folder in app CSXS icons locale; do
-    if [ -d "$SOURCE_PATH/$folder" ]; then
-        rm -rf "$DEST_DIR/$folder"
-        cp -R "$SOURCE_PATH/$folder" "$DEST_DIR/"
-    fi
-done
-if [ -d "$SOURCE_PATH/themes" ]; then
-    mkdir -p "$DEST_DIR/app/themes"
-    cp -R "$SOURCE_PATH/themes/"* "$DEST_DIR/app/themes/"
-fi
-
-echo ""
-echo "+------------------------------------------------------------------+"
-echo "|                      Update Complete!                            |"
-echo "+------------------------------------------------------------------+"
-echo ""
-
-if [ -n "$PS_APP" ] && [ -d "$PS_APP" ]; then
-    echo "[*] Relaunching Photoshop..."
-    open "$PS_APP"
-fi
-sleep 3
-
-cd "$HOME"
-rm -rf "$SCRIPT_DIR"
-`;
-
-// Fallback when in-place install is impossible: drop the zip and an unattended
-// installer script in Downloads/TypeR_Update and launch it. The only remaining
-// user action is closing Photoshop whenever convenient.
-const runScriptFallback = async (zipBytes, onProgress, onComplete) => {
-  const osType = getOSType();
-  const userData = csInterface.getSystemPath(window.SystemPath.USER_DATA);
-  const userHome = osType === 'win'
-    ? userData.split('/AppData/')[0]
-    : userData.replace('/Library/Application Support', '');
-  const downloadsPath = `${userHome}/Downloads/TypeR_Update`;
-  const zipPath = `${downloadsPath}/TypeR.zip`;
-
-  await evalScriptAsync(`deleteFolder(${getExtendScriptString(downloadsPath)})`);
-  const mkdirResult = window.cep.fs.makedir(downloadsPath);
-  if (mkdirResult.err && mkdirResult.err !== 0 && mkdirResult.err !== 17) { // 17 = already exists
-    throw new Error('Failed to create download directory');
-  }
-
-  const writeResult = window.cep.fs.writeFile(zipPath, uint8ToBase64(zipBytes), window.cep.encoding.Base64);
-  if (writeResult.err) {
-    throw new Error('Failed to write ZIP file');
-  }
-
-  let launcherPath;
-  if (osType === 'win') {
-    const psScriptPath = `${downloadsPath}/install_update.ps1`;
-    launcherPath = `${downloadsPath}/install_update.cmd`;
-    window.cep.fs.writeFile(psScriptPath, buildWindowsInstallScript());
-    window.cep.fs.writeFile(launcherPath, `@echo off\r\ncd /d "%~dp0"\r\nPowerShell -NoProfile -ExecutionPolicy Bypass -File "install_update.ps1"\r\n`);
-  } else {
-    launcherPath = `${downloadsPath}/install_update.command`;
-    window.cep.fs.writeFile(launcherPath, buildMacInstallScript());
-    await evalScriptAsync(`makeExecutable(${getExtendScriptString(launcherPath)})`);
-  }
-
-  onProgress && onProgress(locale.updateReady || 'Update ready to install...');
-
-  const launchResult = await evalScriptAsync(`launchInstaller(${getExtendScriptString(launcherPath)})`);
-  if (String(launchResult).indexOf('OK') !== 0) {
-    // Could not start the installer: at least show the folder so the user can
-    // run it manually
-    await evalScriptAsync(`openFolder(${getExtendScriptString(downloadsPath)})`);
-  }
-  onComplete && onComplete(true); // true = a Photoshop close is still needed
-};
-
 const downloadAndInstallUpdate = async (downloadUrl, onProgress, onComplete, onError, options = {}) => {
   try {
-    onProgress && onProgress(locale.updateDownloading || 'Downloading update...');
+    onProgress && onProgress(locale.updateDownloading);
     const zipBytes = await fetchUpdateZip(downloadUrl);
-
-    // Preferred path: overwrite the extension folder directly. CEF keeps the
-    // running panel in memory, so files on disk are not locked; the new
-    // version simply takes over at the next Photoshop restart.
-    try {
-      onProgress && onProgress(locale.updateInstalling || 'Installing update...');
-      await installUpdateInPlace(zipBytes, path);
-      onComplete && onComplete(false);
-      return;
-    } catch (inPlaceError) {
-      console.error('In-place update failed, falling back to script installer', inPlaceError);
-      if (options.inPlaceOnly) {
-        onError && onError(inPlaceError.message || 'Update failed');
-        return;
-      }
-    }
-
-    await runScriptFallback(zipBytes, onProgress, onComplete);
-  } catch (e) {
-    console.error('Update failed:', e);
-    onError && onError(e.message || 'Update failed');
+    onProgress && onProgress(locale.updateInstalling);
+    await installUpdateInPlace(zipBytes, path, null, options.expectedVersion);
+    onComplete && onComplete(false);
+  } catch (error) {
+    console.error('Update failed:', error);
+    onError && onError(error.message || locale.updateFailed);
   }
 };
 

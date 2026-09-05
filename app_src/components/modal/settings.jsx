@@ -1004,7 +1004,7 @@ const SettingsModal = React.memo(function SettingsModal() {
       } else {
         nativeAlert(locale.updateNoUpdate, locale.successTitle, false);
       }
-    });
+    }).catch(() => nativeAlert(locale.updateCheckFailed, locale.errorTitle, true));
   };
 
   const resetStorage = () => {

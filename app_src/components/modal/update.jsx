@@ -89,7 +89,7 @@ const UpdateModal = React.memo(function UpdateModal() {
             locale.successTitle,
             false
           );
-          close();
+          context.dispatch({ type: "setModal", modal: null });
         }
       },
       // onError
@@ -101,7 +101,8 @@ const UpdateModal = React.memo(function UpdateModal() {
           locale.errorTitle,
           true
         );
-      }
+      },
+      { expectedVersion: version }
     );
   };
   
