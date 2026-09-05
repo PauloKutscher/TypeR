@@ -1,3 +1,4 @@
+import { readJsonStorage, writeJsonStorage, reportStorageIssue } from "./storageIO";
 import "./lib/CSInterface";
 import { resolveStylePointText } from "./textLayerPayload";
 import { findNewerReleases, pickUpdateDownloadUrl } from "./updateLogic";
@@ -390,23 +391,16 @@ let storageReadError = null;
 let pendingStorageData = null;
 let pendingStorageTimer = null;
 let pendingStorageIdleDelay = 0;
+let pendingStorageSince = 0;
+const MAX_STORAGE_DELAY = 5000;
 
 const loadStorageCache = () => {
   if (storageCache !== null) {
     return { error: storageReadError, data: storageCache };
   }
-  const result = window.cep.fs.readFile(storagePath);
-  if (result.err) {
-    storageReadError = result.err;
-    storageCache = {};
-  } else {
-    storageReadError = null;
-    try {
-      storageCache = JSON.parse(result.data || "{}") || {};
-    } catch (e) {
-      storageCache = {};
-    }
-  }
+  const result = readJsonStorage(storagePath);
+  storageReadError = result.error || null;
+  storageCache = result.data;
   return { error: storageReadError, data: storageCache };
 };
 
@@ -423,8 +417,9 @@ const commitStorageData = (data, rewrite) => {
   const nextData = storage.error || rewrite ? data : Object.assign({}, storage.data, data);
   storageCache = nextData;
   storageReadError = null;
-  const result = window.cep.fs.writeFile(storagePath, JSON.stringify(nextData));
-  return !result.err;
+  const success = writeJsonStorage(storagePath, nextData);
+  if (!success) reportStorageIssue(storagePath, "write");
+  return success;
 };
 
 const flushStorageWrite = (force = false) => {
@@ -433,12 +428,12 @@ const flushStorageWrite = (force = false) => {
     pendingStorageTimer = null;
   }
   if (!pendingStorageData) return true;
-  if (!force && pendingStorageIdleDelay > 0) {
+  if (!force && pendingStorageIdleDelay > 0 && Date.now() - pendingStorageSince < MAX_STORAGE_DELAY) {
     const idleFor = Date.now() - lastPanelActivityAt;
     if (idleFor < pendingStorageIdleDelay) {
       pendingStorageTimer = setTimeout(
         flushStorageWrite,
-        pendingStorageIdleDelay - idleFor
+        Math.min(pendingStorageIdleDelay - idleFor, MAX_STORAGE_DELAY - (Date.now() - pendingStorageSince))
       );
       return true;
     }
@@ -446,9 +441,12 @@ const flushStorageWrite = (force = false) => {
   const data = pendingStorageData;
   pendingStorageData = null;
   pendingStorageIdleDelay = 0;
+  pendingStorageSince = 0;
   const success = commitStorageData(data, false);
   if (!success) {
     pendingStorageData = Object.assign({}, data, pendingStorageData || {});
+    pendingStorageSince = Date.now();
+    if (!force) pendingStorageTimer = setTimeout(flushStorageWrite, MAX_STORAGE_DELAY);
   }
   return success;
 };
@@ -460,6 +458,7 @@ const writeToStorage = (data, rewrite, options = {}) => {
   }
   const debounce = options.debounce || 0;
   if (debounce > 0) {
+    if (!pendingStorageSince) pendingStorageSince = Date.now();
     pendingStorageData = Object.assign({}, pendingStorageData || {}, data);
     pendingStorageIdleDelay = Math.max(
       pendingStorageIdleDelay,
@@ -468,11 +467,16 @@ const writeToStorage = (data, rewrite, options = {}) => {
     storageCache = Object.assign({}, loadStorageCache().data, pendingStorageData);
     storageReadError = null;
     if (pendingStorageTimer) clearTimeout(pendingStorageTimer);
-    pendingStorageTimer = setTimeout(flushStorageWrite, debounce);
+    pendingStorageTimer = setTimeout(flushStorageWrite, Math.min(debounce, Math.max(0, MAX_STORAGE_DELAY - (Date.now() - pendingStorageSince))));
     return true;
   }
-  flushStorageWrite();
-  return commitStorageData(data, false);
+  flushStorageWrite(true);
+  const success = commitStorageData(data, false);
+  if (!success) {
+    pendingStorageData = Object.assign({}, pendingStorageData || {}, data);
+    if (!pendingStorageSince) pendingStorageSince = Date.now();
+  }
+  return success;
 };
 
 if (window.addEventListener) {
@@ -482,6 +486,7 @@ if (window.addEventListener) {
 const deleteStorageFile = () => {
   flushStorageWrite(true);
   const result = window.cep.fs.deleteFile(storagePath);
+  window.cep.fs.deleteFile(storagePath + ".bak");
   deleteProfileAssets(getActiveProfileId());
   storageCache = {};
   storageReadError = null;

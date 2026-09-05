@@ -1,3 +1,4 @@
+import StorageNotice from "./components/storageNotice";
 import './index.scss';
 import './rtl.scss';
 import './lib/CSInterface';
@@ -52,6 +53,7 @@ const App = React.memo(function App() {
         <HotkeysListner />
         <MainComponent />
         <GlobalTooltip />
+        <StorageNotice />
       </ContextProvider>
     </ErrorBoundary>
   );
