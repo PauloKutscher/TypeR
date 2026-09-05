@@ -847,7 +847,7 @@ const convertHtmlToMarkdown = (html) => {
   return markdown;
 };
 
-const setActiveLayerText = (text, style, direction, callback = () => {}) => {
+const setActiveLayerText = (text, style, direction, callback = () => {}, options = {}) => {
   // Support legacy calls where direction is omitted and callback is 3rd parameter
   if (typeof direction === "function") {
     callback = direction;
@@ -872,6 +872,7 @@ const setActiveLayerText = (text, style, direction, callback = () => {}) => {
         style,
         direction,
         richTextRuns: parsed.richTextRuns,
+        preserveActiveTextSize: options.preserveActiveTextSize === true,
       });
   csInterface.evalScript("setActiveLayerText(" + data + ")", trackHostAction((error) => {
     if (error) nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
@@ -879,7 +880,7 @@ const setActiveLayerText = (text, style, direction, callback = () => {}) => {
   }));
 };
 
-const setSelectedTextLayers = (items, direction, callback = () => {}, restoreLayerIds = []) => {
+const setSelectedTextLayers = (items, direction, callback = () => {}, restoreLayerIds = [], options = {}) => {
   if (!Array.isArray(items) || items.length < 2) {
     nativeAlert(locale.errorSelectMultipleTextLayers, locale.errorTitle, true);
     callback(false);
@@ -894,6 +895,7 @@ const setSelectedTextLayers = (items, direction, callback = () => {}, restoreLay
       style: item.style || { textProps: getDefaultStyle(), stroke: getDefaultStroke() },
       direction,
       richTextRuns: parsed.richTextRuns,
+      preserveActiveTextSize: options.preserveActiveTextSize === true,
     };
   });
   const data = JSON.stringify({
@@ -1048,7 +1050,7 @@ const getSelectionChanged = (callback = () => {}) => {
   });
 };
 
-const createTextLayerInSelection = (text, style, pointText, padding, direction, callback = () => {}) => {
+const createTextLayerInSelection = (text, style, pointText, padding, direction, callback = () => {}, options = {}) => {
   // Support legacy calls where padding/direction are omitted and callback may be 4th or 5th parameter
   if (typeof padding === "function") {
     callback = padding;
@@ -1074,15 +1076,17 @@ const createTextLayerInSelection = (text, style, pointText, padding, direction, 
     padding: padding || 0,
     direction,
     richTextRuns: parsed.richTextRuns,
+    preserveActiveTextSize: options.preserveActiveTextSize === true,
   });
   csInterface.evalScript("createTextLayerInSelection(" + data + ", " + resolvedPointText + ")", trackHostAction((error) => {
     if (error === "smallSelection") nativeAlert(locale.errorSmallSelection, locale.errorTitle, true);
+    else if (error === "sizeSource") nativeAlert(locale.errorKeepTextSizeNoLayer || locale.errorNoTextLayer, locale.errorTitle, true);
     else if (error) nativeAlert(locale.errorNoSelection, locale.errorTitle, true);
     callback(!error);
   }));
 };
 
-const createTextLayersInStoredSelections = (texts, styles, selections, pointText, padding, direction, callback = () => {}) => {
+const createTextLayersInStoredSelections = (texts, styles, selections, pointText, padding, direction, callback = () => {}, options = {}) => {
   // Support legacy calls where padding/direction are omitted and callback may be 5th or 6th parameter
   if (typeof padding === "function") {
     callback = padding;
@@ -1114,10 +1118,12 @@ const createTextLayersInStoredSelections = (texts, styles, selections, pointText
     selections,
     padding: padding || 0,
     direction,
+    preserveActiveTextSize: options.preserveActiveTextSize === true,
   });
   csInterface.evalScript("createTextLayersInStoredSelections(" + data + ", " + !!pointText + ")", trackHostAction((error) => {
     if (error === "smallSelection") nativeAlert(locale.errorSmallSelection, locale.errorTitle, true);
     else if (error === "noSelection") nativeAlert(locale.errorNoSelection, locale.errorTitle, true);
+    else if (error === "sizeSource") nativeAlert(locale.errorKeepTextSizeNoLayer || locale.errorNoTextLayer, locale.errorTitle, true);
     else if (error === "invalidSelection") nativeAlert(locale.errorNoSelection, locale.errorTitle, true);
     else if (error && error.indexOf("scriptError:") === 0) nativeAlert(error.replace("scriptError: ", ""), locale.errorTitle, true);
     else if (error) nativeAlert("Error: " + error, locale.errorTitle, true);

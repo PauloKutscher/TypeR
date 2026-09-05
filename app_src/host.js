@@ -263,6 +263,20 @@ function _ensureStyle(style) {
   return normalized;
 }
 
+function _overrideStyleTextSize(style, size) {
+  if (!style || !(size > 0)) return style;
+  var ranges = style.textProps && style.textProps.layerText && style.textProps.layerText.textStyleRange;
+  if (!ranges || !ranges.length) return style;
+  for (var i = 0; i < ranges.length; i++) {
+    if (!ranges[i] || !ranges[i].textStyle) continue;
+    ranges[i].textStyle.size = size;
+    if (ranges[i].textStyle.impliedFontSize != null) {
+      ranges[i].textStyle.impliedFontSize = size;
+    }
+  }
+  return style;
+}
+
 function _resolveStyleSizeForDocument(style) {
   if (!style || style.autoSizeByPageWidth !== true || !documents.length) return style;
   var presets = style.sizePresets;
@@ -1088,6 +1102,9 @@ function _applyRichTextRanges(textParams, textRuns, textLength) {
 
 function _createAndSetLayerText(data, width, height) {
   var style = _resolveStyleSizeForDocument(_ensureStyle(data.style));
+  if (data.textSizeOverride > 0) {
+    _overrideStyleTextSize(style, data.textSizeOverride);
+  }
   style.textProps.layerText.textKey = _normalizeTextKey(data.text);
   style.textProps.layerText.textStyleRange[0].to = data.text.length;
   style.textProps.layerText.paragraphStyleRange[0].to = data.text.length;
@@ -1283,6 +1300,10 @@ function _setActiveLayerText() {
     var targetPoint = _resolveStylePointText(dataStyle, isPoint);
     if (isPoint) _changeToBoxText();
     var oldTextParams = jamText.getLayerText();
+    if (payload.preserveActiveTextSize && dataStyle && oldTextParams.layerText.textStyleRange &&
+        oldTextParams.layerText.textStyleRange[0] && oldTextParams.layerText.textStyleRange[0].textStyle) {
+      _overrideStyleTextSize(dataStyle, oldTextParams.layerText.textStyleRange[0].textStyle.size);
+    }
     var newTextParams;
     if (dataText && dataStyle) {
       newTextParams = dataStyle.textProps;
@@ -1620,6 +1641,13 @@ function _createTextLayerInSelection() {
   if (!documents.length) {
     state.result = "doc";
     return;
+  }
+  if (state.data.preserveActiveTextSize) {
+    if (!_layerIsTextLayer()) {
+      state.result = "sizeSource";
+      return;
+    }
+    state.data.textSizeOverride = _getTextLayerSize();
   }
   
   var selection = _checkSelection({ adaptiveOpen: true });
@@ -3175,6 +3203,14 @@ function _createTextLayersInStoredSelections() {
     state.result = "doc";
     return;
   }
+  var textSizeOverride = null;
+  if (state.data.preserveActiveTextSize) {
+    if (!_layerIsTextLayer()) {
+      state.result = "sizeSource";
+      return;
+    }
+    textSizeOverride = _getTextLayerSize();
+  }
   
   var texts = state.data.texts || [];
   var styles = state.data.styles || [];
@@ -3210,7 +3246,7 @@ function _createTextLayersInStoredSelections() {
       }
 
       // Create the text layer.
-      var data = { text: text, style: style, direction: state.data.direction, richTextRuns: textRuns };
+      var data = { text: text, style: style, direction: state.data.direction, richTextRuns: textRuns, textSizeOverride: textSizeOverride };
       _createAndSetLayerText(data, dimensions.width, dimensions.height);
 
       var bounds = _getCurrentTextLayerBounds();

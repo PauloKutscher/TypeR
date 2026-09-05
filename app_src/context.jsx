@@ -324,6 +324,9 @@ const initialState = {
   styleSizeTipShown: storage.data?.styleSizeTipShown === true,
   styleSizeTipVisible: false,
   shortcut: shortcutMigration.shortcuts,
+  // Live keyboard state (is the keep-size modifier held right now); never
+  // persisted, and placed after the storage spread so it always starts false
+  keepSizeHeld: false,
   uiLayout: normalizeUiLayout(storage.data?.uiLayout),
   // The theme registry is filled by the theme manager at import time, so the
   // stored id can already point at a custom theme here
@@ -978,6 +981,11 @@ const baseReducer = (state, action) => {
 
     case "setMiddleEast": {
       newState.middleEast = !!action.value;
+      break;
+    }
+
+    case "setKeepSizeHeld": {
+      newState.keepSizeHeld = !!action.value;
       break;
     }
 

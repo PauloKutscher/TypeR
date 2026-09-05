@@ -131,6 +131,7 @@ const HelpModal = React.memo(function HelpModal() {
     const shortcutDetails = {
         add: locale.helpQuickPasteDescr,
         apply: locale.helpQuickApplyDescr,
+        keepTextSize: locale.shortcut_keepTextSizeDescr,
         center: locale.helpQuickAlignDescr,
         insertText: locale.helpShortcutInsertTextDescr || 'Pastes the line text only, keeping the layer style.',
         previous: locale.helpShortcutPreviousDescr || 'Moves to the previous non-ignored line.',

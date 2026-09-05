@@ -383,14 +383,28 @@
     }
 }
 
-.shortcut-row-label {
+.shortcut-row-copy {
     flex: 1 1 auto;
     min-width: 0;
+}
+
+.shortcut-row-label {
     font-size: 12px;
     font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.shortcut-row-descr {
+    margin-top: 2px;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 10px;
+    line-height: 1.25;
+
+    .light-theme & {
+        color: rgba(0, 0, 0, 0.58);
+    }
 }
 
 .shortcut-capture {

@@ -236,6 +236,36 @@ const SettingsModal = React.memo(function SettingsModal() {
     return conflicts;
   }, [shortcutDraft]);
 
+  // A modifier-only shortcut whose keys are all contained in one of its target
+  // bindings can never be released while that command fires: the command would
+  // permanently run in its modified form (e.g. keepTextSize=SHIFT with
+  // apply=WIN+SHIFT). Matching is subset-based, so warn about the overlap.
+  const shortcutModifierOverlaps = React.useMemo(() => {
+    const overlaps = {};
+    const normalize = (keys) => (keys || []).map((key) => String(key).toUpperCase());
+    shortcutCommands.forEach((command) => {
+      if (!command.modifierOnly || !Array.isArray(command.appliesTo)) return;
+      const modifierKeys = normalize(shortcutDraft[command.id]);
+      if (!modifierKeys.length) return;
+      const covered = command.appliesTo.filter((targetId) => {
+        const targetKeys = normalize(shortcutDraft[targetId]);
+        return targetKeys.length && modifierKeys.every((key) => targetKeys.includes(key));
+      });
+      if (!covered.length) return;
+      const names = covered
+        .map((targetId) => {
+          const target = shortcutCommands.find((other) => other.id === targetId);
+          return (target && locale[target.label]) || targetId;
+        })
+        .join(", ");
+      overlaps[command.id] = names;
+      covered.forEach((targetId) => {
+        overlaps[targetId] = locale[command.label] || command.id;
+      });
+    });
+    return overlaps;
+  }, [shortcutDraft]);
+
   const changeShortcut = React.useCallback((id, keys) => {
     setShortcutDraft((current) => ({ ...current, [id]: keys }));
     setEdited(true);
@@ -1805,11 +1835,15 @@ const SettingsModal = React.memo(function SettingsModal() {
                     key={command.id}
                     value={shortcutDraft[command.id] || []}
                     index={command.id}
+                    modifierOnly={command.modifierOnly === true}
                     onChange={changeShortcut}
                     conflict={shortcutConflicts[command.id]
                       ? (locale.shortcutConflict || "Also assigned to: {actions}")
                         .replace("{actions}", shortcutConflicts[command.id])
-                      : ""}
+                      : shortcutModifierOverlaps[command.id]
+                        ? (locale.shortcutModifierOverlap || "Always combined with: {actions}")
+                          .replace("{actions}", shortcutModifierOverlaps[command.id])
+                        : ""}
                   />
                 ))}
               </div>
