@@ -1,3 +1,4 @@
+import { validateImportData, repairFolderHierarchy } from "./librarySerialization";
 import { parsePageMarker } from "./pageMarker";
 import React from "react";
 import PropTypes from "prop-types";
@@ -188,6 +189,7 @@ const defaultShortcut = getDefaultShortcuts();
 const shortcutMigration = migrateShortcutDefaults(storage.data?.shortcut, defaultShortcut);
 
 const normalizeFolders = (folders) => {
+  folders = repairFolderHierarchy(folders);
   const normalized = (folders || []).map((folder) => {
     const parentId = folder?.parentId === undefined || folder?.parentId === null || folder?.parentId === "" ? null : folder.parentId;
     return {
@@ -226,10 +228,13 @@ const collectDescendantFolderIds = (folders, folderId) => {
   const ids = [];
   if (!folderId) return ids;
   const queue = [folderId];
+  const visited = new Set([folderId]);
   while (queue.length) {
     const current = queue.shift();
     const children = (folders || []).filter((folder) => (folder.parentId || null) === current);
     for (const child of children) {
+      if (visited.has(child.id)) continue;
+      visited.add(child.id);
       ids.push(child.id);
       queue.push(child.id);
     }
@@ -370,6 +375,12 @@ if (tabStorage.migrated) {
 }
 
 const baseReducer = (state, action) => {
+  if (action.type === "import" || action.type === "importStyleLibrary" || action.type === "importStyleFolder") {
+    try {
+      const data = action.type === "import" ? action.data : { folders: action.folders || (action.folder ? [action.folder] : []), styles: action.styles || [] };
+      validateImportData(data);
+    } catch (error) { nativeAlert(locale.errorImportStyles, locale.errorTitle, true); return state; }
+  }
   let thenScroll = false;
   let thenSelectStyle = false;
   let forceStylePrefixRefresh = false;
@@ -399,8 +410,8 @@ const baseReducer = (state, action) => {
 
     case "import": {
       for (const field in action.data) {
-        if (!action.data.hasOwnProperty(field)) continue;
-        if (!initialState.hasOwnProperty(field)) continue;
+        if (!Object.prototype.hasOwnProperty.call(action.data, field)) continue;
+        if (!storeFields.includes(field)) continue;
         if (field === "styles" && state.styles) {
           const styles = [];
           let asked = false;

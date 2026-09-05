@@ -40,10 +40,13 @@ const collectDescendantIds = (folders, folderId) => {
   const ids = [];
   if (!folderId) return ids;
   const queue = [folderId];
+  const visited = new Set([folderId]);
   while (queue.length) {
     const current = queue.shift();
     const children = (folders || []).filter((folder) => (folder.parentId || null) === current);
     children.forEach((child) => {
+      if (visited.has(child.id)) return;
+      visited.add(child.id);
       ids.push(child.id);
       queue.push(child.id);
     });

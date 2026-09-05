@@ -1,10 +1,11 @@
+import { serializeStyle, validateImportData } from "../../librarySerialization";
 import React from "react";
 import { FiX, FiSettings, FiEye, FiEyeOff, FiToggleLeft, FiDatabase, FiAlertTriangle, FiChevronUp, FiChevronDown, FiRotateCcw, FiCheck, FiPlayCircle, FiType, FiEdit2, FiPlus, FiImage, FiTrash2, FiUsers } from "react-icons/fi";
 import { MdSave } from "react-icons/md";
 import { FaKeyboard, FaFileExport, FaFileImport } from "react-icons/fa";
 
 import config from "../../config";
-import { locale, nativeAlert, nativeConfirm, checkUpdate, readStorage, writeToStorage, deleteStorageFile } from "../../utils";
+import { backupStorage, locale, nativeAlert, nativeConfirm, checkUpdate, readStorage, writeToStorage, deleteStorageFile } from "../../utils";
 import { useContext, defaultUiLayout, normalizeUiLayout } from "../../context";
 import { sanitizeTextShapeRTuning } from "../../textShapeR";
 import {
@@ -840,13 +841,18 @@ const SettingsModal = React.memo(function SettingsModal() {
     const pathSelect = window.cep.fs.showOpenDialogEx(true, false, null, null, ["json"]);
     if (!pathSelect?.data?.length) return false;
     let foldersImported = 0;
+    let backedUp = false;
     pathSelect.data.forEach((path) => {
       const result = window.cep.fs.readFile(path);
       if (result.err) {
         nativeAlert(locale.errorImportStyles, locale.errorTitle, true);
       } else {
         try {
-          const data = JSON.parse(result.data);
+          const data = validateImportData(JSON.parse(result.data));
+          if (!backedUp) {
+            if (!backupStorage()) { nativeAlert(locale.storageWarning, locale.errorTitle, true); return; }
+            backedUp = true;
+          }
           if (data.pastePointText === undefined && data.textItemKind !== undefined) {
             data.pastePointText = !!data.textItemKind;
           }
@@ -863,6 +869,7 @@ const SettingsModal = React.memo(function SettingsModal() {
             const importedAt = Date.now();
             const dataFolder = { id: folderId, name: data.name };
             const styles = data.exportedStyles.map((style) => ({
+                ...serializeStyle(style),
                 name: style.name,
                 id: Math.random().toString(36).substring(2, 8),
                 folder: folderId,
@@ -902,6 +909,7 @@ const SettingsModal = React.memo(function SettingsModal() {
             }));
             const importedAt = Date.now();
             const styles = data.styles.map((style) => ({
+              ...serializeStyle(style),
               id: Math.random().toString(36).substring(2, 8),
               name: style.name,
               folder: style.folder ? idMap[style.folder] : null,
