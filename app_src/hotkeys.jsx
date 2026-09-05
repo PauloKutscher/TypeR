@@ -1,3 +1,4 @@
+import { getNumpadStyleId } from "./numpadStyleShortcuts";
 import { requestModalClose } from "./modalClose";
 import React from "react";
 
@@ -144,6 +145,14 @@ const HotkeysListner = React.memo(function HotkeysListner() {
         requestModalClose(() => context.dispatch({ type: "setModal" }));
       }
       syncKeepSizeHeld(context, getDomModifierKeys(e));
+      if (!e.repeat && !context.getState().modalType && !isFormFieldActive() && getDomModifierKeys(e).length === 0 && (e.location === 3 || /^Numpad[1-9]$/.test(e.code || ''))) {
+        const state = context.getState();
+        const styleId = getNumpadStyleId(state.styles, state.currentStyleId, [e.code || ('NUMPAD' + e.key)]);
+        if (styleId !== null) {
+          e.preventDefault();
+          context.dispatch({ type: 'setCurrentStyleId', id: styleId });
+        }
+      }
     };
     // On keyup the released modifier is already reported as false, so the
     // same event-flag read clears the badge
