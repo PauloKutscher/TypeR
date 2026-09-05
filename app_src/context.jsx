@@ -59,7 +59,6 @@ const storeFields = [
   "direction",
   "middleEast",
   "lastOpenedImagePath",
-  "storedSelections",
   "multiBubbleMode",
   "showTips",
   "exportFolderFontTipDismissed",
@@ -354,8 +353,8 @@ initialState.tabs = tabStorage.tabs;
 initialState.currentTabId = tabStorage.currentTabId;
 const activeTab = initialState.tabs.find((tab) => tab.id === initialState.currentTabId) || initialState.tabs[0];
 loadTabIntoState(initialState, activeTab);
-// Keep stored selections across restarts (loadTabIntoState clears them)
-initialState.storedSelections = storage.data?.storedSelections || [];
+// Captured coordinates belong to a live Photoshop session and must be recaptured.
+initialState.storedSelections = [];
 
 if (shortcutMigration.migrated) {
   writeToStorage({ shortcut: initialState.shortcut });
@@ -1653,7 +1652,7 @@ const baseReducer = (state, action) => {
     }
   }
   if (hasStorageChange) {
-    const dataToStore = {};
+    const dataToStore = { storedSelections: undefined };
     let shouldDebounceStorage = false;
     for (let i = 0; i < persistedFields.length; i++) {
       const field = persistedFields[i];

@@ -859,6 +859,11 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     getSelectionChanged((selection) => {
       selectionCheckPending.current = false;
       if (selection) {
+        if (selection.documentChanged) {
+          context.dispatch({ type: "clearSelections", preserveLine: true });
+          setTimeout(() => { if (selectionCheckCallbackRef.current) selectionCheckCallbackRef.current(); }, 0);
+          return;
+        }
         notePanelActivity();
         // The host detected a Shift-add growing the previous selection:
         // multi-bubble needs one selection at a time, so warn instead of

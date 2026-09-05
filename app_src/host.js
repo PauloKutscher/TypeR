@@ -127,6 +127,7 @@ var _hostState = {
     selections: [],
   },
   hiddenCleaningLayerIdsByDocument: {},
+  documentSession: String(new Date().getTime()) + ":" + String(Math.random()),
   lastOpenedDocId: null,
   suspendedRun: null,
   pathScanFails: 0,
@@ -3103,7 +3104,28 @@ function undoLastTyperChange() {
   }
 }
 
+function getTypeRDocumentKey() {
+  return documents.length ? _hostState.documentSession + ":" + String(app.activeDocument.id) : "";
+}
+
 function getSelectionChanged() {
+  var monitor = _hostState.selectionMonitor;
+  var documentKey = getTypeRDocumentKey();
+  if (monitor.documentKey !== documentKey) {
+    monitor.documentKey = documentKey;
+    monitor.lastBoundsKey = null;
+    monitor.lastBounds = null;
+    monitor.multiWarnBounds = null;
+    return jamJSON.stringify({ documentChanged: true, documentKey: documentKey });
+  }
+  var result = jamJSON.parse(_getSelectionChanged());
+  result.documentKey = documentKey;
+  var selections = result.multiSelection || [];
+  for (var i = 0; i < selections.length; i++) selections[i].documentKey = documentKey;
+  return jamJSON.stringify(result);
+}
+
+function _getSelectionChanged() {
   try {
     var monitor = _hostState.selectionMonitor;
     var keyboardState = ScriptUI.environment && ScriptUI.environment.keyboardState;
@@ -3365,25 +3387,52 @@ function createTextLayersInStoredSelections(data, point) {
     state.selections = [];
   }
   
-  app.activeDocument.suspendHistory("TyperTools Multiple Paste", "_createTextLayersInStoredSelections()");
+  if (!documents.length) return "doc";
+  var documentKey = getTypeRDocumentKey();
+  var count = state.selections.length;
+  if (!count || !data.texts || data.texts.length !== count) return "noSelection";
+  for (var index = 0; index < count; index++) {
+    var selection = state.selections[index];
+    if (!selection || !selection.documentKey || selection.documentKey !== documentKey) return "wrongDocument";
+    if (!data.texts[index]) return "noText";
+    var dimensions = _calculateSelectionDimensions(selection, state.padding);
+    if (!dimensions || !isFinite(dimensions.width) || !isFinite(dimensions.height) || dimensions.width <= 0 || dimensions.height <= 0) return "invalidSelection";
+  }
+  var doc = app.activeDocument;
+  var previousHistory = doc.activeHistoryState;
+  try {
+    doc.suspendHistory("TyperTools Multiple Paste", "_createTextLayersInStoredSelections()");
+  } catch (error) {
+    state.result = "scriptError: " + error.message;
+  }
+  if (state.result) {
+    try { doc.activeHistoryState = previousHistory; }
+    catch (rollbackError) { return "rollbackFailed"; }
+  }
   return state.result;
 }
 
 function openFile(path, autoClose) {
-  if (autoClose && _hostState.lastOpenedDocId !== null) {
-    for (var i = 0; i < app.documents.length; i++) {
-      var doc = app.documents[i];
-      if (doc.id === _hostState.lastOpenedDocId) {
-        try {
-          doc.close(SaveOptions.SAVECHANGES);
-        } catch (e) {}
-        break;
+  try {
+    var file = File(path);
+    if (!file.exists) throw new Error("File not found");
+    var previousId = _hostState.lastOpenedDocId;
+    var newDoc = app.open(file);
+    if (autoClose && previousId !== null && previousId !== newDoc.id) {
+      for (var i = 0; i < app.documents.length; i++) {
+        var doc = app.documents[i];
+        if (doc.id === previousId) {
+          try { doc.close(SaveOptions.SAVECHANGES); }
+          catch (saveError) { app.activeDocument = doc; throw saveError; }
+          break;
+        }
       }
     }
-  }
-  var newDoc = app.open(File(path));
-  if (autoClose) {
+    app.activeDocument = newDoc;
     _hostState.lastOpenedDocId = newDoc.id;
+    return jamJSON.stringify({ ok: true, path: path, documentKey: getTypeRDocumentKey() });
+  } catch (error) {
+    return jamJSON.stringify({ ok: false, path: path, error: String(error.message || error) });
   }
 }
 

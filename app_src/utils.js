@@ -1,3 +1,4 @@
+import { createLatestTaskQueue } from "./latestTaskQueue";
 import { mergeLocaleBundle } from "./localeBundle";
 import { readJsonStorage, writeJsonStorage, reportStorageIssue } from "./storageIO";
 import "./lib/CSInterface";
@@ -1050,7 +1051,8 @@ const getAllLayersRenderedTexts = (scanBubbles, callback = () => {}) => {
 const getSelectionChanged = (callback = () => {}) => {
   csInterface.evalScript("getSelectionChanged()", (result) => {
     const data = safeJsonParse(result);
-    if (Date.now() < selectionResultsSuppressedUntil || data.noChange || data.error) {
+    if (data.documentChanged) { callback(data); }
+    else if (Date.now() < selectionResultsSuppressedUntil || data.noChange || data.error) {
       callback(null);
     } else if (data.multipleSelections) {
       // The host saw one selection grow around the previous one (Shift-add):
@@ -1139,6 +1141,9 @@ const createTextLayersInStoredSelections = (texts, styles, selections, pointText
     else if (error === "noSelection") nativeAlert(locale.errorNoSelection, locale.errorTitle, true);
     else if (error === "sizeSource") nativeAlert(locale.errorKeepTextSizeNoLayer || locale.errorNoTextLayer, locale.errorTitle, true);
     else if (error === "invalidSelection") nativeAlert(locale.errorNoSelection, locale.errorTitle, true);
+    else if (error === "wrongDocument") nativeAlert(locale.errorSelectionDocument, locale.errorTitle, true);
+    else if (error === "noText") nativeAlert(locale.errorNoText, locale.errorTitle, true);
+    else if (error === "rollbackFailed") nativeAlert(locale.errorBatchRollback, locale.errorTitle, true);
     else if (error && error.indexOf("scriptError:") === 0) nativeAlert(error.replace("scriptError: ", ""), locale.errorTitle, true);
     else if (error) nativeAlert("Error: " + error, locale.errorTitle, true);
     callback(!error);
@@ -1502,14 +1507,14 @@ const getDefaultStroke = () => {
   };
 };
 
-const openFile = (path, autoClose = false) => {
-  const encodedPath = JSON.stringify(path);
+const queueFileOpen = createLatestTaskQueue((request, done) => {
   csInterface.evalScript(
-    "openFile(" + encodedPath + ", " + (autoClose ? "true" : "false") + ")"
+    "openFile(" + getExtendScriptString(request.path) + ", " + !!request.autoClose + ")",
+    trackHostAction((raw) => done(safeJsonParse(raw, { ok: false })))
   );
-};
+});
+const openFile = (path, autoClose = false, callback = () => {}) => queueFileOpen({ path, autoClose }, callback);
 
-// FontScanR: scan one .psd file for text-layer font data
 const scanPsdFonts = (path, callback) => {
   csInterface.evalScript(
     "scanPsdFonts(" + getExtendScriptString(path) + ")",
