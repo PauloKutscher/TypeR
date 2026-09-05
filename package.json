@@ -14,7 +14,8 @@
     "test:update:prepare": "node scripts/prepareUpdateTest.js",
     "test:update:server": "node scripts/updateTestServer.js",
     "test:build": "node scripts/testBuildArtifacts.js",
-    "verify": "npm test && npm run build && npm run test:build"
+    "verify": "npm test && npm run build && npm run test:build",
+    "release": "npm run verify && node scripts/buildRelease.js"
   },
   "dependencies": {
     "@babel/runtime": "^7.15.4",
