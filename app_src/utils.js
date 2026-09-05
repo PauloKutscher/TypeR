@@ -1,3 +1,4 @@
+import { mergeLocaleBundle } from "./localeBundle";
 import { readJsonStorage, writeJsonStorage, reportStorageIssue } from "./storageIO";
 import "./lib/CSInterface";
 import { resolveStylePointText } from "./textLayerPayload";
@@ -543,7 +544,8 @@ const parseLocaleFile = (str) => {
 };
 
 const initLocale = () => {
-  locale = csInterface.initResourceBundle();
+  const automatic = csInterface.initResourceBundle();
+  locale = {};
   const loadLocaleFile = (file) => {
     const result = window.cep.fs.readFile(file);
     if (!result.err) {
@@ -553,6 +555,7 @@ const initLocale = () => {
   };
   // Always merge default strings to ensure fallbacks for new keys
   loadLocaleFile(`${path}/locale/messages.properties`);
+  locale = mergeLocaleBundle(locale, automatic);
   const lang = readStorage("language");
   if (lang && lang !== "auto") {
     const file = lang === "en_US" ? `${path}/locale/messages.properties` : `${path}/locale/${lang}/messages.properties`;

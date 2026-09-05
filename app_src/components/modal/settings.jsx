@@ -1,3 +1,4 @@
+import { useModalClose } from "../../modalClose";
 import { serializeStyle, validateImportData } from "../../librarySerialization";
 import React from "react";
 import { FiX, FiSettings, FiEye, FiEyeOff, FiToggleLeft, FiDatabase, FiAlertTriangle, FiChevronUp, FiChevronDown, FiRotateCcw, FiCheck, FiPlayCircle, FiType, FiEdit2, FiPlus, FiImage, FiTrash2, FiUsers } from "react-icons/fi";
@@ -283,6 +284,7 @@ const SettingsModal = React.memo(function SettingsModal() {
     }
     closeModal();
   };
+  useModalClose(close);
 
   const confirmClose = () => {
     setDiscardConfirmOpen(false);
@@ -322,7 +324,6 @@ const SettingsModal = React.memo(function SettingsModal() {
   const changeMiddleEast = (e) => {
     const val = e.target.checked;
     setMiddleEast(val);
-    context.dispatch({ type: "setMiddleEast", value: val });
     setEdited(true);
   };
 

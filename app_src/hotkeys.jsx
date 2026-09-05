@@ -1,3 +1,4 @@
+import { requestModalClose } from "./modalClose";
 import React from "react";
 
 import { csInterface, getHotkeyPressed, isHostActionPending, isPanelIdle, isPanelInteracting, notePanelActivity, onMouseShortcut, startForegroundWatcher } from "./utils";
@@ -139,7 +140,8 @@ const HotkeysListner = React.memo(function HotkeysListner() {
 
     const handleKeyDown = (e) => {
       if (e.key === "Escape" && context.getState().modalType) {
-        context.dispatch({ type: "setModal" });
+        e.preventDefault();
+        requestModalClose(() => context.dispatch({ type: "setModal" }));
       }
       syncKeepSizeHeld(context, getDomModifierKeys(e));
     };
