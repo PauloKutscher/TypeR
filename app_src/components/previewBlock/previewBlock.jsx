@@ -495,7 +495,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           const data = JSON.parse(result || "{}");
           // A transient "a selection is active" answer says nothing about the
           // bubble: never memoize it, or the layer stays shapeless afterwards
-          if (data && data.error === "hasSelection") return;
+          if (data && (data.error === "hasSelection" || data.error === "historyBusy")) return;
           // Cache failures too: retrying the wand on every poll would spam
           // the document with temporary selections
           inlineShapeKey.current = bubbleKey;

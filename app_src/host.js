@@ -160,6 +160,84 @@ function _withSuspendedHistory(name, fn) {
   return result;
 }
 
+// Shape detection reads pixels through temporary channels, paths and selections.
+// Grouping those operations still retains a full scan in Photoshop history.
+// Roll back and delete only that new state, never the user's undo/redo states.
+function _withTemporaryHistory(name, fn) {
+  var doc = app.activeDocument;
+  var scanName = name;
+  var historyLimit = null;
+  var reservedHistorySlot = false;
+  try {
+    var count = doc.historyStates.length;
+    // Starting a new operation after Undo would discard the redo branch.
+    if (_hostState.temporaryHistoryFailed || count < 2 ||
+        _getActiveHistoryIndex() !== count - 1) {
+      return { error: "historyBusy" };
+    }
+    // A no-op or failed suspension must never match an existing user state.
+    if (doc.historyStates[count - 1].name === scanName) scanName += " (temporary)";
+    // Reserve room only when needed, then restore the preference in finally.
+    // Otherwise the scan itself could evict a real undo state at capacity.
+    historyLimit = app.preferences.numberOfHistoryStates;
+    if (!(historyLimit > 0)) return { error: "historyBusy" };
+    if (count >= historyLimit) {
+      reservedHistorySlot = true;
+      app.preferences.numberOfHistoryStates = count + 1;
+      if (app.preferences.numberOfHistoryStates <= count) throw new Error("historyCapacity");
+    }
+  } catch (historyError) {
+    if (reservedHistorySlot) {
+      try { app.preferences.numberOfHistoryStates = historyLimit; } catch (limitError) {}
+    }
+    return { error: "historyBusy" };
+  }
+
+  var result = null;
+  var previousRun = _hostState.suspendedRun;
+  _hostState.suspendedRun = function () {
+    try {
+      result = fn();
+    } catch (scanError) {
+      result = null;
+    }
+  };
+  try {
+    // Never retry unsuspended: one failed scan could otherwise leave dozens
+    // of history entries and evict the user's work before cleanup runs.
+    doc.suspendHistory(scanName, "_hostState.suspendedRun()");
+  } catch (suspendError) {
+    result = null;
+  } finally {
+    _hostState.suspendedRun = previousRun;
+    try {
+      var scanIndex = doc.historyStates.length - 1;
+      if (scanIndex > 0 && doc.historyStates[scanIndex].name === scanName) {
+        doc.activeHistoryState = doc.historyStates[scanIndex - 1];
+        var reference = new ActionReference();
+        reference.putIndex(stringIDToTypeID("historyState"), scanIndex + 1);
+        var descriptor = new ActionDescriptor();
+        descriptor.putReference(charID.Null, reference);
+        executeAction(charID.Delete, descriptor, DialogModes.NO);
+      }
+    } catch (restoreError) {
+      // A host that cannot clean up must not accumulate more scan states.
+      _hostState.temporaryHistoryFailed = true;
+      result = { error: "historyBusy" };
+    } finally {
+      if (reservedHistorySlot) {
+        try {
+          app.preferences.numberOfHistoryStates = historyLimit;
+        } catch (limitError) {
+          _hostState.temporaryHistoryFailed = true;
+          result = { error: "historyBusy" };
+        }
+      }
+    }
+  }
+  return result;
+}
+
 function _clone(obj) {
   if (!obj || typeof obj !== "object") return obj;
   if (obj instanceof Array) {
@@ -2681,7 +2759,7 @@ function getCurrentSelectionShape(data) {
     return jamJSON.stringify({ error: "noSelection" });
   }
   var sampleCount = _normalizeShapeSampleCount(data && data.samples, 17);
-  var shape = _withSuspendedHistory("TypeR Shape Scan", function () {
+  var shape = _withTemporaryHistory("TypeR Shape Scan", function () {
     return _withDialogsSuppressed(function () {
       return (
         _sampleSelectionShapeViaPath(bounds, sampleCount, true) ||
@@ -2689,6 +2767,7 @@ function getCurrentSelectionShape(data) {
       );
     });
   });
+  if (shape && shape.error) return jamJSON.stringify(shape);
   shape = shape || _buildBoundsShapeRows(bounds, sampleCount);
   // scan/scanError lead the object so they survive the debug log preview cap
   var out = { scan: shape.scan || "legacy" };
@@ -2766,7 +2845,7 @@ function getActiveLayerBubbleShape(data) {
   if (isNaN(tolerance)) tolerance = 20;
   var sampleCount = _normalizeShapeSampleCount(data && data.samples, 21);
 
-  var result = _withSuspendedHistory("TypeR Bubble Scan", function () {
+  var result = _withTemporaryHistory("TypeR Bubble Scan", function () {
     return _scanActiveLayerBubble(tolerance, sampleCount);
   });
   if (!result) {
@@ -3156,10 +3235,10 @@ function getSelectionChanged() {
     // captured selection while its real outline is still available.
     var payloadBounds = merged;
     if (merged.length === 1) {
-      var openedBounds = _withSuspendedHistory("TypeR Selection Capture", function () {
+      var openedBounds = _withTemporaryHistory("TypeR Selection Capture", function () {
         return _getAdaptiveOpenedSelectionBounds(merged[0]);
       });
-      payloadBounds = [openedBounds || merged[0]];
+      payloadBounds = [openedBounds && !openedBounds.error ? openedBounds : merged[0]];
     }
 
     monitor.lastBounds = merged[0];
