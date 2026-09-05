@@ -29,6 +29,12 @@ assert(/\[void\]\[FW\]::GetAsyncKeyState\(5\); \[void\]\[FW\]::GetAsyncKeyState\
 assert(/-band 1\) -ne 0/.test(psScript), "Presses must be edge-detected, not level-detected");
 assert(/'MB\|'/.test(psScript) && /'FG\|'/.test(psScript), "Watcher must tag both line kinds");
 assert(/\$n -eq ''/.test(psScript), "An empty process name must be retried or the foreground gate can wedge shut");
+assert(/keybd_event/.test(psScript) && /function Send-NoOpKey/.test(psScript),
+  "The watcher must be able to inject the no-op key that keeps a lone ALT from opening Photoshop's menu bar");
+assert(/if \(-not \$alt\) \{ \$altFixed = \$false \}/.test(psScript),
+  "The no-op key must fire once per ALT hold, not on every 50ms tick");
+assert(/\$altFixed -and \$n -match 'photoshop'/.test(psScript),
+  "Keys must only be injected while Photoshop is the foreground app");
 const opens = (psScript.match(/\{/g) || []).length;
 const closes = (psScript.match(/\}/g) || []).length;
 assert.strictEqual(opens, closes, "Generated PowerShell has unbalanced braces");

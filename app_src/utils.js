@@ -1085,16 +1085,30 @@ const startForegroundWatcher = () => {
   // so this polls the side buttons 5x more often than the old script polled
   // the process name while doing strictly less work per second.
   const psScript = [
-    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class FW { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport(\"user32.dll\")] public static extern short GetAsyncKeyState(int vk); }';",
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class FW { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport(\"user32.dll\")] public static extern short GetAsyncKeyState(int vk); [DllImport(\"user32.dll\")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra); }';",
     // GetAsyncKeyState's low bit means "pressed since the previous call", so
     // prime it once: otherwise a click made before the panel opened replays here
     "[void][FW]::GetAsyncKeyState(5); [void][FW]::GetAsyncKeyState(6);",
-    "$lastH = [IntPtr]::Zero; $n = ''; $tick = 0;",
+    // Windows gives the menu bar the keyboard when ALT is released without
+    // another key in between, and a WIN+ALT binding looks exactly like that to
+    // Photoshop: the shell keeps the WIN key, so ALT arrives on its own. The
+    // menu bar then eats the arrow keys the typesetter uses to nudge the layer
+    // he has just centred, and only Esc gives them back. One no-op key while
+    // ALT is still down is what tells Windows the ALT was a modifier, so the
+    // release stops opening the menu. F13 is bound neither in Photoshop nor in
+    // the panel, and it is over before the hotkey poll can sample it.
+    "function Send-NoOpKey { [FW]::keybd_event(0x7C, 0, 0, [UIntPtr]::Zero); [FW]::keybd_event(0x7C, 0, 2, [UIntPtr]::Zero) }",
+    "$lastH = [IntPtr]::Zero; $n = ''; $tick = 0; $altFixed = $false;",
     "while ($true) {",
     "$h = [FW]::GetForegroundWindow();",
     // Re-resolve on focus change, and keep retrying while the name is empty so
     // a transient Get-Process failure cannot wedge the gate shut
     "if ($h -ne $lastH -or $n -eq '') { $lastH = $h; $procId = [uint32]0; [void][FW]::GetWindowThreadProcessId($h, [ref]$procId); $n = ''; try { $n = (Get-Process -Id $procId -ErrorAction Stop).ProcessName } catch {} }",
+    // Once per ALT hold, and only for ALT held with WIN: ALT with CTRL or SHIFT
+    // already carries another key, so those releases never opened the menu.
+    "$alt = ([FW]::GetAsyncKeyState(0x12) -band 0x8000) -ne 0;",
+    "if (-not $alt) { $altFixed = $false }",
+    "elseif (-not $altFixed -and $n -match 'photoshop' -and ((([FW]::GetAsyncKeyState(0x5B) -band 0x8000) -ne 0) -or (([FW]::GetAsyncKeyState(0x5C) -band 0x8000) -ne 0))) { $altFixed = $true; Send-NoOpKey }",
     // 5 = XBUTTON1 (button4), 6 = XBUTTON2 (button5). The low bit is an edge,
     // so a click shorter than one tick is still caught and holding never repeats
     "foreach ($b in 5, 6) {",
@@ -1104,6 +1118,8 @@ const startForegroundWatcher = () => {
     "if (([FW]::GetAsyncKeyState(0x11) -band 0x8000) -ne 0) { $m += 'C' }",
     "if (([FW]::GetAsyncKeyState(0x12) -band 0x8000) -ne 0) { $m += 'A' }",
     "if (([FW]::GetAsyncKeyState(0x10) -band 0x8000) -ne 0) { $m += 'S' }",
+    // A side button held with ALT is the same lone ALT release, without WIN
+    "if ($m -match 'A' -and -not $altFixed -and $n -match 'photoshop') { $altFixed = $true; Send-NoOpKey }",
     "[Console]::Out.WriteLine('MB|' + $b + '|' + $m + '|' + $n) } }",
     "$tick++;",
     "if ($tick -ge 5) { $tick = 0; [Console]::Out.WriteLine('FG|' + $n) }",
