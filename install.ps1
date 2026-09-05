@@ -79,7 +79,7 @@ elseif ($Lang -eq "pt") {
     $msg_discord  = "Discord do ScanR se precisar de ajuda: https://discord.com/invite/Pdmfmqk"
 }
 
-Clear-Host
+if ($Interactive) { Clear-Host }
 Write-Host "+------------------------------------------------------------------+" -ForegroundColor Cyan
 Write-Host "|                          TypeR Installer                         |" -ForegroundColor Cyan
 Write-Host "+------------------------------------------------------------------+" -ForegroundColor Cyan
@@ -90,6 +90,14 @@ Write-Host $msg_close -ForegroundColor Yellow
 Write-Host ""
 if ($Interactive) { Read-Host -Prompt $msg_pause }
 
+# Use .NET directly: Get-FileHash may be absent from older Windows PowerShell
+# or from child processes inheriting a PowerShell Core module search path.
+function Get-TypeRFileHash([string]$FilePath) {
+    $Stream = [IO.File]::OpenRead($FilePath)
+    $Algorithm = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($Algorithm.ComputeHash($Stream)).Replace('-', '').ToLowerInvariant() }
+    finally { $Algorithm.Dispose(); $Stream.Dispose() }
+}
 $Folders = @('app', 'CSXS', 'icons', 'locale')
 $Inventory = Join-Path $ScriptDir 'app/package.sha256'
 if (-not (Test-Path -LiteralPath $Inventory -PathType Leaf)) { throw 'Incomplete TypeR package: missing inventory' }
@@ -101,7 +109,7 @@ foreach ($Line in Get-Content -LiteralPath $Inventory) {
     if ($Relative -match '(^|/)\.\.?($|/)|//' -or $Relative -eq 'app/package.sha256' -or $Listed.ContainsKey($Relative)) { throw 'Unsafe or duplicate package path' }
     $File = Join-Path $ScriptDir $Relative
     if (-not (Test-Path -LiteralPath $File -PathType Leaf)) { throw "Missing file: $Relative" }
-    if ((Get-FileHash -LiteralPath $File -Algorithm SHA256).Hash -ne $Hash) { throw "Checksum mismatch: $Relative" }
+    if ((Get-TypeRFileHash $File) -ne $Hash) { throw "Checksum mismatch: $Relative" }
     $Listed[$Relative] = $true
 }
 foreach ($Relative in $Required) {
@@ -135,7 +143,7 @@ try {
     foreach ($Folder in $Folders) { Copy-Item -LiteralPath (Join-Path $ScriptDir $Folder) -Destination $Stage -Recurse }
     foreach ($Line in Get-Content -LiteralPath $Inventory) {
         $Parts = $Line -split '  ', 2
-        if ((Get-FileHash -LiteralPath (Join-Path $Stage $Parts[1]) -Algorithm SHA256).Hash -ne $Parts[0]) { throw 'Staged package verification failed' }
+        if ((Get-TypeRFileHash (Join-Path $Stage $Parts[1])) -ne $Parts[0]) { throw 'Staged package verification failed' }
     }
     foreach ($Folder in $Folders) {
         $Destination = Join-Path $TargetDir $Folder
