@@ -1,3 +1,4 @@
+import { fetchBody } from "../../network";
 import React from "react";
 import {
   FiCheck,
@@ -587,9 +588,7 @@ const FontViewer = () => {
     const namedFonts = makeUniqueFileNames(manifestFonts);
     let completed = 0;
     return fetchWithConcurrency(namedFonts, async (font) => {
-      const response = await fetch(font.download_url, { headers: { Accept: "application/octet-stream" } });
-      if (!response.ok) throw new Error("downloadFailed");
-      const bytes = new Uint8Array(await response.arrayBuffer());
+      const bytes = new Uint8Array(await fetchBody(font.download_url, { headers: { Accept: "application/octet-stream" } }, "arrayBuffer", 60000));
       completed += 1;
       if (mounted.current) {
         setDownloadState({

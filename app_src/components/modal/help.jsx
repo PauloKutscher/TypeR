@@ -1,5 +1,6 @@
 import './help.scss';
 
+import { fetchBody } from "../../network";
 import React from 'react';
 import {
     FiAlignLeft,
@@ -87,11 +88,7 @@ const HelpModal = React.memo(function HelpModal() {
         if (readStorage(VIDEO_GUIDE_CURRENT_SEEN_KEY) === true) return undefined;
 
         let active = true;
-        fetch(`${VIDEO_CONFIG_URL}?v=${Date.now()}`, {cache: 'no-store'})
-            .then((response) => {
-                if (!response.ok) throw new Error(`Video guide config returned ${response.status}`);
-                return response.json();
-            })
+        fetchBody(`${VIDEO_CONFIG_URL}?v=${Date.now()}`, {cache: 'no-store'})
             .then((remoteConfig) => {
                 if (active && typeof remoteConfig.isLegacy === 'boolean') {
                     setVideoIsLegacy(remoteConfig.isLegacy);
