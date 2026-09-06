@@ -612,6 +612,7 @@ const SPAN_DIVISOR = tuning("_CUSP_SPAN_DIVISOR");
 const MIN_GAP = tuning("_CUSP_MIN_GAP");
 const ASSIST_CONCAVITY = tuning("_CUSP_ASSIST_CONCAVITY");
 const MAX_NECK = tuning("_CUSP_MAX_NECK");
+const SHARE_WAIST = tuning("_CUSP_SHARE_WAIST");
 
 const signedArea = lift("_polygonSignedArea(poly)", [])();
 const areaCentroid = lift("_polygonAreaCentroid(poly)", [])();
@@ -629,9 +630,10 @@ const splitAtCusps = lift("_splitOutlineAtCusps(polygons, activeBox, report)", [
   "_CUSP_CONCAVITY", "_CUSP_MIN_PIECE_SHARE", "_CUSP_MAX_CUTS", "_CUSP_CONTOUR_POINTS",
   "_CUSP_SPAN_DIVISOR", "_largestContour", "_resampleContour", "_findCuspPair", "_splitContourAtChord",
   "_pieceOnSideOf", "_polygonAreaCentroid",
+  "_polygonSignedArea", "_CUSP_SHARE_WAIST",
 ])(CONCAVITY, MIN_PIECE_SHARE, MAX_CUTS, CONTOUR_POINTS,
   SPAN_DIVISOR, largestContour, resampleContour, findCuspPair, splitContourAtChord,
-  pieceOnSideOf, areaCentroid);
+  pieceOnSideOf, areaCentroid, signedArea, SHARE_WAIST);
 
 function textBox(left, top, right, bottom) {
   return { left: left, top: top, right: right, bottom: bottom, width: right - left, height: bottom - top };
@@ -972,9 +974,40 @@ assert.ok(
 
 const chainMiddle = splitCentreFor(outlines.chainMiddle);
 assert.ok(chainMiddle.centre, "the junction with two deep cusps must still be cut, exactly as before");
+assert.ok(
+  distanceTo(chainMiddle.centre, outlines.chainMiddle.savedCentre) <= 8,
+  "a balloon in the middle of a chain needs the cut on both of its sides: " +
+    JSON.stringify(chainMiddle.centre) + " against " + JSON.stringify(outlines.chainMiddle.savedCentre)
+);
+
+/*
+ * The balloon at the top of the same chain leaves 89% of the region on its own
+ * side, because what the cut takes off is the two smaller ones. That is a waist,
+ * not a bump being shaved, and the chord is what says so.
+ */
+const chainTop = splitCentreFor(outlines.chainTop);
+assert.ok(chainTop.centre, "a waist that leaves 89% still separated two balloons");
+assert.ok(
+  distanceTo(chainTop.centre, outlines.chainTop.savedCentre) <= 8,
+  "and the piece is the balloon the line sits in: " + JSON.stringify(chainTop.centre) +
+    " against " + JSON.stringify(outlines.chainTop.savedCentre)
+);
 
 const single = splitCentreFor(outlines.singleBalloon);
 assert.strictEqual(single.centre, null, "a balloon that is one balloon is never cut");
+
+/*
+ * And the outline that says how short that waist has to be. This region takes a
+ * cut whose chord is 0.5 of its own size and lands 81 px away from where the
+ * typesetter had the line; at 0.45 it is refused and the line keeps the centre
+ * it had. It is the only reason the exception is stricter than `_CUSP_MAX_NECK`.
+ */
+const wrongCut = splitCentreFor(outlines.wrongCutIfLoose);
+assert.strictEqual(
+  wrongCut.centre,
+  null,
+  "a chord this long is a cut across the region, whatever share it leaves"
+);
 
 /*
  * The contract of the assisted pair, on the outline that needed it: one corner

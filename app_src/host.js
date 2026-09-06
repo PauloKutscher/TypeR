@@ -192,6 +192,16 @@ var _CUSP_CONCAVITY = 0.6;
 // 62 px to 39 px.
 var _CUSP_ASSIST_CONCAVITY = 0.12;
 
+// How short the chord has to be before a cut that leaves almost everything on
+// one side is read as a waist rather than a bump being shaved. Stricter than
+// `_CUSP_MAX_NECK` because it is allowed to overrule the piece-share window, and
+// measured on the outlines the host traced: at 0.55 a region on 0018-0019 starts
+// being cut in the wrong place (13 px to 81 px), at 0.45 that one is refused
+// again and every balloon this exception was for still separates — the top and
+// middle of the reported chain at 5 px and 7 px, and two more regions at 10 px
+// and 5 px that used to keep the merged centroid at 67 px and 55 px.
+var _CUSP_SHARE_WAIST = 0.45;
+
 // A waist is short next to the shape it splits, and that is what keeps the
 // assisted pair above from cutting a single balloon in half: the chord may not
 // be longer than this fraction of the piece's own size (the square root of its
@@ -3514,6 +3524,7 @@ function _splitOutlineAtCusps(polygons, activeBox, report) {
   var share = 1;
 
   for (var pass = 0; pass < _CUSP_MAX_CUTS; pass++) {
+    var pieceArea = Math.abs(_polygonSignedArea(points));
     var pair = _findCuspPair(points);
     if (!pair) {
       if (report && !cuts) report.skip = "noCusp";
@@ -3540,9 +3551,24 @@ function _splitOutlineAtCusps(polygons, activeBox, report) {
       if (report && !cuts) report.skip = "noSide";
       break;
     }
-    if (chosen.share < _CUSP_MIN_PIECE_SHARE || chosen.share > 1 - _CUSP_MIN_PIECE_SHARE) {
+    if (chosen.share < _CUSP_MIN_PIECE_SHARE) {
       if (report && !cuts) report.skip = "share:" + Math.round(chosen.share * 100);
       break;
+    }
+    // A cut that leaves almost everything on one side did one of two things: it
+    // separated a small balloon from a big one, or it shaved a bump off a single
+    // balloon. The chord says which. A waist is short next to the shape it cuts;
+    // shaving takes a long chord across it. Refusing both is what left the small
+    // neighbours of a chain merged: on the reported page the top balloon left
+    // 89% and the middle one 85% on its second cut, both across a waist, and
+    // taking them lands those lines 5 px and 7 px from the typesetter's own
+    // centre instead of 12 px and 21 px.
+    if (chosen.share > 1 - _CUSP_MIN_PIECE_SHARE) {
+      var waist = pair.length <= _CUSP_SHARE_WAIST * Math.sqrt(pieceArea > 0 ? pieceArea : 1);
+      if (!waist) {
+        if (report && !cuts) report.skip = "share:" + Math.round(chosen.share * 100);
+        break;
+      }
     }
     points = chosen.points;
     share = share * chosen.share;
