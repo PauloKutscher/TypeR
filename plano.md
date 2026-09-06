@@ -710,6 +710,103 @@ Como a Task 29 não produziu vencedor, a condição de entrada da Task 30 não f
 `npm run verify` passou (testes, build de produção e teste do bundle). O SHA-1 do bundle medido nos quatro runs foi `48906BB37721887DB6CB72331F977EA71413F5E8`; os 28 PSDs permaneceram iguais ao manifesto completo. A decisão ponytail aqui foi não portar código sem vencedor: adicionar uma segunda implementação ao host só criaria regressão já demonstrada.
 
 
+### Task 31 — balões redondos encadeados: a junção com uma cúspide só (concluída, 2026-09-06)
+
+**O relato.** Um typesetter reportou balões redondos centralizando mal, e que
+centralizar com marquee saía melhor do que apertar o atalho sem seleção. Página
+`true/MUP_唯一無二の精霊鍛冶師が最強の武具を創るまで15話_2023~0026.psd`.
+
+**O que a página tem.** Três balões redondos desenhados sobrepostos, que a
+varinha traça como **uma região só** (`89,518 192x475`). Cada linha recebia o
+centroide do blob inteiro. O corte por cúspides existe exatamente para isso e
+não disparava.
+
+**Por que não disparava.** `_findCuspPair` exigia **duas** esquinas acima de
+`_CUSP_CONCAVITY = 0.6`. Medido no contorno real dessas junções: uma cúspide
+funda e uma dobra rasa — **1.40 contra 0.34** na de cima, **1.48 contra 0.15** na
+de baixo. O outro lado da junção ou é uma sobreposição funda demais para
+mergulhar, ou sai fora do quadro. Achava uma esquina e desistia
+(`skip=shallow:140`).
+
+**As duas mudanças, ambas medidas antes de entrar** (`9595a62` e `e59dbae`):
+
+1. **Par assistido.** Uma esquina precisa passar de `_CUSP_CONCAVITY`; a
+   parceira só precisa ser esquina (`_CUSP_ASSIST_CONCAVITY = 0.12`). Sozinho
+   isso corta balão único, então um par carregado por uma esquina só vale se a
+   corda for cintura: `_CUSP_MAX_NECK = 0.55` do tamanho da peça (raiz da área).
+   As cinturas reais do corpus medem 0.23 e 0.32; corda atravessando um balão
+   único fica perto de 0.9.
+2. **Exceção de cintura na janela de `share`.** A janela recusava qualquer corte
+   que deixasse mais de 85% de um lado, por assumir que isso era raspar uma
+   saliência. Em cadeia de balões redondos significa o contrário: o balão da
+   linha é o grande e o corte tira os dois vizinhos pequenos. Agora um `share`
+   acima da janela passa quando a corda é cintura, com limiar mais estrito que o
+   do par assistido: `_CUSP_SHARE_WAIST = 0.45`. Em 0.55 uma região da
+   `0018-0019` passa a ser cortada no lugar errado (13 px para 81 px); em 0.45
+   ela é recusada e todos os balões que a exceção existe para separar continuam
+   separando.
+
+**Medição.** 107 camadas de texto das 15 páginas de `true/`, alinhando cada uma a
+partir da posição que o typesetter tinha escolhido e medindo o quanto o align a
+move. Contra a regra anterior a este trabalho:
+
+| | antes | depois |
+|---|---|---|
+| melhoraram / pioraram | — | **11 / 0** |
+| mediana | 8 px | 7 px |
+| p75 | 18 px | 13 px |
+| p95 | **62 px** | **35 px** |
+| camadas acima de 25 px | 16 | 9 |
+| cortes disparados | 18 | 24 |
+
+As maiores: `13.psd#15` 78→7, `13.psd#23` 67→10, `3話~0003#25` 55→5,
+`14.psd#13` 46→12, `13.psd#19` 38→7, `13.psd#17` 34→13, `13.psd#21` 28→4, e a
+página reportada com o balão de baixo 17→1, o de cima 12→5 e o do meio 21→7.
+
+**Uma regressão conhecida.** `11.psd#29` (região de quatro balões) passa a fazer
+um terceiro corte e vai de 7 px para 26 px — ainda melhor que os 86 px de antes
+do trabalho, mas pior que o commit intermediário.
+
+**Tentativa rejeitada, medida.** Aceitar um corte a partir do segundo só quando
+ele aproxima o centro da peça da linha. Conserta `11.psd#29` (26→7) e quebra
+outros dois: `14.psd#17` 7→45 e `13.psd#21` 4→21. Em região de quatro balões a
+sequência **piora antes de melhorar** — o centro sai de perto da linha num corte
+intermediário e volta no seguinte (`skip=away:24` e `away:8`) — então exigir
+monotonia mata as sequências longas que funcionam. Trocar uma camada errada por
+duas não paga. Escolher a sequência por busca também foi descartado: "melhor"
+ali seria a que move menos o texto, que é a métrica desta medição, e isso ajusta
+o algoritmo a este corpus em vez de acertar a geometria.
+
+**Testes.** `scripts/balloonOutlines.fixture.json` guarda os contornos que o host
+realmente traçou nessa página, capturados do caminho do align, e o
+`testBalloonCentroid.js` exige: a junção assimétrica é cortada e cai a ≤5 px do
+centro escolhido pelo typesetter; o balão do meio da cadeia a ≤8 px (precisa dos
+dois cortes); o balão de cima, que deixa 89%, também a ≤8 px; um balão único
+nunca é cortado; a região da `0018-0019` continua recusada, que é o que fixa o
+limiar em 0.45; e o par assistido mantém uma esquina funda e corda de cintura.
+Conferido que os testes **falham** com os limiares antigos.
+
+**Relação com as decisões das Tasks 25-30.** Isto não é o porte que foi
+rejeitado lá: nada de multi-escala, busca global, DT, clean/dirty, fixed-point,
+estado ou histerese, e nenhum parâmetro escolhido olhando `11.psd` — que aqui é
+justamente a página que piora. São dois limiares no solver publicado, com
+evidência nova (uma página de usuário onde a região merge não era cortada) e
+regressão zero no corpus contra a regra anterior.
+
+**Ressalva da métrica.** "Erro" aqui é a distância até onde o typesetter tinha
+deixado a linha, que é proxy e não ground truth: parte dos 7 px de mediana é ele
+tendo empurrado o texto de propósito. As comparações valem entre rodadas, na
+mesma máquina e mesmo corpus.
+
+**Como foi medido.** Photoshop dirigido pelo debug remoto do CEP (porta 8001),
+com o painel instalado a partir do build local; as bancadas ficaram no scratchpad
+da sessão: `sweep2.js` (percorre as 15 páginas, alinha cada camada e grava o
+erro), `cmp.js` (compara duas rodadas camada a camada), `tune.js` (varre limiares
+offline sobre os contornos capturados), `capture.js` e `capture2.js` (capturam
+contorno + caixa + centro salvo), `centerdiag.js` e `cusps.js` (região, alvo e
+perfil de concavidade por camada).
+
+
 ## Decisões feitas
 
 1. **Consolidar a decisão negativa das Tasks 25–30.** A bancada agora reproduz a geometria real, os artefatos estão em `.centering-lab/partition-report.md` e `.centering-lab/partition-scores.json`, e `npm run verify` passou. Das 32 configurações avaliadas com leave-one-page-out, nenhuma passou todos os gates (`0/32`); `11.psd` permaneceu holdout.
