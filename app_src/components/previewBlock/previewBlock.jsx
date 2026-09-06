@@ -225,6 +225,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const inlineLayerBoundsRef = React.useRef(null);
   const inlineTextSizeRef = React.useRef(null);
   const bubbleShapeCache = React.useRef(new Map());
+  // The wand scan waits for someone to be at the widget, so the widget has to
+  // know when the pointer is on it
+  const widgetHoveredRef = React.useRef(false);
   const inlineShapeSettle = React.useRef({ hash: "", timer: null });
   const [inlineSelectionShape, setInlineSelectionShape] = React.useState(null);
   const batchOrderRef = React.useRef([]);
@@ -410,7 +413,68 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     inlineShapeSettle.current.hash = "";
   }, []);
 
-  const refreshInlineSelectionShape = React.useCallback((force = false) => {
+  // One magic-wand scan of the bubble around the active text layer: 200+ ms of
+  // Photoshop's main thread and one history state, so it has exactly two
+  // callers — the widget, once the typesetter is looking at it, and the align
+  // button, which needs the bubble's phantom offset to centre. `undefined`
+  // means "no answer to trust", null means "no bubble here".
+  const scanActiveBubbleShape = React.useCallback((callback) => {
+    csInterface.evalScript(`getActiveLayerBubbleShape(${JSON.stringify({ samples: 21, tolerance: 20 })})`, (result) => {
+      // Every caller clears a pending flag in its callback, so this must call
+      // back exactly once whatever the host answered: a throw in here would
+      // leave the shape refresh wedged for the rest of the session
+      let shape;
+      try {
+        let data = null;
+        try {
+          data = JSON.parse(result || "{}");
+        } catch (parseError) {}
+        // A transient "a selection is active" answer says nothing about the
+        // bubble: never memoize it, or the layer stays shapeless afterwards
+        if (!data || data.error !== "hasSelection") {
+          if (!data || data.error || !data.bounds) {
+            shape = null;
+          } else {
+            const geometry = textShapeREngine && textShapeREngine.getShapeProfileGeometry
+              ? textShapeREngine.getShapeProfileGeometry(data)
+              : null;
+            shape = {
+              profile: data,
+              width: data.bounds.width,
+              height: data.bounds.height,
+              phantomOffsetX: geometry ? geometry.offsetX * data.bounds.width : 0,
+              source: "bubble",
+              textSize: inlineTextSizeRef.current,
+            };
+          }
+        }
+      } catch (error) {}
+      callback(shape);
+    });
+  }, [textShapeREngine]);
+
+  // The scan waits for the pointer to be at the widget, so the actions that
+  // need the outline for something other than a suggestion — centring the
+  // layer, learning from it — resolve it themselves before they run.
+  const ensureBubbleShape = React.useCallback((callback) => {
+    if (inlineSelectionShape || !bubbleAware || !inlineSourceKey.current || inlineShapePending.current) {
+      callback(inlineSelectionShape);
+      return;
+    }
+    inlineShapePending.current = true;
+    scanActiveBubbleShape((shape) => {
+      inlineShapePending.current = false;
+      if (shape) {
+        const bubbleKey = getBubbleCacheKey(inlineLayerIdRef.current, inlineLayerBoundsRef.current, inlineSourceKey.current);
+        inlineShapeKey.current = bubbleKey;
+        rememberBubbleShape(bubbleShapeCache.current, bubbleKey, shape);
+        setInlineSelectionShape(shape);
+      }
+      callback(shape || null);
+    });
+  }, [bubbleAware, inlineSelectionShape, scanActiveBubbleShape]);
+
+  const refreshInlineSelectionShape = React.useCallback((force = false, allowBubbleScan = false) => {
     if (inlineShapePending.current) return;
     if (force) {
       // Explicit refresh: the user is telling us the detection is stale, so
@@ -528,41 +592,39 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         setInlineSelectionShape(sharedBubble);
         return;
       }
-      csInterface.evalScript(`getActiveLayerBubbleShape(${JSON.stringify({ samples: 21, tolerance: 20 })})`, (result) => {
+      // Nothing above this line talks to Photoshop; from here it is a wand scan
+      // per layer. On a page full of dialogue the typesetter selects one layer
+      // after another just to move them, and every one of those clicks paid for
+      // a scan whose suggestions nobody was reading — that is the freeze. The
+      // scan waits for the pointer to be on the widget; until then the layer
+      // keeps the unshaped suggestions, and the align button pays for its own
+      // scan when it needs the offset.
+      // A running batch counts as being at the widget: the panel is walking the
+      // layers for the typesetter and he is waiting on those shapes. It has to
+      // be checked here, not only at the call in goToBatchLayer: that call fires
+      // before the layer's text has arrived, and the scan then rides on the
+      // refresh that the new source key triggers.
+      if (!allowBubbleScan && !widgetHoveredRef.current && !batchRunRef.current) {
         inlineShapePending.current = false;
-        try {
-          const data = JSON.parse(result || "{}");
-          // A transient "a selection is active" answer says nothing about the
-          // bubble: never memoize it, or the layer stays shapeless afterwards
-          if (data && data.error === "hasSelection") return;
-          // Cache failures too: retrying the wand on every poll would spam
-          // the document with temporary selections
-          inlineShapeKey.current = bubbleKey;
-          const shape = !data || data.error || !data.bounds
-            ? null
-            : (() => {
-              const geometry = textShapeREngine && textShapeREngine.getShapeProfileGeometry
-                ? textShapeREngine.getShapeProfileGeometry(data)
-                : null;
-              return {
-                profile: data,
-                width: data.bounds.width,
-                height: data.bounds.height,
-                phantomOffsetX: geometry ? geometry.offsetX * data.bounds.width : 0,
-                source: "bubble",
-                textSize: inlineTextSizeRef.current,
-              };
-            })();
-          rememberBubbleShape(bubbleShapeCache.current, bubbleKey, shape);
-          // A failed detection must clear the shape, exactly like the cached
-          // path above: keeping the previous bubble would shape the text after
-          // another layer's outline. React bails out on its own when the value
-          // is unchanged, so no guard is needed here.
-          setInlineSelectionShape(shape);
-        } catch (error) {}
+        inlineShapeKey.current = "";
+        setInlineSelectionShape((current) => (current ? null : current));
+        return;
+      }
+      scanActiveBubbleShape((shape) => {
+        inlineShapePending.current = false;
+        if (shape === undefined) return;
+        // Cache failures too: retrying the wand on every poll would spam
+        // the document with temporary selections
+        inlineShapeKey.current = bubbleKey;
+        rememberBubbleShape(bubbleShapeCache.current, bubbleKey, shape);
+        // A failed detection must clear the shape, exactly like the cached
+        // path above: keeping the previous bubble would shape the text after
+        // another layer's outline. React bails out on its own when the value
+        // is unchanged, so no guard is needed here.
+        setInlineSelectionShape(shape);
       });
     }, false);
-  }, [bubbleAware, clearInlineShapeSettle]);
+  }, [bubbleAware, clearInlineShapeSettle, scanActiveBubbleShape]);
 
   // A Photoshop 'move' action changes history but not the text or style. Read
   // only the active layer's ID/bounds/history signature, then acknowledge that
@@ -661,7 +723,9 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     setInlineLayerSource({ text: "", style: null, key: "", layerId: null, loading: true, error: "" });
     csInterface.evalScript(`selectLayerById(${JSON.stringify(layerId)})`, () => {
       refreshInlineLayerSource(true);
-      refreshInlineSelectionShape(true);
+      // A batch is the panel walking the layers for the typesetter: he is
+      // waiting on these shapes, so the scan does not wait for the pointer
+      refreshInlineSelectionShape(true, true);
     });
   }, [refreshInlineLayerSource, refreshInlineSelectionShape]);
 
@@ -1074,18 +1138,22 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   }, [line.rawIndex]);
 
   const handleAlignLayer = React.useCallback(() => {
-    const geometry = textShapeREngine && inlineSelectionShape?.profile && textShapeREngine.getShapeProfileGeometry
-      ? textShapeREngine.getShapeProfileGeometry(inlineSelectionShape.profile)
-      : null;
-    const phantomOffsetX = geometry
-      ? geometry.offsetX * (inlineSelectionShape.width || 0)
-      : (inlineSelectionShape?.phantomOffsetX || 0);
-    alignTextLayerToSelection(context.state.resizeTextBoxOnCenter, context.state.internalPadding || 0, () => {
-      if (context.state.multiBubbleMode && (context.state.storedSelections || []).length > 0) {
-        resetStoredSelections(true);
-      }
-    }, phantomOffsetX);
-  }, [context.state, inlineSelectionShape, resetStoredSelections, textShapeREngine]);
+    // Centring is what the phantom offset is for, so it resolves the bubble
+    // itself rather than centring against one the panel never looked at
+    ensureBubbleShape((shape) => {
+      const geometry = textShapeREngine && shape?.profile && textShapeREngine.getShapeProfileGeometry
+        ? textShapeREngine.getShapeProfileGeometry(shape.profile)
+        : null;
+      const phantomOffsetX = geometry
+        ? geometry.offsetX * (shape.width || 0)
+        : (shape?.phantomOffsetX || 0);
+      alignTextLayerToSelection(context.state.resizeTextBoxOnCenter, context.state.internalPadding || 0, () => {
+        if (context.state.multiBubbleMode && (context.state.storedSelections || []).length > 0) {
+          resetStoredSelections(true);
+        }
+      }, phantomOffsetX);
+    });
+  }, [context.state, ensureBubbleShape, resetStoredSelections, textShapeREngine]);
 
   const handleDecrease = React.useCallback(() => {
     changeActiveLayerTextSize(-(context.state.textSizeIncrement || 1));
@@ -1158,12 +1226,22 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   }, [applyingTextShapeRId, context, inlineLayerSource.style, inlineLayerSource.loading, inlineLayerSource.layerId, advanceTextShapeRBatch]);
 
   // Hover refresh is a fallback for missed Photoshop events: rate-limit it so
-  // sweeping the cursor over the widget doesn't queue ExtendScript roundtrips
+  // sweeping the cursor over the widget doesn't queue ExtendScript roundtrips.
+  // The pointer being here is also what unlocks the bubble scan, and a layer
+  // that has no shape yet is worth the scan even inside the rate limit — it is
+  // the only thing between the typesetter and the shaped suggestions.
   const handleTextShapeRMouseEnter = React.useCallback(() => {
-    if (Date.now() - inlineLastRefreshAt.current < 800 || isHostActionPending()) return;
+    widgetHoveredRef.current = true;
+    if (isHostActionPending()) return;
+    const needsShape = bubbleAware && !inlineSelectionShape;
+    if (!needsShape && Date.now() - inlineLastRefreshAt.current < 800) return;
     refreshInlineLayerSource();
-    refreshInlineSelectionShape();
-  }, [refreshInlineLayerSource, refreshInlineSelectionShape]);
+    refreshInlineSelectionShape(false, true);
+  }, [bubbleAware, inlineSelectionShape, refreshInlineLayerSource, refreshInlineSelectionShape]);
+
+  const handleTextShapeRMouseLeave = React.useCallback(() => {
+    widgetHoveredRef.current = false;
+  }, []);
 
   // Photoshop history is document-wide, so this undo only means "the shape I
   // just applied" while that shape is still the last thing that happened. Once
@@ -1262,24 +1340,29 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     // automatically, so the visual shape must be read off the host, which
     // materializes those wraps on a throwaway point-text copy of the layer
     getActiveLayerRenderedText((renderedText) => {
-      const result = textShapeREngine.recordTextShapeRFeedback(renderedText || inlineLayerSource.text, {
-        limit: 12,
-        allowHyphenation: true,
-        profile: "balanced",
-        shapeProfile: inlineSelectionShape?.profile || null,
-        width: inlineSelectionShape?.width,
-        height: inlineSelectionShape?.height,
-        calibration: inlineCalibration,
-      }, context.state.textShapeRTuning);
-      if (!result) return;
-      // Apply to the generator before dispatching so the re-render (whose memo
-      // depends on the stored tuning) already sees the new knobs
-      textShapeREngine.setTextShapeRTuning(result.tuning);
-      context.dispatch({ type: "setTextShapeRTuning", value: result.tuning, learned: true });
-      flashShapeFeedback((locale.textShapeRMarkBestSaved || "Preference saved ({count} lines) — suggestions will follow this style")
-        .replace("{count}", result.chosenLineCount));
+      // Learning compares the typesetter's own line breaks against the
+      // candidates for this bubble: without the outline it would learn from
+      // the wrong candidate set, so resolve it first
+      ensureBubbleShape((shape) => {
+        const result = textShapeREngine.recordTextShapeRFeedback(renderedText || inlineLayerSource.text, {
+          limit: 12,
+          allowHyphenation: true,
+          profile: "balanced",
+          shapeProfile: shape?.profile || null,
+          width: shape?.width,
+          height: shape?.height,
+          calibration: inlineCalibration,
+        }, context.state.textShapeRTuning);
+        if (!result) return;
+        // Apply to the generator before dispatching so the re-render (whose memo
+        // depends on the stored tuning) already sees the new knobs
+        textShapeREngine.setTextShapeRTuning(result.tuning);
+        context.dispatch({ type: "setTextShapeRTuning", value: result.tuning, learned: true });
+        flashShapeFeedback((locale.textShapeRMarkBestSaved || "Preference saved ({count} lines) — suggestions will follow this style")
+          .replace("{count}", result.chosenLineCount));
+      });
     });
-  }, [inlineLayerSource.text, inlineLayerSource.loading, inlineSelectionShape, inlineCalibration, context, flashShapeFeedback, textShapeREngine]);
+  }, [inlineLayerSource.text, inlineLayerSource.loading, ensureBubbleShape, inlineCalibration, context, flashShapeFeedback, textShapeREngine]);
 
   const handleIncrementChange = React.useCallback((e) => {
     context.dispatch({ type: "setTextSizeIncrement", increment: e.target.value });
@@ -1405,7 +1488,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
             </span>
           </div>
         ) : context.state.inlineTextShapeR ? (
-          <div className={"preview-textshaper hostBgdDark" + (showTextShapeRLearnTip ? " has-learn-tip" : "")} onMouseEnter={handleTextShapeRMouseEnter}>
+          <div className={"preview-textshaper hostBgdDark" + (showTextShapeRLearnTip ? " has-learn-tip" : "")} onMouseEnter={handleTextShapeRMouseEnter} onMouseLeave={handleTextShapeRMouseLeave}>
             <div className="preview-textshaper-head">
               <div className="preview-textshaper-title">
                 <span>{locale.textShapeRTitle || "TextShapeR"}</span>
