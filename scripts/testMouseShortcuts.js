@@ -31,6 +31,8 @@ assert(/'MB\|'/.test(psScript) && /'FG\|'/.test(psScript), "Watcher must tag bot
 assert(/\$n -eq ''/.test(psScript), "An empty process name must be retried or the foreground gate can wedge shut");
 assert(/keybd_event/.test(psScript) && /function Send-NoOpKey/.test(psScript),
   "The watcher must be able to inject the no-op key that keeps a lone ALT from opening Photoshop's menu bar");
+assert(/keybd_event\(0xFF, /.test(psScript) && !/keybd_event\(0x[0-9A-F]{2}, /.test(psScript.replace(/0xFF/g, "")),
+  "Only the unassigned virtual key 0xFF may be injected: a real key can carry a Photoshop or tablet-driver command");
 assert(/if \(-not \$alt\) \{ \$altFixed = \$false \}/.test(psScript),
   "The no-op key must fire once per ALT hold, not on every 50ms tick");
 assert(/\$altFixed -and \$n -match 'photoshop'/.test(psScript),

@@ -1095,9 +1095,12 @@ const startForegroundWatcher = () => {
     // menu bar then eats the arrow keys the typesetter uses to nudge the layer
     // he has just centred, and only Esc gives them back. One no-op key while
     // ALT is still down is what tells Windows the ALT was a modifier, so the
-    // release stops opening the menu. F13 is bound neither in Photoshop nor in
-    // the panel, and it is over before the hotkey poll can sample it.
-    "function Send-NoOpKey { [FW]::keybd_event(0x7C, 0, 0, [UIntPtr]::Zero); [FW]::keybd_event(0x7C, 0, 2, [UIntPtr]::Zero) }",
+    // release stops opening the menu. 0xFF is the unassigned virtual key: no
+    // physical key produces it, so Photoshop ignores it and no tablet or macro
+    // driver can have a command bound to it. F13 looked free too, and it is not:
+    // that range is exactly where those drivers put their own macros, and here
+    // one of them rotated the canvas on every centring.
+    "function Send-NoOpKey { [FW]::keybd_event(0xFF, 0, 0, [UIntPtr]::Zero); [FW]::keybd_event(0xFF, 0, 2, [UIntPtr]::Zero) }",
     "$lastH = [IntPtr]::Zero; $n = ''; $tick = 0; $altFixed = $false;",
     "while ($true) {",
     "$h = [FW]::GetForegroundWindow();",
