@@ -431,3 +431,151 @@ Fora isso, os itens da lista de regressão que dependem de mão humana continuam
 ### Reproduzir
 
 As bancadas continuam fora do repositório, no scratchpad da sessão (`cdp.js`, `bench.js`, `benchSelect.js`, `benchMarquee.js`, `benchBubble.js`, `cmpShape.js`, `cmpBubble2.js`, `benchIdle.js`, `diagBubble3.js`, `benchLayerText.js`, `typerperf.js`). O `.debug` correto agora está versionado e o `install.ps1` o copia, então o debug remoto na porta 8001 funciona depois de uma instalação normal.
+
+## Fase 2, candidato 1 — o scan passa a esperar o ponteiro (2026-09-06)
+
+O candidato 1 da Fase 2 ("adiar até o usuário olhar") era o único da lista que
+tinha ficado sem implementar. Um usuário voltou com a mesma queixa em páginas
+cheias de fala: travava ao selecionar uma camada para mover e ao selecionar a
+próxima. A página dele é **2700×3840 com 13-14 camadas de texto**, contra as
+1760×2560 e 9 camadas da página de referência — 2,3× os pixels, e todo balão é
+uma primeira visita.
+
+Commits: `aff6d7f` (host) e `72145b5` (painel).
+
+### O percurso que o usuário faz
+
+Selecionar as 14 camadas, uma a uma, 1,6 s em cada, sem passar o mouse no
+widget, com bubble-aware ligado:
+
+| | antes | depois |
+|---|---|---|
+| `getActiveLayerBubbleShape` | 8 chamadas · 261 ms média · **2091 ms** | **0** |
+| `getTypeRPanelSnapshot` | 23 · 51 ms · 1181 ms | 15 · 28 ms · 422 ms |
+| estados de histórico criados | **+8** | **0** |
+| host no percurso, fora o poll de hotkey | 3929 ms | **1558 ms** |
+
+Que cada scan é um estado de histórico deixou de ser leitura de comentário:
+`historyStates` medido em volta de um scan isolado vai de 29 para 30. Num
+documento desse tamanho cada um desses estados carrega um snapshot de página
+inteira, e é isso que faz a sessão longa piorar sozinha.
+
+### O gargalo que ninguém tinha perfilado: `_getTextLayerSize`
+
+Perfilando o scan passo a passo dentro do host, numa camada qualquer da página:
+
+| passo | mediana |
+|---|---|
+| `_getCurrentTextLayerBounds` | 0-1 ms |
+| `_createMagicWandSelection` | 10-20 ms |
+| **`_getTextLayerSize`** | **205-826 ms** |
+| expandir / contrair | 8-13 ms |
+| `_sampleSelectionShapeViaPath` | 55-172 ms |
+| `_deselect` | 3-6 ms |
+
+O scan suaviza a seleção por metade do corpo da fonte, e a única forma que ele
+tinha de saber esse corpo era `jamText.getLayerText()`: o descritor de texto
+inteiro, convertido para objetos JS, por causa de um número. O mesmo número
+está no mesmo descritor `textKey` e o Action Manager devolve em 1-2 ms.
+
+| | antigo (`jamText`) | novo (Action Manager) |
+|---|---|---|
+| leitura do corpo | 205-826 ms | **1-2 ms** |
+| `getActiveLayerBubbleShape` completo, A/B na mesma sessão | 261 ms média | **176 ms** |
+| saída do scan (`bounds` + 21 linhas) | — | **idêntica em 14/14** |
+
+O controle roda o mesmo leitor duas vezes seguidas e confirma que o scan é
+determinístico (idêntico em 14/14), então a igualdade entre os dois leitores
+significa o que parece. O valor lido bate em **40 camadas de texto das três
+páginas** (1 a 8 style ranges cada) e numa camada de point text criada só para
+o teste. O leitor antigo continua como reserva se o Action Manager falhar.
+
+**A dispersão dos 205-826 ms é a deriva do processo, e é o argumento.** Numa
+sessão recém-aberta `jamText.getLayerText()` custa ~90 ms; depois de horas de
+Photoshop, 300-800 ms. O leitor novo mede 1-2 ms nos dois casos. O ganho A/B
+honesto, medido em sequência na mesma sessão limpa, é 261 → 176 ms; o ganho que
+o usuário sente no fim de um dia de trabalho é bem maior.
+
+### A regressão que o adiamento cria, medida
+
+Entre a troca de camada e o ponteiro chegar no widget, as sugestões são as sem
+shape. Medindo a janela nas 14 camadas, cache frio:
+
+| | antes do ganho no host | depois |
+|---|---|---|
+| janela `mouseover` → forma resolvida | min 108, mediana 435, pior 771 ms | min 108, **mediana 220**, pior 330 ms |
+| camadas com forma resolvida | 14/14 | 14/14 |
+| card do topo diferente com e sem shape | **0 de 14** | **0 de 14** |
+| lista inteira diferente | 1 de 14 | 1 de 14 |
+
+As camadas de ~108 ms nem escaneiam: vêm do cache ou do reuso do balão
+compartilhado. E nessa página a sugestão do topo saiu igual com e sem shape nas
+14 camadas, então clicar dentro da janela aplica o mesmo texto. Isso é medição
+de uma página, não teorema: em balão mais estreito o shape pode mudar o
+ranking.
+
+**Não fazer:** tirar o gate agora que o scan custa 176 ms. Seriam 9 scans e 9
+snapshots de página inteira por página percorrida, que é exatamente o que
+degrada a sessão longa.
+
+### O que precisa resolver o balão sozinho
+
+Adiar o scan quebra quem usa o contorno para outra coisa que não sugestão. Os
+três casos passam por `ensureBubbleShape`, que devolve a forma em memória ou
+paga o scan na hora:
+
+- **Alinhamento** — o `phantomOffsetX` é o que centraliza em balão assimétrico.
+  Clicando o botão nas 14 camadas nas duas builds, com a chamada interceptada
+  para não mexer no arquivo, os offsets saíram **idênticos bit a bit**
+  (`36.79407979407889`, `-69.38253937228887`, `122.83483292503598`,
+  `-333.83684939091347`, `-22.994274698186945`, `0`). O atalho WIN+ALT nunca
+  usou a forma do painel (`shortcutCommands.js:177` passa só resize e padding),
+  então esse caminho não muda.
+- **Estrela (aprender forma)** — sem o contorno ela aprenderia comparando as
+  quebras do usuário contra o conjunto de candidatos errado.
+- **Batch** — o painel percorre as camadas sozinho e o usuário está esperando as
+  formas. **Aqui a primeira versão tinha uma regressão de verdade, achada pela
+  passada ao vivo:** batch com cache frio não escaneava nada (`shape: none`).
+  `goToBatchLayer` pede o scan antes do texto da camada chegar, e naquele
+  instante `inlineSourceKey.current` ainda está vazio, então o branch do balão
+  desiste; o scan real vinha do refresh disparado depois pela chegada do texto,
+  e esse estava atrás do gate. O gate agora também abre com `batchRunRef.current`.
+
+### Lista de regressão ao vivo, build final
+
+| verificação | resultado |
+|---|---|
+| percorrer 14 camadas sem hover | 0 scans, 0 estados de histórico |
+| aplicar sugestão | texto da camada igual ao texto do card |
+| ⟲ desfazer depois de aplicar | habilitado, texto volta ao original |
+| ⟲ depois de trocar de camada | desabilitado |
+| batch com cache frio | 1 scan, forma do balão, 3 cards |
+| marquee manual | `getCurrentSelectionShape` roda sozinho, forma `selection` |
+| estrela sem hover | resolve o balão, `Preference saved (5 lines)` |
+| Alinhamento, 14 camadas | `phantomOffsetX` idêntico ao build anterior |
+| `npm test` | 31 suítes, 0 falhas |
+
+Não medido, e vale dizer: texto vertical/RTL e documento com resolução diferente
+de 72. Os dois leitores de corpo saem do mesmo campo do mesmo descritor, então a
+chance de divergirem é baixa, mas ninguém mediu.
+
+### Reproduzir
+
+As bancadas ficaram no scratchpad da sessão: `cdp.js` (cliente CDP em Node 22+,
+sem dependências — `fetch` e `WebSocket` globais), `bench.js` (percurso das
+camadas contando chamadas de host), `race.js` (janela do hover), `align.js`
+(offsets com a chamada interceptada), `scanprofile.js` (perfil passo a passo do
+scan), `hostregress.js` (A/B dos dois leitores de corpo), `starcheck.js`,
+`batchcold.js`, `regress.js`.
+
+Duas armadilhas que custaram tempo:
+
+1. **`mouseenter` sintético não dispara `onMouseEnter` do React.** O React
+   sintetiza enter/leave a partir de `mouseover`/`mouseout`; despachar
+   `mouseenter` direto no elemento não faz nada, e a medição sai dizendo que o
+   hover não escaneia.
+2. **`$.evalFile` não substituiu o host carregado.** Recarregar a página do
+   painel também não: o `ScriptPath` do manifesto é avaliado uma vez por sessão
+   do Photoshop. `eval(File.read())` troca as funções em memória, e reiniciar o
+   Photoshop é o jeito limpo de medir o host novo. Sem isso dá para medir o
+   código antigo achando que é o novo — aconteceu aqui duas vezes.
