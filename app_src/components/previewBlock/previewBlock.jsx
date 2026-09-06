@@ -1,7 +1,7 @@
 import "./previewBlock.scss";
 
 import React from "react";
-import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiChevronsRight, FiPlay, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiInfo, FiRotateCcw, FiStar, FiX } from "react-icons/fi";
+import { FiArrowRightCircle, FiChevronLeft, FiChevronRight, FiChevronsRight, FiPlay, FiPlusCircle, FiMinusCircle, FiArrowUp, FiArrowDown, FiAlertTriangle, FiInfo, FiCornerUpLeft, FiStar, FiX } from "react-icons/fi";
 import { AiOutlineBorderInner } from "react-icons/ai";
 import { MdCenterFocusWeak } from "react-icons/md";
 import { FaMagic } from "react-icons/fa";
@@ -1165,6 +1165,15 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     refreshInlineSelectionShape();
   }, [refreshInlineLayerSource, refreshInlineSelectionShape]);
 
+  // Photoshop history is document-wide, so this undo only means "the shape I
+  // just applied" while that shape is still the last thing that happened. Once
+  // the typesetter moves to another layer, everything he does there sits
+  // between him and that state, and undoing would take those layers with it.
+  // The switch therefore puts the button back to disabled.
+  React.useEffect(() => {
+    setTextShapeRUndoDepth(0);
+  }, [inlineLayerSource.layerId]);
+
   // Jumps Photoshop history back to just before the last applied shape —
   // the panel equivalent of Ctrl+Z after trying a shape
   const undoTextShapeRApply = React.useCallback(() => {
@@ -1489,7 +1498,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
                   disabled={!textShapeRUndoDepth || !!applyingTextShapeRId || !!batchRun}
                   title={locale.textShapeRUndo || "Undo the last applied shape (steps Photoshop history back)"}
                 >
-                  <FiRotateCcw size={11} />
+                  <FiCornerUpLeft size={11} />
                 </button>
                 <button
                   type="button"
