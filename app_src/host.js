@@ -177,6 +177,30 @@ var _MAX_BALLOON_PATH_ANCHORS = 30000;
 // middle of the plateau is the value.
 var _CUSP_CONCAVITY = 0.6;
 
+// Where two balloons meet, only one of the two corners has to be a real corner.
+//
+// Two round balloons overlapping deeply, or a junction whose other side runs off
+// the panel, leave one deep cusp and one shallow bend: measured on the reported
+// page, 1.40 against 0.34 and 1.48 against 0.15. The stock rule needs both above
+// 0.6, finds one corner, and every line in the merged region gets the merged
+// centroid — which is the "round balloon centred badly" the typesetter reports.
+//
+// Swept over the 107 layers of the corpus, requiring one corner above
+// `_CUSP_CONCAVITY` and its partner only above this: 4 layers improve (86 to 7,
+// 78 to 7, 46 to 12 and 17 to 1 px against the position the typesetter had
+// chosen), none get worse, and the 95th percentile of the whole corpus goes from
+// 62 px to 39 px.
+var _CUSP_ASSIST_CONCAVITY = 0.12;
+
+// A waist is short next to the shape it splits, and that is what keeps the
+// assisted pair above from cutting a single balloon in half: the chord may not
+// be longer than this fraction of the piece's own size (the square root of its
+// area). Measured, the real waists in the corpus sit at 0.23 and 0.32 while a
+// chord across a single balloon lands near 0.9; at 0.55 the one single balloon
+// that the assisted pair used to cut (0 px error, then 14 px) is refused again,
+// and every improvement above survives.
+var _CUSP_MAX_NECK = 0.55;
+
 // How much two lines have to cover each other before the balloon is worth probing
 // again with the other one hidden.
 //
@@ -3666,7 +3690,7 @@ function _findCuspPair(points) {
   var deepest = 0;
   for (i = 0; i < n; i++) {
     if (concavity[i] > concavity[deepest]) deepest = i;
-    if (concavity[i] < _CUSP_CONCAVITY) continue;
+    if (concavity[i] < _CUSP_ASSIST_CONCAVITY) continue;
     var top = true;
     for (var k = -span; k <= span; k++) {
       if (concavity[(i + k + n + n) % n] > concavity[i]) { top = false; break; }
@@ -3677,15 +3701,25 @@ function _findCuspPair(points) {
     return { a: -1, b: -1, first: concavity[deepest], second: 0 };
   }
 
+  var area = Math.abs(_polygonSignedArea(points));
+  var size = Math.sqrt(area > 0 ? area : 1);
   var best = null;
   for (var a = 0; a < corners.length; a++) {
     for (var b = a + 1; b < corners.length; b++) {
+      // One of the two still has to be a corner nobody argues about
+      var deepA = concavity[corners[a]] >= _CUSP_CONCAVITY;
+      var deepB = concavity[corners[b]] >= _CUSP_CONCAVITY;
+      if (!deepA && !deepB) continue;
+      var assisted = !deepA;
+      if (!deepB) assisted = true;
       var gap = Math.abs(corners[a] - corners[b]);
       if (gap > n / 2) gap = n - gap;
       if (gap < n * _CUSP_MIN_GAP) continue;
       var dx = points[corners[a]][0] - points[corners[b]][0];
       var dy = points[corners[a]][1] - points[corners[b]][1];
       var length = Math.sqrt(dx * dx + dy * dy);
+      // A pair carried by a single corner has to be a waist, not a cut across
+      if (assisted && length > _CUSP_MAX_NECK * size) continue;
       if (!best || length < best.length) {
         best = {
           length: length,

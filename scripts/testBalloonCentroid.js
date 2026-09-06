@@ -610,12 +610,16 @@ const MAX_CUTS = tuning("_CUSP_MAX_CUTS");
 const CONTOUR_POINTS = tuning("_CUSP_CONTOUR_POINTS");
 const SPAN_DIVISOR = tuning("_CUSP_SPAN_DIVISOR");
 const MIN_GAP = tuning("_CUSP_MIN_GAP");
+const ASSIST_CONCAVITY = tuning("_CUSP_ASSIST_CONCAVITY");
+const MAX_NECK = tuning("_CUSP_MAX_NECK");
 
 const signedArea = lift("_polygonSignedArea(poly)", [])();
 const areaCentroid = lift("_polygonAreaCentroid(poly)", [])();
 const largestContour = lift("_largestContour(polygons)", ["_polygonSignedArea"])(signedArea);
 const resampleContour = lift("_resampleContour(poly, count)", [])();
-const findCuspPair = lift("_findCuspPair(points)", ["_CUSP_SPAN_DIVISOR", "_CUSP_MIN_GAP", "_CUSP_CONCAVITY"])(SPAN_DIVISOR, MIN_GAP, CONCAVITY);
+const findCuspPair = lift("_findCuspPair(points)", [
+  "_CUSP_SPAN_DIVISOR", "_CUSP_MIN_GAP", "_CUSP_CONCAVITY", "_CUSP_ASSIST_CONCAVITY", "_CUSP_MAX_NECK", "_polygonSignedArea",
+])(SPAN_DIVISOR, MIN_GAP, CONCAVITY, ASSIST_CONCAVITY, MAX_NECK, signedArea);
 const splitContourAtChord = lift("_splitContourAtChord(points, a, b)", [])();
 const pieceOnSideOf = lift("_pieceOnSideOf(pieces, a, b, x, y)", [
   "_polygonSignedArea", "_polygonAreaCentroid",
@@ -934,6 +938,66 @@ const shareBody = hostSource.slice(shareStart, hostSource.indexOf("\n}", shareSt
 assert.ok(
   shareBody.indexOf("Math.min(mine") >= 0,
   "measured against the smaller box: a short line dropped across a long one covers 3% of it and all of itself"
+);
+
+/*
+ * The balloons the typesetter reported: three round ones drawn over each other,
+ * traced as one region. Two of their three junctions leave one deep cusp and one
+ * shallow bend — the other side of the neck runs off the panel, or the overlap is
+ * so deep that it never dives — and the rule that wanted two deep cusps found
+ * one, cut nothing, and centred every line on the merged blob.
+ *
+ * These are the outlines the host really traced on that page, captured from the
+ * align path, with the centre the typesetter had chosen for each line.
+ */
+const outlines = require("./balloonOutlines.fixture.json");
+
+function splitCentreFor(shape) {
+  const report = {};
+  const centre = splitAtCusps([shape.contour], shape.box, report);
+  return { centre: centre, report: report };
+}
+
+function distanceTo(centre, target) {
+  return Math.round(Math.hypot(centre.x - target.x, centre.y - target.y));
+}
+
+const chainBottom = splitCentreFor(outlines.chainBottom);
+assert.ok(chainBottom.centre, "the balloon with one deep cusp and one shallow bend has to be cut out of the blob");
+assert.ok(
+  distanceTo(chainBottom.centre, outlines.chainBottom.savedCentre) <= 5,
+  "and the piece has to be the balloon the line sits in: " + JSON.stringify(chainBottom.centre) +
+    " against " + JSON.stringify(outlines.chainBottom.savedCentre)
+);
+
+const chainMiddle = splitCentreFor(outlines.chainMiddle);
+assert.ok(chainMiddle.centre, "the junction with two deep cusps must still be cut, exactly as before");
+
+const single = splitCentreFor(outlines.singleBalloon);
+assert.strictEqual(single.centre, null, "a balloon that is one balloon is never cut");
+
+/*
+ * The contract of the assisted pair, on the outline that needed it: one corner
+ * deep, the partner merely a corner, and a chord short enough to be a waist. Drop
+ * either half and the rule starts slicing single balloons — measured, one of them
+ * went from landing on the typesetter's own centre to 14 px away.
+ */
+const bottomPoints = resampleContour(largestContour([outlines.chainBottom.contour]), CONTOUR_POINTS);
+const bottomPair = findCuspPair(bottomPoints);
+assert.ok(bottomPair.a >= 0, "the assisted pair has to be found at all");
+assert.ok(
+  Math.max(bottomPair.first, bottomPair.second) >= CONCAVITY,
+  "one of the two corners still has to be a corner nobody argues about"
+);
+assert.ok(
+  Math.min(bottomPair.first, bottomPair.second) < CONCAVITY &&
+    Math.min(bottomPair.first, bottomPair.second) >= ASSIST_CONCAVITY,
+  "and this outline is the asymmetric case: its partner is a bend, not a cusp"
+);
+const bottomSize = Math.sqrt(Math.abs(signedArea(bottomPoints)));
+assert.ok(
+  bottomPair.length <= MAX_NECK * bottomSize,
+  "a pair carried by one corner is only allowed across a waist"
 );
 
 console.log("balloon centroid tests passed");
