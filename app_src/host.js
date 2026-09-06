@@ -490,6 +490,29 @@ function _resolveStylePointText(style, fallbackPointText) {
 }
 
 function _getTextLayerSize() {
+  // jamText.getLayerText() reads the whole text descriptor and converts it to
+  // JS objects: 240-690 ms on a page-sized document, for one number. The bubble
+  // scan calls this on every layer, and it was two thirds of the scan's cost.
+  // The Action Manager answers the same size from the same textKey descriptor
+  // in 1-2 ms, measured identical on every layer of the reference page.
+  try {
+    var reference = new ActionReference();
+    reference.putProperty(charID.Property, stringIDToTypeID("textKey"));
+    reference.putEnumerated(charID.Layer, charID.Ordinal, charID.Target);
+    var textKey = executeActionGet(reference).getObjectValue(stringIDToTypeID("textKey"));
+    var ranges = textKey.getList(stringIDToTypeID("textStyleRange"));
+    if (ranges.count) {
+      var textStyle = ranges.getObjectValue(0).getObjectValue(stringIDToTypeID("textStyle"));
+      var sizeId = stringIDToTypeID("size");
+      var size = 0;
+      try {
+        size = textStyle.getUnitDoubleValue(sizeId);
+      } catch (unitError) {
+        size = textStyle.getDouble(sizeId);
+      }
+      if (size > 0) return size;
+    }
+  } catch (actionError) {}
   try {
     var textParams = jamText.getLayerText();
     if (textParams && textParams.layerText && 
