@@ -446,7 +446,7 @@ const buildRichTextPayload = (text, allowMarkdown = isMarkdownEnabled()) => {
   };
 };
 
-const setActiveLayerText = (text, style, direction, callback = () => {}) => {
+const setActiveLayerText = (text, style, direction, callback = () => {}, options = {}) => {
   // Support legacy calls where direction is omitted and callback is 3rd parameter
   if (typeof direction === "function") {
     callback = direction;
