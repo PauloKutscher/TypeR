@@ -1,3 +1,4 @@
+import { fetchBody } from "./network";
 const FONT_VIEWER_API_BASE = "https://tools.carbonscans.com/fonts/api";
 const FILTER_CACHE_KEY = "typer.fontViewer.filters.v2";
 const STATUS_CACHE_TTL = 60 * 1000;
@@ -41,21 +42,13 @@ const requestJson = (url, options = {}, ttl = FAMILY_CACHE_TTL, fetchImpl = fetc
     if (inFlight.has(cacheKey)) return inFlight.get(cacheKey);
   }
 
-  const promise = fetchImpl(url, {
+  const promise = fetchBody(url, {
     ...options,
     headers: {
       Accept: "application/json",
       ...(options.headers || {}),
     },
-  })
-    .then((response) => {
-      if (!response.ok) {
-        const error = new Error(response.status === 429 ? "rateLimited" : "requestFailed");
-        error.status = response.status;
-        throw error;
-      }
-      return response.json();
-    })
+  }, 'json', 20000, fetchImpl)
     .then((data) => {
       if (!data || data.success === false) throw new Error("invalidResponse");
       if (cacheKey) {

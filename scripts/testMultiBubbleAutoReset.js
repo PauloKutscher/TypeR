@@ -22,8 +22,10 @@ assert.ok(/monitor\.lastBoundsKey = null/.test(clearedHelperBody), "Clearing mus
 assert.ok(/monitor\.multiWarnBounds = null/.test(clearedHelperBody), "Clearing must forget the Shift warning bounds");
 assert.ok(/cleared: true/.test(clearedHelperBody), "Cleared selections must be flagged for the panel");
 
+// The marquee reader is `_getSelectionChanged`; `getSelectionChanged` wraps it
+// to tag the answer with the document the selection belongs to.
 const getSelectionChangedSource = hostSource.match(
-  /function getSelectionChanged\(\) \{[\s\S]*?\n\}/
+  /function _getSelectionChanged\(\) \{[\s\S]*?\r?\n\}/
 )[0];
 assert.strictEqual(
   (getSelectionChangedSource.match(/_selectionClearedResult\(monitor, shiftPressed\)/g) || []).length,

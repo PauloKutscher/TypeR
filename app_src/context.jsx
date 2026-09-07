@@ -1,3 +1,5 @@
+import { validateImportData, repairFolderHierarchy } from "./librarySerialization";
+import { parsePageMarker } from "./pageMarker";
 import React from "react";
 import PropTypes from "prop-types";
 import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, getUpdateTestConfig, clearUpdateTestConfig, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, nativeAlert } from "./utils";
@@ -58,7 +60,6 @@ const storeFields = [
   "direction",
   "middleEast",
   "lastOpenedImagePath",
-  "storedSelections",
   "multiBubbleMode",
   "showTips",
   "exportFolderFontTipDismissed",
@@ -223,6 +224,7 @@ const defaultShortcut = getDefaultShortcuts();
 const shortcutMigration = migrateShortcutDefaults(storage.data?.shortcut, defaultShortcut);
 
 const normalizeFolders = (folders) => {
+  folders = repairFolderHierarchy(folders);
   const normalized = (folders || []).map((folder) => {
     const parentId = folder?.parentId === undefined || folder?.parentId === null || folder?.parentId === "" ? null : folder.parentId;
     return {
@@ -261,10 +263,13 @@ const collectDescendantFolderIds = (folders, folderId) => {
   const ids = [];
   if (!folderId) return ids;
   const queue = [folderId];
+  const visited = new Set([folderId]);
   while (queue.length) {
     const current = queue.shift();
     const children = (folders || []).filter((folder) => (folder.parentId || null) === current);
     for (const child of children) {
+      if (visited.has(child.id)) continue;
+      visited.add(child.id);
       ids.push(child.id);
       queue.push(child.id);
     }
@@ -360,6 +365,9 @@ const initialState = {
   styleSizeTipShown: storage.data?.styleSizeTipShown === true,
   styleSizeTipVisible: false,
   shortcut: shortcutMigration.shortcuts,
+  // Live keyboard state (is the keep-size modifier held right now); never
+  // persisted, and placed after the storage spread so it always starts false
+  keepSizeHeld: false,
   uiLayout: normalizeUiLayout(storage.data?.uiLayout),
   // The theme registry is filled by the theme manager at import time, so the
   // stored id can already point at a custom theme here
@@ -402,6 +410,12 @@ if (tabStorage.migrated) {
 }
 
 const baseReducer = (state, action) => {
+  if (action.type === "import" || action.type === "importStyleLibrary" || action.type === "importStyleFolder") {
+    try {
+      const data = action.type === "import" ? action.data : { folders: action.folders || (action.folder ? [action.folder] : []), styles: action.styles || [] };
+      validateImportData(data);
+    } catch (error) { nativeAlert(locale.errorImportStyles, locale.errorTitle, true); return state; }
+  }
   let thenScroll = false;
   let thenSelectStyle = false;
   let forceStylePrefixRefresh = false;
@@ -431,8 +445,8 @@ const baseReducer = (state, action) => {
 
     case "import": {
       for (const field in action.data) {
-        if (!action.data.hasOwnProperty(field)) continue;
-        if (!initialState.hasOwnProperty(field)) continue;
+        if (!Object.prototype.hasOwnProperty.call(action.data, field)) continue;
+        if (!storeFields.includes(field)) continue;
         if (field === "styles" && state.styles) {
           const styles = [];
           let asked = false;
@@ -1017,6 +1031,11 @@ const baseReducer = (state, action) => {
       break;
     }
 
+    case "setKeepSizeHeld": {
+      newState.keepSizeHeld = !!action.value;
+      break;
+    }
+
     case "setMultiBubbleMode": {
       newState.multiBubbleMode = !!action.value;
       if (!action.value) {
@@ -1313,12 +1332,6 @@ const baseReducer = (state, action) => {
     case "setMultiTabEnabled": {
       const enabled = action.value !== false;
       newState.multiTabEnabled = enabled;
-      if (!enabled && state.tabs.length > 1) {
-        // Disabling multi-tab keeps only the first tab; the rest is discarded
-        const firstTab = state.tabs[0];
-        newState.tabs = [firstTab];
-        loadTabIntoState(newState, firstTab);
-      }
       break;
     }
 
@@ -1681,7 +1694,7 @@ const baseReducer = (state, action) => {
     }
   }
   if (hasStorageChange) {
-    const dataToStore = {};
+    const dataToStore = { storedSelections: undefined };
     let shouldDebounceStorage = false;
     for (let i = 0; i < persistedFields.length; i++) {
       const field = persistedFields[i];
@@ -1852,7 +1865,7 @@ const ContextProvider = React.memo(function ContextProvider(props) {
             // Silent install failed: fall back to the interactive modal
             dispatch({ type: "setModal", modal: "update", data });
           },
-          { inPlaceOnly: true }
+          { expectedVersion: data.version }
         );
         return;
       }
@@ -1860,7 +1873,7 @@ const ContextProvider = React.memo(function ContextProvider(props) {
       // Fetch the zip in the background so the Install click is instant
       prefetchUpdateZip(data.downloadUrl);
       dispatch({ type: "setModal", modal: "update", data });
-    });
+    }).catch(error => console.warn("Automatic update check failed:", error));
   }, [state.checkUpdates, state.autoUpdate]);
   return <Context.Provider value={contextValue}>{props.children}</Context.Provider>;
 });

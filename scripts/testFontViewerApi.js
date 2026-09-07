@@ -9,7 +9,7 @@ const transformed = babel.transformSync(source, {
   presets: [["@babel/preset-env", { modules: "commonjs" }]],
 }).code;
 const apiModule = { exports: {} };
-new Function("require", "module", "exports", transformed)(require, apiModule, apiModule.exports);
+new Function("require", "module", "exports", transformed)(name => name === "./network" ? require("./helpers/loadAppModule")()("app_src/network.js") : require(name), apiModule, apiModule.exports);
 const {
   buildFontQuery,
   clearFontViewerMemoryCache,

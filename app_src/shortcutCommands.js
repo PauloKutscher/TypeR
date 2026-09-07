@@ -14,7 +14,7 @@ import {
 } from "./utils";
 import { buildSelectedLayerPayload, buildStoredSelectionPayload, getScaledStyle } from "./textLayerPayload";
 
-const applyLinesToLayers = (ctx, layers, preferredOrder = []) => {
+const applyLinesToLayers = (ctx, layers, preferredOrder = [], options = {}) => {
   const selectedIds = layers
     .map((layer) => layer.id)
     .filter((id) => typeof id === "number");
@@ -55,10 +55,10 @@ const applyLinesToLayers = (ctx, layers, preferredOrder = []) => {
         true
       );
     }
-  }, orderedIds);
+  }, orderedIds, options);
 };
 
-const pasteInSelection = (ctx, preferredOrder = []) => {
+const pasteInSelection = (ctx, preferredOrder = [], options = {}) => {
   const storedSelections = ctx.state.storedSelections || [];
 
   if (ctx.state.multiBubbleMode && storedSelections.length > 0) {
@@ -96,14 +96,15 @@ const pasteInSelection = (ctx, preferredOrder = []) => {
             true
           );
         }
-      }
+      },
+      options
     );
     return;
   }
 
   getTypeRSelectionSnapshot(({ selection, layers }) => {
     if (!selection && layers.length >= 2) {
-      applyLinesToLayers(ctx, layers, preferredOrder);
+      applyLinesToLayers(ctx, layers, preferredOrder, options);
       return;
     }
 
@@ -117,17 +118,18 @@ const pasteInSelection = (ctx, preferredOrder = []) => {
       ctx.state.direction,
       (ok) => {
         if (ok) ctx.dispatch({ type: "nextLine", add: true });
-      }
+      },
+      options
     );
   });
 };
 
-const applyLineAndStyle = (ctx) => {
+const applyLineAndStyle = (ctx, options = {}) => {
   const line = ctx.state.currentLine || { text: "" };
   const style = getScaledStyle(ctx.state.currentStyle, ctx.state.textScale);
   setActiveLayerText(line.text, style, ctx.state.direction, (ok) => {
     if (ok) ctx.dispatch({ type: "nextLine", add: true });
-  });
+  }, options);
 };
 
 const insertLineText = (ctx) => {
@@ -137,9 +139,9 @@ const insertLineText = (ctx) => {
   });
 };
 
-const applyLinesToSelectedLayers = (ctx, preferredOrder = []) => {
+const applyLinesToSelectedLayers = (ctx, preferredOrder = [], options = {}) => {
   getSelectedTextLayers((layers) => {
-    applyLinesToLayers(ctx, layers, preferredOrder);
+    applyLinesToLayers(ctx, layers, preferredOrder, options);
   });
 };
 
@@ -160,7 +162,7 @@ const shortcutCommands = [
     label: "shortcut_add",
     defaultKeys: ["WIN", "CTRL"],
     repeatDelay: 0,
-    handler: pasteInSelection,
+    handler: (ctx, options) => pasteInSelection(ctx, [], options),
   },
   {
     id: "apply",
@@ -168,6 +170,18 @@ const shortcutCommands = [
     defaultKeys: ["WIN", "SHIFT"],
     repeatDelay: 0,
     handler: applyLineAndStyle,
+  },
+  {
+    id: "keepTextSize",
+    label: "shortcut_keepTextSize",
+    defaultKeys: ["ALT"],
+    modifierOnly: true,
+    // Commands whose behavior this modifier changes. Matching is subset-based,
+    // so if these bindings contain every key of the modifier, the modifier is
+    // permanently on for them; the settings screen warns about that overlap.
+    appliesTo: ["add", "apply", "applyMultiple"],
+    repeatDelay: 0,
+    handler: () => {},
   },
   {
     id: "center",
@@ -273,7 +287,7 @@ const shortcutCommands = [
     label: "shortcut_applyMultiple",
     defaultKeys: [],
     repeatDelay: 0,
-    handler: applyLinesToSelectedLayers,
+    handler: (ctx, options) => applyLinesToSelectedLayers(ctx, [], options),
   },
   {
     id: "toggleMultiBubble",
@@ -400,6 +414,16 @@ const withShortcutHint = (label, keys) => {
   return shortcut ? `${label} (${shortcut})` : label;
 };
 
+const isShortcutActiveForEvent = (event, keys) => {
+  if (!event || !Array.isArray(keys) || !keys.length) return false;
+  const pressedModifiers = [];
+  if (event.metaKey) pressedModifiers.push("WIN");
+  if (event.ctrlKey) pressedModifiers.push("CTRL");
+  if (event.altKey) pressedModifiers.push("ALT");
+  if (event.shiftKey) pressedModifiers.push("SHIFT");
+  return keys.every((key) => pressedModifiers.indexOf(String(key).toUpperCase()) !== -1);
+};
+
 export {
   shortcutCommands,
   getDefaultShortcuts,
@@ -407,6 +431,7 @@ export {
   shortcutKeyLabels,
   formatShortcut,
   withShortcutHint,
+  isShortcutActiveForEvent,
   applyLinesToSelectedLayers,
   pasteInSelection,
 };

@@ -5,7 +5,7 @@ import PropTypes from "prop-types";
 import { FiArrowRightCircle, FiBold, FiItalic, FiTarget } from "react-icons/fi";
 
 import config from "../../config";
-import { locale, setActiveLayerText, resizeTextArea, scrollToLine, openFile, parseMarkdownRuns } from "../../utils";
+import { nativeAlert, locale, setActiveLayerText, resizeTextArea, scrollToLine, openFile, parseMarkdownRuns } from "../../utils";
 import { convertHtmlToMarkdownDetailed } from "../../markdownConvert";
 import { analyzeStructuralNumbers } from "../../structuralNumbers";
 import { writePasteDebugReport } from "../../pasteDebug";
@@ -259,7 +259,9 @@ const TextBlock = React.memo(function TextBlock() {
     [ignoreTagsRegex]
   );
 
+
   React.useEffect(() => {
+    let active = true;
     let image = context.state.images[0] || null;
     for (const line of context.state.lines) {
       if (line.ignore) {
@@ -274,10 +276,18 @@ const TextBlock = React.memo(function TextBlock() {
       }
     }
     if (image && image.path !== lastOpenedPath.current) {
-      openFile(image.path, context.state.autoClosePSD);
-      lastOpenedPath.current = image.path;
-      context.dispatch({ type: "setLastOpenedImagePath", path: image.path });
+      openFile(image.path, context.state.autoClosePSD, (result) => {
+        if (!active || result.superseded) return;
+        if (!result.ok) {
+          nativeAlert(locale.errorOpenPage.replace("{path}", image.path), locale.errorTitle, true);
+          return;
+        }
+        lastOpenedPath.current = image.path;
+        context.dispatch({ type: "clearSelections", preserveLine: true });
+        context.dispatch({ type: "setLastOpenedImagePath", path: image.path });
+      });
     }
+    return () => { active = false; };
   }, [context.state.currentLineIndex, context.state.autoClosePSD, context.state.images, context.state.lines, pageImageLookup]);
 
   // Precompute line numbers (handles the cumulative page counter)
