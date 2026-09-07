@@ -201,8 +201,10 @@ const textBlockSource = fs.readFileSync(
   path.resolve(__dirname, "../app_src/components/textBlock/textBlock.jsx"),
   "utf8"
 );
+// `core.autocrlf` decides how this file lands in the working tree, so the
+// matcher has to accept both endings or the check passes or fails by checkout.
 const highlightRenderer = textBlockSource.match(
-  /const renderHighlightedText = React\.useCallback\(\n[\s\S]*?\n {4}\[ignoreTagsRegex\]/
+  /const renderHighlightedText = React\.useCallback\(\r?\n[\s\S]*?\r?\n {4}\[ignoreTagsRegex\]/
 );
 assert.ok(highlightRenderer, "The highlight layer renderer must exist");
 assert.ok(
