@@ -2,7 +2,7 @@
 
 Documento de trabalho. Atualizado a cada etapa concluída.
 
-Última atualização: 2026-08-19, após destravar o multi-bolhas em páginas fora de 72 dpi (unidade das âncoras lida do descritor e centroide ausente deixando de virar `undefined` no payload).
+Última atualização: 2026-09-08, depois de a região deixar de desistir no primeiro par recusado, de o prefixo de cortes válidos parar de ser jogado fora, e de o corte parar de perguntar em que balão a fala está a uma caixa que o `resizeTextBox` já tinha movido.
 
 ## Objetivo
 
@@ -98,6 +98,14 @@ Baseline da medição: `resizeTextBoxOnCenter` desligado e `internalPadding = 0`
 | 22 | A fala vizinha jogada por cima: a mordida que a tinta dela tira da região | concluída |
 | 23 | Nível `overlap` na bancada: a página com uma fala em cima da outra | concluída |
 | 24 | Impedir que a limpeza invente um corte que a página não sustenta | rejeitada, medida |
+| 25 | Baseline e dataset exato com a geometria que o Align usou | concluída |
+| 26 | H25-A/F: concavidade multi-escala | concluída, rejeitada |
+| 27 | H25-B: busca global sobre conjuntos de cordas | concluída, rejeitada |
+| 28 | H25-C/E: transformada de distância e concordância clean/dirty | concluída, rejeitada |
+| 29 | H25-D: fixed-point e seleção final | concluída, resultado negativo (0/32) |
+| 30 | Porte mínimo e gate real | encerrada sem porte |
+| 31 | Balões redondos encadeados: a junção com uma cúspide só | concluída |
+| 32 | O par atrás do mais curto, o prefixo válido e a caixa que o resize moveu | concluída; aprovada nos cinco cenários congelados, reprovada por 2 px no cenário novo `overlapmid` |
 
 ## Registro do que já foi feito
 
@@ -807,11 +815,224 @@ contorno + caixa + centro salvo), `centerdiag.js` e `cusps.js` (região, alvo e
 perfil de concavidade por camada).
 
 
+### Task 32 — o par atrás do mais curto, o prefixo válido, e a caixa que o resize já tinha movido (concluída, 2026-09-08)
+
+**Baseline congelado.** `develop` em `012ef3438abf8c1dc83ccbdd449acdb3427e785b`,
+working tree limpo, bundle `app/host.jsx` SHA-1
+`4fdd163d7a3c73f8597c55877bbf3db437fb0f48`, Photoshop 27.9.1. Corridas de base
+`120-none`, `121-mid`, `122-full`, `123-overlap`, `125-resize-pad12` e
+`126-overlapmid`; da candidata `130..133`, `136-resize-pad12`, `137-overlap` e
+`136-overlapmid`, bundle final `c9b8be9c88031de1260a1a1d57b8d645b45e0d78`.
+15 páginas, 107 camadas, **106 elegíveis por cenário**, 0 erros de script.
+
+**O manifesto do ground truth estava incompleto e o driver o reescrevia sozinho.**
+Tinha 14 arquivos; `psd/` tem 15 desde a Task 31. `runMeasure.ps1` recongelava o
+manifesto sempre que a contagem mudava — era assim que uma página nova, removida
+ou renomeada passava sem ninguém ver. Agora só congela quando não existe
+manifesto ou com `-RefreezeGroundTruth`, e qualquer outra diferença é nomeada
+(`novo` / `ausente` / `mudou conteúdo`) e aborta a corrida. A guarda pegou um
+defeito real na primeira tentativa: manifesto escrito por PowerShell 7 (UTF-8 sem
+BOM) e lido por PowerShell 5.1 como ANSI, com os 30 nomes aparecendo como
+renomeados.
+
+**O avaliador imprimia `GATE APROVADO` sobre uma população que não conferia.**
+Quatro furos em `compareRuns.js`: um caso ausente de qualquer das duas corridas
+era pulado em silêncio; o p95 da candidata era calculado **só sobre os casos sem
+erro**, então uma falha do motor *melhorava* a distribuição ao sair dela; uma
+camada sem medição de segunda passada era pulada em vez de comparada; e nada
+conferia `scatter`, `resize`, `padding`, `phantomRatio`, `liveSelection`,
+`wandTolerance` nem o SHA-1 do harness entre as duas corridas. Corrigidos: os dois
+percentis saem da mesma lista de casos comparáveis, qualquer caso sem medição
+reprova, e chave duplicada, valor não finito e erro de script também.
+`node scripts/lab/compareRuns.js --selfcheck` injeta os sete defeitos, um por vez,
+em duas corridas sintéticas idênticas e exige que todos sejam detectados. A
+convenção de quantil está escrita (índice `floor(p·n)`) e o `n` sai em toda linha
+— em `texts:3+` (n=15) o "p95" é praticamente o máximo.
+
+**Bancada offline fiel.** `scripts/lab/liftHost.js` levanta as funções puras de
+qualquer revisão do host (working tree ou `git show <rev>:app_src/host.js`);
+`scripts/lab/replayPartition.js` roda o solver sobre os contornos que o Align
+realmente traçou e valida três coisas antes de qualquer número: o alvo gravado
+explica o movimento medido (p95 0,6 px), o fallback gravado é o centroide da
+região (p95 0,0 px) e o replay reproduz a decisão da corrida (p95 0,0 px,
+1 divergência em 108, explicada — `_centreInsideOutline` roda sobre todos os
+contornos e o rastro só guarda o maior). `overlayPartition.js` desenha região,
+esquinas, cada corda com a guarda que a recusou, a peça mantida, a caixa ativa, o
+alvo e o centro do typesetter.
+
+Duas armadilhas que essa validação pegou, e que ficam registradas: **reamostrar o
+contorno gravado não é no-op** (as amostras são uniformes ao longo do contorno
+*original*, então uma segunda passagem mede um perímetro menor e desliza tudo —
+até 25 px de arco, o bastante para trocar qual amostra é esquina); e **com
+`resize` ligada a caixa ativa não é reconstruível** a partir do rastro, então
+essas corridas são lidas pelas medições e não replayadas.
+
+**Onde o erro recuperável está.** Sobre 424 regiões (106 camadas × 4 cenários),
+com o gabarito autorizado a escolher a sequência de cortes — medição de teto, não
+regra:
+
+| oráculo | p50 | p95 | >25 | >50 | ganho somado |
+| --- | --- | --- | --- | --- | --- |
+| motor publicado | 7,1 | 61,7 | 53 | 28 | — |
+| escolha entre pares **já admissíveis** | 6,1 | 47,5 | 38 | 21 | 885 px |
+| admissibilidade solta (sem `gap`/`neck`) | 5,6 | 34,9 | 30 | 14 | 1801 px |
+| sem guarda de share | 5,4 | 34,9 | 26 | 13 | 2086 px |
+
+E afrouxar **um** limiar de cada vez é sempre negativo: `_CUSP_MIN_GAP` 0,10 leva
+o p95 de 64,8 a 94,6 (23 melhoram, 20 pioram); `_CUSP_MAX_NECK` 0,65/0,80,
+`_CUSP_CONCAVITY` 0,50/0,40, `_CUSP_SHARE_WAIST` 0,55, `_CUSP_MIN_PIECE_SHARE`
+0,10 e `_CUSP_MAX_CUTS` 5/1 — todas com soma de ganho negativa. O erro
+recuperável não está atrás de um limiar; está na decisão que **encerrava a
+região** quando a peça do primeiro par era recusada.
+
+**As três mudanças em `app_src/host.js`.**
+
+1. **O par atrás do mais curto, enquanto não houver corte.**
+   `_findCuspPair(points, skip)` ordena todos os pares admissíveis por
+   comprimento de corda e depois por índice, e devolve o `skip`-ésimo. Enquanto a
+   região não tem corte nenhum, uma peça recusada por `noPiece`, `noSide`,
+   `share` ou `thinPiece` faz a passagem tentar o próximo par em vez de encerrar
+   a região. Depois do primeiro corte o laço se comporta exatamente como antes, e
+   essa metade é medida: deixar uma passagem posterior caçar outra corda levou
+   três regiões do balão quádruplo de 16, 21 e 54 px para 106, 80 e 70 px.
+   `_CUSP_MAX_PAIR_TRIES = 3` não é botão: 2, 3, 4, 6 e 10 dão resultados
+   idênticos, porque o par que funciona é o primeiro ou o segundo.
+2. **O corte que afina demais é recusado, o prefixo fica.** A guarda cumulativa
+   saiu de depois do laço para dentro dele. Antes, uma sequência que terminava
+   abaixo de um sexto da região era descartada **inteira**, inclusive os cortes
+   que tinham passado todas as guardas sozinhos.
+3. **A âncora de pertencimento é a caixa de antes do layout.** Com
+   `resizeTextBox` ligado a caixa de texto é crescida até a **seleção inteira**
+   antes de o corte rodar — medido, 181×233 vira 648×70 numa região de 930×542 —
+   e o teste de lado passava a perguntar em que balão a fala está a um retângulo
+   centrado entre os dois. A caixa redimensionada continua sendo a que posiciona
+   a camada; só a pergunta "em que peça esta fala está" usa a caixa que ela tinha.
+
+A terceira entrou porque a matriz exigiu: na primeira tentativa o cenário com
+resize **reprovou** com `13#1` 150 → 467 px, `13#2` 67 → 313 px e `14#2`
+151 → 391 px. Ela é inerte quando `resize` está desligado, e isso foi medido, não
+suposto: `133-overlap` (sem ela) contra `137-overlap` (com ela) dá **0 casos
+diferentes** em 104.
+
+**Matriz real, cada cenário contra o motor publicado no mesmo cenário:**
+
+| cenário | corridas | veredito | por caso | custo |
+| --- | --- | --- | --- | --- |
+| seleção viva, offset 15%, `none` | `120` × `130` | aprovado | 0 IMPROVED · 106 UNCHANGED · 0 WORSENED | 685,4 → 577,1 s |
+| seleção viva, offset 15%, `mid` | `121` × `131` | aprovado | 1 · 105 · 0 | 901,2 → 998,3 s |
+| seleção viva, offset 15%, `full` | `122` × `132` | aprovado | 2 · 104 · 0 | 845,0 → 795,4 s |
+| sem marquee, `overlap` | `123` × `137` | aprovado | 0 · 104 · 0 | 888,1 → 830,7 s |
+| seleção viva, offset 15%, resize + padding 12 | `125` × `136` | aprovado | **10** · 95 · **1** | 607,2 → 572,9 s |
+| sem marquee, `overlapmid` (cenário novo, fora das séries históricas) | `126` × `136-overlapmid` | **reprovado por 2 px** | 0 · 104 · **1** | 1041,3 → 1024,4 s |
+
+O custo oscila de −16% a +11% conforme a corrida, com o sinal trocando entre
+cenários; medir entre sessões nesta máquina não vale nada, como a Task 22 já
+registrou. O que dá para afirmar é o trabalho extra: o par seguinte só é
+procurado em **16 das 530 regiões medidas** (3,0%) e a guarda cumulativa dentro do
+laço só muda algo em **5** (0,9%); em Node o solver inteiro sai de 0,014 ms para
+0,015 ms por região.
+
+No cenário com resize — o que o painel usa com `resizeTextBoxOnCenter` —
+`texts:3+` vai de p95 190/150 px para **22/15**, o E do p95 de 242 para **26**, os
+casos acima de 50 px de **6 para 0**, e `leak` de 148/73 para **36/20** com os
+acima de 50 px de 10 para 2. `texts:1`, `normal`, `cut` e `scream` ficam
+**idênticos** em todos os cenários e continuam com zero cortes: a regra nova só
+muda a população em que o motor já queria cortar e foi impedido.
+
+As camadas que mudaram, todas nomeadas: `mid` — `0029#1` 60,2 → 6,7. `full` —
+`11#2` 108,0 → 11,2 e `0016#2` 114,7 → 26,1. Resize — `11#2` 241,8 → 11,4,
+`13#1` 150,0 → 8,3, `14#2` 150,6 → 4,0, `0016#4` 154,4 → 27,6, `14#3` 98,3 → 7,1,
+`13#3` 69,3 → 4,7, `13#2` 66,9 → 10,1, `0003#0` 54,8 → 5,4, `13#5` 33,9 → 13,7,
+`14#4` 29,2 → 3,6, e **uma piora tolerada**: `11#4` 6,8 → 26,3 px.
+
+**Um alerta de idempotência que não reproduziu, e como ficou provado.** A
+primeira corrida de `overlap` reprovou por uma camada: `11#8` passou a mover 1 px
+em X na segunda passada. Ela não corta (`skip=shallow:4`, `cortes=0`) e a primeira
+passada é idêntica nas 11 camadas da página nos dois motores. Medido com a mesma
+página e as mesmas opções, duas corridas por bundle: **o bundle publicado discorda
+de si mesmo** — `140-noise-base-a` deu `7/-6 rep 1/0` e `141-noise-base-b` deu
+`8/-6 rep 0/0`. As outras dez camadas são iguais nas sete corridas. O gate não foi
+afrouxado: `137-overlap` passa como ele está escrito.
+
+**O cenário novo que a candidata não passa, e que fica registrado.** `-Scatter
+overlapmid` é o nível que faltava: a fala jogada dentro do próprio balão **e** a
+vizinha em cima de onde ela foi parar. Os níveis `none/mid/full` cercam cada fala
+no próprio balão e nunca põem uma sobre a outra; o `overlap` da Task 23 deixa a
+ativa em casa. Como a candidata lê a caixa da camada ativa, os dois fatores
+precisavam ser exercidos juntos. Corridas `126-overlapmid` × `136-overlapmid`:
+0 IMPROVED, 104 UNCHANGED, **1 WORSENED**, e o gate **reprova** por 2 px no p95 de
+`|dY|` em `texts:3+` (50,0 → 52,0; `n = 15`, então esse p95 é praticamente o
+máximo). O caso é `14#2`: o motor publicado recusa por `noSide`, fica no centroide
+fundido e erra 57,4 px **oscilando 35/−41 px a cada aperto**; a candidata tenta o
+par seguinte, corta duas vezes, erra 63,8 px e **para de oscilar (0/0)**.
+Reprodutível — três corridas por bundle na mesma página dão sempre o mesmo
+resultado, e as outras seis camadas de `14.psd` são idênticas nas seis corridas.
+É uma piora de prioridade 4 em troca de uma correção de prioridade 2, mas o gate
+está escrito em p95 e não foi afrouxado. Uma guarda tentada para removê-la — só
+tentar o próximo par enquanto o centro da caixa ativa estiver dentro da região —
+é **inerte**: 0 casos mudam nos cinco cenários replayáveis, porque o centro está
+dentro da região e o `noSide` vem de os dois centroides das peças caírem do mesmo
+lado da corda.
+
+**Integração conferida no Photoshop real.** Multi Bubble: 20 formas de seleção no
+bundle candidato, marquee **viva** em captura, captura repetida, shape scan e
+captura de novo, inclusive em `coversPage`, recusa por orçamento e `noPolygons`.
+Paste: caminho não tocado — `_splitOutlineAtCusps` tem um único chamador. DPI: a
+mesma página a 72 e a 300 dpi sem reamostrar pixel dá **0,000 px** de diferença de
+alvo e os mesmos cortes, nos dois motores. Fluxo sequencial (página inteira sem
+repor entre as falas, ida e volta e duas varreduras): em `11.psd` a dependência de
+ordem cai de máx 84,9 px para **49,2 px** e a segunda varredura fica igual; em
+`13.psd` os dois motores são idênticos. `psd/` e `true/` conferidos por SHA-1
+depois de todas as corridas: 30 arquivos, 0 divergências. `npm run verify` passa.
+
+**Fronteira que sobra, caracterizada.** 36 das 424 regiões têm uma cúspide funda
+(≥0,6 rad) e **nenhum parceiro admissível** — p95 191 px, máximo 354 px, 30 delas
+com dois ou mais textos. Auditadas par a par, a rejeição é sempre `gap` (as duas
+cúspides ficam perto demais ao longo do contorno) ou `neck` (o parceiro é uma
+dobra rasa e a corda é longa demais para ser cintura). O caso mais caro é
+`MUP_難攻不落の魔王城へようこそ64話_2023~0007`, uma cadeia de três lobos empilhados
+cujo lado direito é reto: as junções só têm cúspide de um lado. E há ambiguidade
+registrada em `0003#1`, com três cúspides fundas e três pares admissíveis cujos
+erros são 188,6 px (a corda mais curta, escolhida), **7,2 px** e 462,5 px — o par
+certo é o do meio em comprimento, o mais desequilibrado em fração e o de cúspide
+mais rasa. Medido o **rank** da corda que o oráculo escolhe entre os pares
+admissíveis nos 19 casos recuperáveis: 1, 2, 3, 4, 5, 10 e 12 de 2 a 21
+candidatos — espalhado. "Pegar o k-ésimo mais curto" não é regra, e é por isso
+que a busca por pontuação das Tasks 25–30 não achou vencedor.
+
+**Tentativas medidas e rejeitadas nesta rodada:** preferir a corda que não
+atravessa a caixa da fala (1 caso melhora 6 px, nada mais muda); preferir o par
+cuja peça contém o centro da fala (**0** casos mudam — a peça escolhida pelo
+teste de lado já contém o centro em todos); e a suspeita de que
+`_centreInsideOutline` conferido contra a região inteira fosse permissivo demais
+(**0** dos 101 casos com corte tem centro dentro do contorno e fora da peça).
+
+**Testes.** `scripts/testBalloonCentroid.js` ganhou: os dois contornos reais em
+que o par mais curto é recusado (`retryAfterNoSide`, `retryAfterShare`, no
+`balloonOutlines.fixture.json`), com a exigência de que o corte caia a menos da
+metade da distância que o centroide fundido erra; a ordem total e estável dos
+pares e o `null` depois do último; uma cadeia sintética de quatro lobos em que
+dois cortes legais sozinhos ficam abaixo do piso juntos, exigindo que o prefixo
+seja mantido; e a ordem em que a âncora é tomada em relação ao resize. Conferido
+que os três casos **não cortam** no motor anterior (`noSide`, `share:86` e
+`thinPiece:10`).
+
+**Ferramentas novas do laboratório**, todas no git: `liftHost.js`,
+`replayPartition.js`, `overlayPartition.js`, `diagDpiSplit.jsx` +
+`runDpiSplit.ps1`, `diagSequence.jsx` + `runSequence.ps1`, e o nível
+`-Scatter overlapmid` no harness. Relatório completo com todas as tabelas:
+`.centering-lab/task32-report.md`; um CSV por cenário com erro assinado por eixo,
+E, erro relativo, repetição, corte, fallback e status em
+`.centering-lab/gate-*.csv`.
+
 ## Decisões feitas
 
 1. **Consolidar a decisão negativa das Tasks 25–30.** A bancada agora reproduz a geometria real, os artefatos estão em `.centering-lab/partition-report.md` e `.centering-lab/partition-scores.json`, e `npm run verify` passou. Das 32 configurações avaliadas com leave-one-page-out, nenhuma passou todos os gates (`0/32`); `11.psd` permaneceu holdout.
 2. **Manter o motor publicado.** Não portar multi-escala, busca global, DT, clean/dirty ou fixed-point para `app_src/host.js`; não adicionar estado/histerese, mudanças no painel/payload ou alterações em Paste/Multi Bubble. O SHA-1 do host e os 28 PSDs devem continuar sendo conferidos antes/depois de novas medições.
 3. **Só reabrir a investigação com evidência nova.** Se for necessário tentar novamente, acrescentar ground truth ou páginas held-out independentes e repetir os quatro cenários e os mesmos gates, congelando a configuração antes de revelar `11.psd`. Não ajustar parâmetros ao caso holdout nem selecionar o melhor valor isolado.
+4. **O avaliador é conferido antes de qualquer número.** `compareRuns.js` reprova população incompleta, falha do motor, repetição ausente, chave duplicada, valor não finito, erro de script e divergência de opções ou de harness; `--selfcheck` demonstra os sete. `runMeasure.ps1` não recongela o manifesto do ground truth sozinho. Nenhuma tabela desta ou de futuras rodadas vale se a linha `população: N elegíveis, N comparáveis, 0 sem medição` não estiver lá.
+5. **A escolha entre pares admissíveis continua aberta e sem regra conhecida.** O teto medido é 885 px em 19 casos, mas o rank da corda certa entre os pares admissíveis é 1, 2, 3, 4, 5, 10 e 12 de 2 a 21 — não existe "pegar o k-ésimo". Reabrir só com informação **adicional à máscara** (traço interno remanescente na junção, oclusão, junção em T), e prototipando offline antes de pagar aquisição nova no Photoshop.
+6. **As 15 páginas são todas de desenvolvimento.** Não há validação independente reservada nesta rodada: `psd/` e `true/` são o mesmo corpus usado para formular as hipóteses, e `11.psd` deixou de ser holdout na Task 31. Os números valem como não-regressão medida no corpus conhecido, não como previsão sobre páginas novas.
 
 ## Como reproduzir
 
@@ -852,6 +1073,29 @@ powershell -NoProfile -File scripts/lab/runMultiBubble.ps1 -Root "<raiz>" -Run 0
 
 # 10. em que unidade o Action Manager devolve as âncoras deste Photoshop
 powershell -NoProfile -File scripts/lab/runAnchor.ps1 -Root "<raiz>" -Run 040-dpi -Page bug300 -Label dpi300 -X 1120 -Y 98
+
+# 11. auditar o próprio avaliador antes de acreditar em qualquer tabela
+node scripts/lab/compareRuns.js --selfcheck
+node scripts/lab/compareRuns.js 120-none 130-none 120-none --csv .centering-lab/gate.csv
+
+# 12. rodar o solver publicado sobre os contornos que o Align realmente traçou,
+#     sem abrir o Photoshop, e conferir que a bancada reproduz a corrida
+node scripts/lab/replayPartition.js --runs 120-none,121-mid,122-full,123-overlap \
+  --validate --engine HEAD --host HEAD --candidate .
+node scripts/lab/replayPartition.js --runs 120-none --host . --json .centering-lab/replay.json
+node scripts/lab/overlayPartition.js --dump .centering-lab/replay.json --worst 20
+
+# 13. o nível que junta as duas metades: a fala jogada dentro do próprio balão
+#     E a vizinha em cima de onde ela foi parar
+powershell -NoProfile -File scripts/lab/runMeasure.ps1 -Root "<raiz>" -Run 136-overlapmid `
+  -Scatter overlapmid -TraceGeometry
+
+# 14. a mesma página alinhada na resolução dela e em 300 dpi, sem reamostrar pixel
+powershell -NoProfile -File scripts/lab/runDpiSplit.ps1 -Root "<raiz>" -Page 13.psd -Dpi 300 -Label cand
+
+# 15. a página inteira alinhada linha a linha sem ser reposta entre elas,
+#     para a frente, para trás e duas vezes
+powershell -NoProfile -File scripts/lab/runSequence.ps1 -Root "<raiz>" -Page 11.psd -Label cand
 ```
 
 Runs guardados em `.centering-lab/runs/`. Motor original: `000-baseline` (sem resize), `000R-resize`, `000R-pad12`, `000L-live`, `000L-live-phantom`. Motor atual: `041-dpi-live-phantom` (Tarefa 18), antes dele `038-cost-live-phantom` (Tarefa 17), antes dele `016-narrow`, `017-narrow-resize`, `018-narrow-pad12`, `019-narrow-live`, `020-narrow-live-phantom`. Os demais (`002` a `015`, `021`, `022`) são as etapas intermediárias descritas acima.
