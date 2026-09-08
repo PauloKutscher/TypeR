@@ -626,8 +626,8 @@ const findCuspPair = lift("_findCuspPair(points, skip)", [
 ])(SPAN_DIVISOR, MIN_GAP, CONCAVITY, ASSIST_CONCAVITY, MAX_NECK, signedArea);
 const splitContourAtChord = lift("_splitContourAtChord(points, a, b)", [])();
 const pieceOnSideOf = lift("_pieceOnSideOf(pieces, a, b, x, y)", [
-  "_polygonSignedArea", "_polygonAreaCentroid",
-])(signedArea, areaCentroid);
+  "_polygonSignedArea", "_polygonAreaCentroid", "_pointInPolygon",
+])(signedArea, areaCentroid, pointInPolygon);
 const centreInsideOutline = lift("_centreInsideOutline(polygons, point)", ["_pointInPolygon"])(pointInPolygon);
 const splitAtCusps = lift("_splitOutlineAtCusps(polygons, activeBox, report)", [
   "_CUSP_CONCAVITY", "_CUSP_MIN_PIECE_SHARE", "_CUSP_MAX_CUTS", "_CUSP_CONTOUR_POINTS",
@@ -1072,7 +1072,7 @@ assert.ok(
  * captured from the align path, so the shape here is the shape it decided on.
  */
 const retryCases = [
-  { name: "retryAfterNoSide", guard: "noSide" },
+  { name: "retryAfterNoSide", guard: "sameSide" },
   { name: "retryAfterShare", guard: "share" },
 ];
 for (let r = 0; r < retryCases.length; r++) {
@@ -1097,22 +1097,62 @@ for (let r = 0; r < retryCases.length; r++) {
   const pieces = splitContourAtChord(points, first.a, first.b);
   assert.ok(pieces, label + ": the narrowest pair still has to produce two arcs");
   const side = pieceOnSideOf(pieces, points[first.a], points[first.b], shape.box.xMid, shape.box.yMid);
-  if (retryCases[r].guard === "noSide") {
-    assert.ok(!side, label + ": the narrowest chord is the one that leaves the text on neither side");
+  if (retryCases[r].guard === "sameSide") {
+    /*
+     * A chord does not cut a shape into two half-planes once a piece is concave.
+     * On this outline both pieces' area centroids land on the same side of the
+     * narrowest chord, so "the piece whose centre matches the text's side" names
+     * neither — and the line kept the centre of both balloons, 115 px away.
+     * Containment answers it: exactly one of the two holds the text.
+     */
+    const ux = points[first.b][0] - points[first.a][0];
+    const uy = points[first.b][1] - points[first.a][1];
+    const sideOf = (p) => (p.x - points[first.a][0]) * uy - (p.y - points[first.a][1]) * ux;
+    const wanted = (shape.box.xMid - points[first.a][0]) * uy - (shape.box.yMid - points[first.a][1]) * ux;
+    const centres = pieces.map((piece) => areaCentroid(piece));
+    assert.ok(centres[0] && centres[1], label + ": both pieces must have a centroid");
+    assert.strictEqual(
+      sideOf(centres[0]) >= 0,
+      sideOf(centres[1]) >= 0,
+      label + ": this is the outline where both piece centroids fall on the same side of the chord"
+    );
+    assert.ok(
+      (sideOf(centres[0]) >= 0) !== (wanted >= 0),
+      label + ": and it is the side the text is not on, so the centroid test answers nothing"
+    );
+    const holding = pieces.filter((piece) => pointInPolygon(shape.box.xMid, shape.box.yMid, piece));
+    assert.strictEqual(holding.length, 1, label + ": exactly one piece holds the text");
+    assert.ok(side, label + ": so the piece has to be named by containment, not refused");
+    assert.strictEqual(side.points, holding[0], label + ": and it has to be the piece that holds it");
   } else {
     assert.ok(side, label + ": the narrowest chord does give the text a side");
     assert.ok(
       side.share > 1 - MIN_PIECE_SHARE && first.length > SHARE_WAIST * Math.sqrt(Math.abs(signedArea(points))),
       label + ": and it is refused because it shaves the region instead of crossing a waist"
     );
+    const second = findCuspPair(points, 1);
+    assert.ok(second, label + ": there has to be a pair behind the narrowest one");
+    assert.ok(
+      second.length >= first.length,
+      "pairs are offered narrowest first: " + second.length + " must not be under " + first.length
+    );
   }
-  const second = findCuspPair(points, 1);
-  assert.ok(second, label + ": there has to be a pair behind the narrowest one");
-  assert.ok(
-    second.length >= first.length,
-    "pairs are offered narrowest first: " + second.length + " must not be under " + first.length
-  );
 }
+
+/*
+ * And the fallback the side test still exists for: a line that is not inside the
+ * region at all — dropped between two balloons, or standing where a neighbour's
+ * ink bit the region away — has to be given a side anyway rather than refused.
+ */
+const straightCut = [[0, 0], [100, 0], [100, 100], [0, 100]];
+const halves = splitContourAtChord(resampleContour(straightCut, 80), 20, 60);
+assert.ok(halves, "a square must split at two opposite points");
+const outsideLeft = pieceOnSideOf(halves, [100, 50], [0, 50], -500, 10);
+assert.ok(outsideLeft, "a text outside the region must still be given a piece");
+assert.ok(
+  !pointInPolygon(-500, 10, outsideLeft.points),
+  "and that piece is chosen by the side test, because containment cannot answer"
+);
 
 // The order is total and stable, and running off the end says so instead of
 // handing back the last pair again.
