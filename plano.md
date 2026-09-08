@@ -105,7 +105,7 @@ Baseline da medição: `resizeTextBoxOnCenter` desligado e `internalPadding = 0`
 | 29 | H25-D: fixed-point e seleção final | concluída, resultado negativo (0/32) |
 | 30 | Porte mínimo e gate real | encerrada sem porte |
 | 31 | Balões redondos encadeados: a junção com uma cúspide só | concluída |
-| 32 | O par atrás do mais curto, o prefixo válido e a caixa que o resize moveu | concluída; aprovada nos cinco cenários congelados, reprovada por 2 px no cenário novo `overlapmid` |
+| 32 | O par atrás do mais curto, o prefixo válido, a caixa que o resize moveu e o teste de lado que não era pertencimento | concluída; aprovada nos seis cenários |
 
 ## Registro do que já foi feito
 
@@ -821,9 +821,20 @@ perfil de concavidade por camada).
 working tree limpo, bundle `app/host.jsx` SHA-1
 `4fdd163d7a3c73f8597c55877bbf3db437fb0f48`, Photoshop 27.9.1. Corridas de base
 `120-none`, `121-mid`, `122-full`, `123-overlap`, `125-resize-pad12` e
-`126-overlapmid`; da candidata `130..133`, `136-resize-pad12`, `137-overlap` e
-`136-overlapmid`, bundle final `c9b8be9c88031de1260a1a1d57b8d645b45e0d78`.
-15 páginas, 107 camadas, **106 elegíveis por cenário**, 0 erros de script.
+`176-overlapmid`; da candidata `180-*`, bundle final
+`d22925dbdd7b304378954e78fd490835a162028b`. Doze corridas no mesmo harness
+congelado, mais duas de repetibilidade (`171-none`, `171-resize-pad12`, publicado
+contra publicado) e uma de coleta do H9 (`190-rawoutline`). 15 páginas, 107
+camadas, **106 elegíveis por cenário**, 0 erros de script.
+
+O custo não é conclusivo e não é apresentado como se fosse: entre corridas do
+mesmo bundle ele oscila de −18,5% a +44,9% conforme a sessão e a pressão de
+memória da máquina — a corrida de `overlap` que mediu +44,9% rodou logo depois de
+o sistema ficar com 0,49 GB livres. O trabalho extra que a mudança realmente
+acrescenta é: o par seguinte só é procurado em 16 das 530 regiões medidas (3,0%),
+a guarda cumulativa dentro do laço só muda algo em 5 (0,9%), o pertencimento é um
+`_pointInPolygon` por peça, e em Node o solver inteiro sai de 0,014 ms para
+0,015 ms por região.
 
 **O manifesto do ground truth estava incompleto e o driver o reescrevia sozinho.**
 Tinha 14 arquivos; `psd/` tem 15 desde a Task 31. `runMeasure.ps1` recongelava o
@@ -885,7 +896,7 @@ o p95 de 64,8 a 94,6 (23 melhoram, 20 pioram); `_CUSP_MAX_NECK` 0,65/0,80,
 recuperável não está atrás de um limiar; está na decisão que **encerrava a
 região** quando a peça do primeiro par era recusada.
 
-**As três mudanças em `app_src/host.js`.**
+**As quatro mudanças em `app_src/host.js`.**
 
 1. **O par atrás do mais curto, enquanto não houver corte.**
    `_findCuspPair(points, skip)` ordena todos os pares admissíveis por
@@ -907,6 +918,15 @@ região** quando a peça do primeiro par era recusada.
    e o teste de lado passava a perguntar em que balão a fala está a um retângulo
    centrado entre os dois. A caixa redimensionada continua sendo a que posiciona
    a camada; só a pergunta "em que peça esta fala está" usa a caixa que ela tinha.
+4. **O teste de lado não é um teste de pertencimento.** `_pieceOnSideOf` escolhia
+   a peça cujo **centroide** cai do mesmo lado da corda que a caixa da fala. Uma
+   corda não corta uma forma em dois semiplanos assim que uma peça é côncava:
+   medido sobre 529 regiões traçadas, o teste de lado escolhe uma peça que **não
+   contém** a fala em 8 de 151 cortes e não responde nada em 3 — uma dessas
+   deixou a fala 108 px fora, outra 115 px. Agora pertencimento vem primeiro,
+   quando exatamente uma das duas peças contém o ponto; o teste de lado fica como
+   fallback, e não é sobra: a caixa de tinta pode estar inteiramente fora da
+   região aberta, e uma fala sem lugar ainda tem de receber um lado.
 
 A terceira entrou porque a matriz exigiu: na primeira tentativa o cenário com
 resize **reprovou** com `13#1` 150 → 467 px, `13#2` 67 → 313 px e `14#2`
@@ -916,21 +936,18 @@ diferentes** em 104.
 
 **Matriz real, cada cenário contra o motor publicado no mesmo cenário:**
 
-| cenário | corridas | veredito | por caso | custo |
-| --- | --- | --- | --- | --- |
-| seleção viva, offset 15%, `none` | `120` × `130` | aprovado | 0 IMPROVED · 106 UNCHANGED · 0 WORSENED | 685,4 → 577,1 s |
-| seleção viva, offset 15%, `mid` | `121` × `131` | aprovado | 1 · 105 · 0 | 901,2 → 998,3 s |
-| seleção viva, offset 15%, `full` | `122` × `132` | aprovado | 2 · 104 · 0 | 845,0 → 795,4 s |
-| sem marquee, `overlap` | `123` × `137` | aprovado | 0 · 104 · 0 | 888,1 → 830,7 s |
-| seleção viva, offset 15%, resize + padding 12 | `125` × `136` | aprovado | **10** · 95 · **1** | 607,2 → 572,9 s |
-| sem marquee, `overlapmid` (cenário novo, fora das séries históricas) | `126` × `136-overlapmid` | **reprovado por 2 px** | 0 · 104 · **1** | 1041,3 → 1024,4 s |
+| cenário | corridas | veredito | por caso |
+| --- | --- | --- | --- |
+| seleção viva, offset 15%, `none` | `170` × `180` | aprovado | 0 IMPROVED · 106 UNCHANGED · 0 WORSENED |
+| seleção viva, offset 15%, `mid` | `170` × `180` | aprovado | **1** · 105 · 0 |
+| seleção viva, offset 15%, `full` | `170` × `180` | aprovado | **2** · 104 · 0 |
+| sem marquee, `overlap` | `170` × `180` | aprovado | 0 · 104 · 0 |
+| seleção viva, offset 15%, resize + padding 12 | `170` × `180` | aprovado | **10** · 95 · **1** |
+| sem marquee, `overlapmid` (cenário novo, fora das séries históricas) | `170` × `180` | aprovado | 0 · 105 · 0 |
+| **nulo**: publicado × publicado, `none` | `170-none` × `171-none` | aprovado | 0 · 106 · 0 |
+| **nulo**: publicado × publicado, resize | `170-resize` × `171-resize` | aprovado | 0 · 106 · 0 |
 
-O custo oscila de −16% a +11% conforme a corrida, com o sinal trocando entre
-cenários; medir entre sessões nesta máquina não vale nada, como a Task 22 já
-registrou. O que dá para afirmar é o trabalho extra: o par seguinte só é
-procurado em **16 das 530 regiões medidas** (3,0%) e a guarda cumulativa dentro do
-laço só muda algo em **5** (0,9%); em Node o solver inteiro sai de 0,014 ms para
-0,015 ms por região.
+
 
 No cenário com resize — o que o painel usa com `resizeTextBoxOnCenter` —
 `texts:3+` vai de p95 190/150 px para **22/15**, o E do p95 de 242 para **26**, os
@@ -954,25 +971,97 @@ de si mesmo** — `140-noise-base-a` deu `7/-6 rep 1/0` e `141-noise-base-b` deu
 `8/-6 rep 0/0`. As outras dez camadas são iguais nas sete corridas. O gate não foi
 afrouxado: `137-overlap` passa como ele está escrito.
 
-**O cenário novo que a candidata não passa, e que fica registrado.** `-Scatter
+**O gate estava quebrado, e a prova é um experimento nulo.** Duas das seis
+comparações reprovavam, e as duas em camadas onde o caminho alterado **não
+executa** (`cortes=0`). Medido rodando o mesmo bundle duas vezes:
+
+| corrida | bundle | `11#8` alvo (`none`) | `11#6` alvo da 2ª passada (`resize`) |
+| --- | --- | --- | --- |
+| `120-none` / `170-resize` | publicado | 498,006 | 1524,500 |
+| `170-none` / `171-resize` | publicado | **497,950** | 1524,500 |
+| `180-none` / `180-resize` | candidata | 498,006 | **1524,493** |
+| — / `181-resize` | candidata | — | 1524,500 |
+
+O motor publicado discorda de si mesmo em 0,074 px e a candidata em 0,007 px, e
+isso basta para o centro rasterizado da tinta pular um pixel inteiro e cruzar
+uma tolerância. `node scripts/lab/compareRuns.js 170-none 171-none 170-none` —
+**publicado contra publicado** — reprovava exatamente como a candidata.
+
+O conserto não foi subir limiar, que seria afrouxar depois de ver falhar. Foi
+medir a coisa certa: idempotência e "estava correto" são propriedades da resposta
+do **motor**, e o harness grava o alvo. Um caso que troca de lado de uma
+tolerância enquanto o motor mirou no mesmo ponto dentro de 0,5 px não mudou de
+comportamento — e os dois casos continuam **nomeados no relatório**, não
+somem:
+
+```
+1 caso(s) trocaram de lado da tolerância sem o motor mudar de alvo:
+  11#8: caiu do outro lado da tolerância com o alvo do motor a 0.074 px do anterior
+idempotência: 5 de 106 ... (1 que o motor de base mantinha parada,
+                            0 delas com o alvo da segunda passada realmente mudado)
+```
+
+O teste de aceitação é o experimento nulo passar a aprovar, e o `--selfcheck`
+ganhou as duas metades: um caso que sai da tolerância **com o alvo mudado**
+reprova; um que sai **com o alvo idêntico** é nomeado e não reprova. O mesmo para
+oscilação.
+
+**H9, o contorno antes da abertura: mecanismo confirmado, uso rejeitado.** O
+harness ganhou `-CaptureRawOutline`, que grava no mesmo probe o contorno cru e o
+aberto. Sobre 102 camadas com os dois:
+
+| grupo | cortes no aberto | cortes no cru | cru melhor | cru pior |
+| --- | --- | --- | --- | --- |
+| `texts:1` | 0 | 3 | 3 | 10 |
+| `texts:2` | 10 | 24 | 15 | 7 |
+| `texts:3+` | 14 | 11 | 2 | 11 |
+
+A abertura **realmente esconde pares de cúspide**: 14 das 26 regiões de duas
+falas ganham corte no contorno cru, várias exatamente da família `shallow:132`,
+`shallow:122`, `shallow:56`. Mas o cru também inventa corte em três balões
+únicos — um deles `0018-0019#1`, a região em que a Task 31 fixou
+`_CUSP_SHARE_WAIST = 0.45` justamente por não poder ser cortada (13,0 → 74,9 px)
+— e arrasa a página de quatro balões (`11#2` 11,9 → 277,5 px), onde a peça vira a
+região inteira (`share:100`).
+
+Restringir o cru a recurso, só quando o aberto não corta, elimina o desastre de
+`texts:3+` e mantém 10 ganhos reais em `texts:2` (30,1 → 9,2 · 35,9 → 15,0 ·
+23,2 → 6,9 · 22,3 → 6,2 e mais seis), mas **continua rejeitado**: `texts:1` vai de
+p95 19,5 para 39,5 px e de máximo 62 para 75, com os mesmos três cortes falsos.
+
+O que isso muda para a próxima rodada: o alvo deixa de ser "achar sinal novo" e
+passa a ser **limpar o contorno cru sem arredondar a cúspide**. A abertura existe
+para tirar franja de antialias e retícula, e é isso que ela cobra. Um filtro que
+remova ruído sem erodir-dilatar ficaria com os 10 ganhos sem os 3 falsos. É
+mudança na aquisição, custa `Make Work Path` a mais, e precisa da própria matriz.
+
+**O cenário novo, e o que ele custou.** `-Scatter
 overlapmid` é o nível que faltava: a fala jogada dentro do próprio balão **e** a
 vizinha em cima de onde ela foi parar. Os níveis `none/mid/full` cercam cada fala
 no próprio balão e nunca põem uma sobre a outra; o `overlap` da Task 23 deixa a
 ativa em casa. Como a candidata lê a caixa da camada ativa, os dois fatores
-precisavam ser exercidos juntos. Corridas `126-overlapmid` × `136-overlapmid`:
-0 IMPROVED, 104 UNCHANGED, **1 WORSENED**, e o gate **reprova** por 2 px no p95 de
-`|dY|` em `texts:3+` (50,0 → 52,0; `n = 15`, então esse p95 é praticamente o
-máximo). O caso é `14#2`: o motor publicado recusa por `noSide`, fica no centroide
-fundido e erra 57,4 px **oscilando 35/−41 px a cada aperto**; a candidata tenta o
-par seguinte, corta duas vezes, erra 63,8 px e **para de oscilar (0/0)**.
-Reprodutível — três corridas por bundle na mesma página dão sempre o mesmo
-resultado, e as outras seis camadas de `14.psd` são idênticas nas seis corridas.
-É uma piora de prioridade 4 em troca de uma correção de prioridade 2, mas o gate
-está escrito em p95 e não foi afrouxado. Uma guarda tentada para removê-la — só
-tentar o próximo par enquanto o centro da caixa ativa estiver dentro da região —
-é **inerte**: 0 casos mudam nos cinco cenários replayáveis, porque o centro está
-dentro da região e o `noSide` vem de os dois centroides das peças caírem do mesmo
-lado da corda.
+precisavam ser exercidos juntos. Numa versão intermediária da candidata — antes do pertencimento explícito — ele
+reprovava por 2 px no p95 de `|dY|` em `texts:3+`, num caso só: `14#2` passava a
+cortar onde o publicado recusava por `noSide`, errava 6,4 px a mais e parava de
+oscilar 35/−41 px. Com o pertencimento, `14#2` volta a não cortar e o cenário
+fecha em **0 IMPROVED, 105 UNCHANGED, 0 WORSENED**. Uma guarda tentada antes
+disso — só tentar o próximo par enquanto o centro da caixa ativa estiver dentro
+da região — é **inerte**: 0 casos mudam nos cinco cenários replayáveis, porque o
+centro está dentro da região e o `noSide` vem de os dois centroides das peças
+caírem do mesmo lado da corda, que é o que a quarta mudança conserta.
+
+**A única piora da matriz inteira, investigada até o fim.** `11#4` no cenário com
+resize sai de 6,8 px para 26,3 px. Não disparou regra nenhuma — nunca esteve
+dentro da tolerância de 4,05 px (dy 5,50). Rastreada: veio da correção da âncora,
+não do par seguinte nem do pertencimento. Os três cortes que ela agora faz são
+todos legítimos — cúspides 0,79/1,52, 1,01/0,40 e 1,57/1,13, cinturas 0,18/0,36/
+0,27, shares 0,76/0,82/0,87, acumulado 0,543, e a peça contém a fala nas três — e
+o erro por passo é 53,9 → **7,3** → 26,4: o terceiro corte é válido e infeliz.
+Limitar o orçamento conserta esse caso e quebra dezesseis: com `_CUSP_MAX_CUTS`
+em 2, `14#3` vai de 7,0 a 69,0 px, `14#4` de 2,5 a 61,2 e `13#4` de 7,9 a 66,5
+(5 melhoram, 16 pioram); em 4, 5 melhoram e 3 pioram. Ela pertence à região de
+quatro balões da `11.psd` que é a pendência aberta desde a Task 21, e compra uma
+oscilação de 33 px por Align indo a zero.
 
 **Integração conferida no Photoshop real.** Multi Bubble: 20 formas de seleção no
 bundle candidato, marquee **viva** em captura, captura repetida, shape scan e
@@ -1025,14 +1114,144 @@ que os três casos **não cortam** no motor anterior (`noSide`, `share:86` e
 E, erro relativo, repetição, corte, fallback e status em
 `.centering-lab/gate-*.csv`.
 
+### Distribuição do erro, antes e depois (regenerar com `node scripts/lab/errorTable.js`)
+
+Erro = `hypot(delta.inkX, delta.inkY)`, a distância entre onde a camada parou e
+onde o typesetter a tinha deixado. Corridas `170-*` (bundle publicado
+`4fdd163d…`) contra `180-*` (candidata `d22925db…`), mesmo harness, 15 páginas,
+106 camadas elegíveis por cenário. Três medições ficam de fora porque o motor
+recusou de um dos lados — falha não vale erro zero.
+
+**Os seis cenários somados**
+
+| grupo | n | p50 | p75 | p95 | máx | >10 px | >25 px | >50 px |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| TOTAL | 633 | 7,3 → **7,2** | 16,0 → **14,9** | 78,7 → **65,0** | 354 → 354 | 254 → **248** | 99 → **88** | 57 → **46** |
+
+**Cenário a cenário, só o total e os grupos que se movem**
+
+| cenário | grupo | n | p50 | p75 | p95 | máx | >25 px | >50 px |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `none` | TOTAL | 106 | 7,1 → 7,1 | 13,0 → 13,0 | 34,8 → 34,8 | 354 → 354 | 9 → 9 | 3 → 3 |
+| `mid` | TOTAL | 106 | 7,3 → 7,3 | 16,3 → **16,1** | 76,4 → 76,4 | 192 → 192 | 18 → **17** | 10 → **9** |
+| `mid` | `texts:2` | 30 | 15,7 → **13,6** | 44,2 → **33,0** | 188,8 → 188,8 | 192 → 192 | 10 → **9** | 7 → **6** |
+| `full` | TOTAL | 106 | 7,8 → 7,8 | 17,5 → **16,3** | 108,0 → **77,4** | 185 → 185 | 20 → **18** | 12 → **10** |
+| `full` | `texts:2` | 30 | 15,4 → 15,4 | 42,5 → **34,7** | 181,2 → 181,2 | 185 → 185 | 11 → **10** | 6 → **5** |
+| `full` | `texts:3+` | 15 | 16,3 → **16,0** | 65,0 → **54,7** | 179,8 → 179,8 | 180 → 180 | 6 → **5** | 5 → **4** |
+| `overlap` | TOTAL | 104 | 6,0 → 6,0 | 13,0 → 13,0 | 45,7 → 45,7 | 336 → 336 | 7 → 7 | 5 → 5 |
+| **`resize+pad12`** | **TOTAL** | 106 | 7,6 → **7,2** | 16,8 → **13,0** | 110,8 → **35,3** | 354 → 354 | 17 → **9** | 11 → **3** |
+| `resize+pad12` | `texts:2` | 30 | 14,1 → **13,6** | 22,8 → **19,4** | 154,4 → **110,8** | 354 → 354 | 7 → **5** | 4 → **2** |
+| `resize+pad12` | **`texts:3+`** | 15 | 20,8 → **7,4** | 98,3 → **12,2** | 241,8 → **26,3** | 242 → **26** | 7 → **1** | 6 → **0** |
+| `resize+pad12` | `leak` | 45 | 15,2 → **11,1** | 33,9 → **18,7** | 154,4 → **36,0** | 354 → 354 | 14 → **6** | 10 → **2** |
+| `overlapmid` | TOTAL | 105 | 9,5 → 9,5 | 35,3 → 35,3 | 93,6 → 93,6 | 336 → 336 | 28 → 28 | 16 → 16 |
+
+`texts:1`, `normal`, `cut` e `scream` ficam **idênticos em todos os seis
+cenários** — a regra nova só muda a população em que o motor já queria cortar e
+não conseguia. O máximo de 354 px que não se move é
+`MUP_難攻不落の魔王城へようこそ64話_2023~0007#2`, a cadeia de três lobos com cúspide
+de um lado só, descrita na fronteira abaixo.
+
+O ganho está concentrado no caminho com `resizeTextBox`, que é o que o painel usa
+por padrão: `texts:3+` sai de p95 241,8 px para **26,3** e de seis camadas acima
+de 50 px para **nenhuma**.
+
+### Mapa do erro que sobra (medido, para não recomeçar do zero na próxima rodada)
+
+Sobre 529 regiões — 106 camadas × 5 cenários, motor publicado — repartindo o erro
+pela **primeira etapa em que ele aparece**:
+
+| etapa | n | p50 | p95 | máx | soma do erro | % do total |
+| --- | --- | --- | --- | --- | --- | --- |
+| aquisição: a região não é o balão da fala | 3 | 62,4 | 79,4 | 79 | 145 px | **1,5%** |
+| sem corte, alvo = centroide da região | 386 | 5,8 | 75,0 | 354 | 6724 px | **69,4%** |
+| cortou e o alvo foi recusado | 1 | 5,0 | 5,0 | 5 | 5 px | 0,1% |
+| cortou | 140 | 11,2 | 76,4 | 189 | 2811 px | **29,0%** |
+
+**A aquisição não é o problema.** Em 3 de 529 a região que o motor usou não é o
+balão em que a fala está (IoU contra a região de referência abaixo de 0,6), e
+duas delas são a mesma página no cenário com vizinha em cima. Todo o resto do
+erro nasce depois, com a região certa na mão.
+
+A massa "sem corte" repartida por topologia e forma:
+
+| grupo | n | p50 | p95 | máx | % da massa sem corte |
+| --- | --- | --- | --- | --- | --- |
+| `texts:2` / `leak` | 72 | 19,4 | 191,7 | 354 | **53,8%** |
+| `texts:1` / `cut` | 139 | 5,7 | 50,2 | 95 | 19,6% |
+| `texts:1` / `normal` | 153 | 4,5 | 35,3 | 114 | 19,2% |
+| `texts:3+` / `leak` | 16 | 19,0 | 108,0 | 108 | 6,7% |
+| `texts:1` / `scream` | 10 | 9,6 | 10,0 | 10 | 0,7% |
+
+**Mais da metade do erro que sobra é região de duas falas que o corte não
+separa.** É a mesma família descrita acima: cúspide funda sem parceiro
+admissível, ou par recusado.
+
+**E a cauda de uma fala só não é partição perdida.** Das 302 amostras de
+`texts:1`, 285 não têm cúspide nenhuma (p50 5,0 px, p95 34,8) e só 9 têm cúspide
+funda sem corte — dessas, as duas grandes (114 e 50 px) só aparecem nos cenários
+com uma vizinha jogada em cima, isto é, região mordida, não balão fundido. Os 17
+casos de `texts:1` acima de 25 px são **seis regiões distintas**, e o padrão
+delas é outro:
+
+| erro | dX/dY | balão | caixa da fala | texto |
+| --- | --- | --- | --- | --- |
+| 95 px | −52/−79 | 395×683 | 307×535 | "The Ducal House of Eisenhood" |
+| 62 px | +5/+62 | 739×845 | 395×409 | "There's no doubt that Oz fel…" |
+| 59 px | +56/−18 | 554×678 | 347×174 | "But, you know, Mr. Remme?" |
+| 49 px | −48/−10 | 425×536 | 275×110 | "Hee hee, yes, he is." |
+| 40 px | +1,5/−39,5 | 601×974 | 246×381 | "Let those kids die…!" |
+| 35 px | −11/+33,5 | 439×681 | 249×187 | "Ichi vai caçar a magia Anti-…" |
+
+Ou a fala ocupa quase todo o balão (78% da largura e da altura no pior caso), ou
+é uma fala pequena num balão grande onde o typesetter escolheu um canto. Nenhuma
+delas tem região errada nem cúspide perdida.
+
+### Hipóteses medidas e rejeitadas nesta rodada
+
+| hipótese | medida | veredito |
+| --- | --- | --- |
+| **caixa tipográfica em vez da caixa de tinta** — centrar pela tinta desloca o corpo das letras conforme haja descendente | pooled, `texts:1`: dY médio 4,44 px com descendente contra 0,05 sem. **Controlando por número de linhas o efeito some**: uma linha, 2,93 contra 0,86 px, quando metade do descendente medido valeria ~27 px | confundimento com tamanho e número de linhas; rejeitada |
+| **deslocamento óptico constante** (typesetter põe o texto acima do centro) | `texts:1`, três cenários: dX mediana −1,0 px e média −0,9; dY mediana +1,0 e média +3,0, com histograma de −39 a +62 e moda em 0 | não existe viés constante que valha corrigir; o −1 px em X está no piso de ±1 px dos bounds inteiros |
+| **contenção (H7)**: o alvo empurra a caixa para fora do balão | amostrando 49 pontos da caixa contra o contorno: o motor deixa a caixa parcialmente fora em 68 de 516, **o typesetter em 62**; só 34 casos perdem mais de 2 pontos percentuais de cobertura, quase todos 0,94–0,98 contra 1,00 | não é problema geral; o único caso grave (cobertura 0,24) já é resolvido pelo par seguinte |
+| **offset fantasma em Y** para balão cortado | só 8 das 112 camadas de `texts:1`/`cut` tocam borda do canvas (4 à direita, 4 em cima); dY médio +5,0 px no grupo do topo, n=4 | amostra pequena demais e sem direção consistente |
+| **H8: traço remanescente na junção** | amostrando o composto da página (texto escondido) ao longo do **meio** de cada corda candidata, excluindo 15% de cada ponta: cinza médio **255** e mínimo **255** nas cordas boas; 254/242 nas ruins, com 5% tendo algum pixel abaixo de 200 | **a informação não está na imagem**: o desenhista apaga a divisa interna por completo. Não é difícil de extrair, é inexistente |
+| **H13: estreitar para a vizinhança da fala** quando há cúspide funda sem par (mecanismo que já existe para região vazada) | 40 regiões com esse gatilho (26 `texts:2`, 9 `texts:1`, 5 `texts:3+`). Estreitando 50%: p95 191,5 → 94,7 px, máximo 354 → 113, ganho somado 520 px, mas **13 melhoram e 8 pioram** — inclusive `育成74話~0007#0` de 0,1 px para 51,3 px | há erro recuperável ali, mas o gatilho pega 9 regiões de uma fala só e destrói casos perfeitos; separar por solidez seria ajustar em 40 amostras |
+
+**O que isso fecha.** A separação de dois balões sobrepostos não tem sinal local:
+não há tinta na junção, o teste de tangentes já foi medido pior que o acaso
+(Task 26, AUC 0,314), o rank da corda certa entre as admissíveis é espalhado de 1
+a 12, e reconstruir o lobo por ajuste de círculo não é identificável. O que resta
+é a silhueta global, que é o que a regra de cúspides já usa.
+
+**O que continua aberto.** Uma frente ainda não medida: o contorno **antes** da
+abertura morfológica. Tudo que já foi medido roda sobre o contorno aberto, e a
+abertura arredonda a esquina côncava num arco de raio `r` — nas regiões
+problemáticas `r` mediano é 69 px contra 38 px nas saudáveis, porque o raio é 10%
+do menor lado e essas regiões são grandes. Se for a abertura que transforma um
+lado da junção numa dobra rasa demais para parear, o contorno cru tem o par que
+falta. O harness sabe capturá-lo (`trueRegion.rawOutline`), o teste é
+discriminatório — dá par nas 40 regiões travadas sem inventar corte nas 285 de
+uma fala só? — e não custa mudança no motor até render.
+
 ## Decisões feitas
 
 1. **Consolidar a decisão negativa das Tasks 25–30.** A bancada agora reproduz a geometria real, os artefatos estão em `.centering-lab/partition-report.md` e `.centering-lab/partition-scores.json`, e `npm run verify` passou. Das 32 configurações avaliadas com leave-one-page-out, nenhuma passou todos os gates (`0/32`); `11.psd` permaneceu holdout.
 2. **Manter o motor publicado.** Não portar multi-escala, busca global, DT, clean/dirty ou fixed-point para `app_src/host.js`; não adicionar estado/histerese, mudanças no painel/payload ou alterações em Paste/Multi Bubble. O SHA-1 do host e os 28 PSDs devem continuar sendo conferidos antes/depois de novas medições.
 3. **Só reabrir a investigação com evidência nova.** Se for necessário tentar novamente, acrescentar ground truth ou páginas held-out independentes e repetir os quatro cenários e os mesmos gates, congelando a configuração antes de revelar `11.psd`. Não ajustar parâmetros ao caso holdout nem selecionar o melhor valor isolado.
-4. **O avaliador é conferido antes de qualquer número.** `compareRuns.js` reprova população incompleta, falha do motor, repetição ausente, chave duplicada, valor não finito, erro de script e divergência de opções ou de harness; `--selfcheck` demonstra os sete. `runMeasure.ps1` não recongela o manifesto do ground truth sozinho. Nenhuma tabela desta ou de futuras rodadas vale se a linha `população: N elegíveis, N comparáveis, 0 sem medição` não estiver lá.
-5. **A escolha entre pares admissíveis continua aberta e sem regra conhecida.** O teto medido é 885 px em 19 casos, mas o rank da corda certa entre os pares admissíveis é 1, 2, 3, 4, 5, 10 e 12 de 2 a 21 — não existe "pegar o k-ésimo". Reabrir só com informação **adicional à máscara** (traço interno remanescente na junção, oclusão, junção em T), e prototipando offline antes de pagar aquisição nova no Photoshop.
-6. **As 15 páginas são todas de desenvolvimento.** Não há validação independente reservada nesta rodada: `psd/` e `true/` são o mesmo corpus usado para formular as hipóteses, e `11.psd` deixou de ser holdout na Task 31. Os números valem como não-regressão medida no corpus conhecido, não como previsão sobre páginas novas.
+4. **O gate mede o motor, não o raster.** Idempotência e "estava correto" só
+   reprovam quando o alvo que o motor calculou mudou mais de 0,5 px; abaixo
+   disso o caso é **nomeado no relatório** e não conta. A justificativa é
+   medida, não estética: com a regra anterior o bundle publicado reprovava
+   contra ele mesmo (`170-none` × `171-none`), porque duas corridas do mesmo
+   motor divergem 0,074 px no alvo e isso move o centro rasterizado um pixel
+   inteiro. O teste de aceitação é o experimento nulo passar a aprovar, e o
+   `--selfcheck` exige as duas metades: alvo mudado reprova, alvo idêntico é
+   nomeado. Toda rodada futura deve rodar pelo menos um experimento nulo antes
+   de ler um flag de um caso só.
+5. **O avaliador é conferido antes de qualquer número.** `compareRuns.js` reprova população incompleta, falha do motor, repetição ausente, chave duplicada, valor não finito, erro de script e divergência de opções ou de harness; `--selfcheck` demonstra os sete. `runMeasure.ps1` não recongela o manifesto do ground truth sozinho. Nenhuma tabela desta ou de futuras rodadas vale se a linha `população: N elegíveis, N comparáveis, 0 sem medição` não estiver lá.
+6. **A escolha entre pares admissíveis continua aberta e sem regra conhecida.** O teto medido é 885 px em 19 casos, mas o rank da corda certa entre os pares admissíveis é 1, 2, 3, 4, 5, 10 e 12 de 2 a 21 — não existe "pegar o k-ésimo". E a saída pelo "traço remanescente na junção" está **fechada com medição**: amostrando o composto da página no meio de cada corda candidata, o cinza médio é 255 e o mínimo é 255 nas cordas boas — o desenhista apaga a divisa interna por completo, então não é informação difícil de extrair, é informação que não existe.
+7. **A frente que sobra é a aquisição, não o solver.** O contorno **antes** da abertura morfológica tem os pares que faltam (14 das 26 regiões de duas falas ganham corte nele) e também inventa três cortes em balão único, porque carrega a franja de antialias e a retícula que a abertura existe para remover. O próximo passo, se houver, é **limpar sem arredondar a cúspide** — filtro de ruído em vez de erodir-dilatar — e isso é mudança na aquisição, com `Make Work Path` a mais e matriz própria. `-CaptureRawOutline` no harness grava os dois contornos do mesmo probe para medir offline antes de pagar.
+8. **As 15 páginas são todas de desenvolvimento.** Não há validação independente reservada nesta rodada: `psd/` e `true/` são o mesmo corpus usado para formular as hipóteses, e `11.psd` deixou de ser holdout na Task 31. Os números valem como não-regressão medida no corpus conhecido, não como previsão sobre páginas novas.
 
 ## Como reproduzir
 
@@ -1078,6 +1297,15 @@ powershell -NoProfile -File scripts/lab/runAnchor.ps1 -Root "<raiz>" -Run 040-dp
 node scripts/lab/compareRuns.js --selfcheck
 node scripts/lab/compareRuns.js 120-none 130-none 120-none --csv .centering-lab/gate.csv
 
+# 11b. a distribuição do erro, antes e depois, por cenário e por grupo
+#      (a tabela que fica no plano; regenerar sempre que houver corrida nova)
+node scripts/lab/errorTable.js
+node scripts/lab/errorTable.js none:170-none:180-none resize:170-resize-pad12:180-resize-pad12
+
+# 11c. o experimento nulo: o mesmo bundle dos dois lados. Um flag de um caso só
+#      não vale nada sem ele
+node scripts/lab/compareRuns.js 170-none 171-none 170-none
+
 # 12. rodar o solver publicado sobre os contornos que o Align realmente traçou,
 #     sem abrir o Photoshop, e conferir que a bancada reproduz a corrida
 node scripts/lab/replayPartition.js --runs 120-none,121-mid,122-full,123-overlap \
@@ -1096,6 +1324,11 @@ powershell -NoProfile -File scripts/lab/runDpiSplit.ps1 -Root "<raiz>" -Page 13.
 # 15. a página inteira alinhada linha a linha sem ser reposta entre elas,
 #     para a frente, para trás e duas vezes
 powershell -NoProfile -File scripts/lab/runSequence.ps1 -Root "<raiz>" -Page 11.psd -Label cand
+
+# 16. gravar o contorno antes e depois da abertura morfológica, no mesmo probe,
+#     para medir offline o que a abertura esconde e o que ela evita
+powershell -NoProfile -File scripts/lab/runMeasure.ps1 -Root "<raiz>" -Run 190-rawoutline `
+  -Scatter none -LiveSelection -PhantomRatio 0.15 -TraceGeometry -CaptureRawOutline
 ```
 
 Runs guardados em `.centering-lab/runs/`. Motor original: `000-baseline` (sem resize), `000R-resize`, `000R-pad12`, `000L-live`, `000L-live-phantom`. Motor atual: `041-dpi-live-phantom` (Tarefa 18), antes dele `038-cost-live-phantom` (Tarefa 17), antes dele `016-narrow`, `017-narrow-resize`, `018-narrow-pad12`, `019-narrow-live`, `020-narrow-live-phantom`. Os demais (`002` a `015`, `021`, `022`) são as etapas intermediárias descritas acima.
