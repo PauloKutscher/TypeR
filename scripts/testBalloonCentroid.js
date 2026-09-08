@@ -615,12 +615,13 @@ const MIN_GAP = tuning("_CUSP_MIN_GAP");
 const ASSIST_CONCAVITY = tuning("_CUSP_ASSIST_CONCAVITY");
 const MAX_NECK = tuning("_CUSP_MAX_NECK");
 const SHARE_WAIST = tuning("_CUSP_SHARE_WAIST");
+const MAX_PAIR_TRIES = tuning("_CUSP_MAX_PAIR_TRIES");
 
 const signedArea = lift("_polygonSignedArea(poly)", [])();
 const areaCentroid = lift("_polygonAreaCentroid(poly)", [])();
 const largestContour = lift("_largestContour(polygons)", ["_polygonSignedArea"])(signedArea);
 const resampleContour = lift("_resampleContour(poly, count)", [])();
-const findCuspPair = lift("_findCuspPair(points)", [
+const findCuspPair = lift("_findCuspPair(points, skip)", [
   "_CUSP_SPAN_DIVISOR", "_CUSP_MIN_GAP", "_CUSP_CONCAVITY", "_CUSP_ASSIST_CONCAVITY", "_CUSP_MAX_NECK", "_polygonSignedArea",
 ])(SPAN_DIVISOR, MIN_GAP, CONCAVITY, ASSIST_CONCAVITY, MAX_NECK, signedArea);
 const splitContourAtChord = lift("_splitContourAtChord(points, a, b)", [])();
@@ -632,10 +633,10 @@ const splitAtCusps = lift("_splitOutlineAtCusps(polygons, activeBox, report)", [
   "_CUSP_CONCAVITY", "_CUSP_MIN_PIECE_SHARE", "_CUSP_MAX_CUTS", "_CUSP_CONTOUR_POINTS",
   "_CUSP_SPAN_DIVISOR", "_largestContour", "_resampleContour", "_findCuspPair", "_splitContourAtChord",
   "_pieceOnSideOf", "_polygonAreaCentroid",
-  "_polygonSignedArea", "_CUSP_SHARE_WAIST",
+  "_polygonSignedArea", "_CUSP_SHARE_WAIST", "_CUSP_MAX_PAIR_TRIES",
 ])(CONCAVITY, MIN_PIECE_SHARE, MAX_CUTS, CONTOUR_POINTS,
   SPAN_DIVISOR, largestContour, resampleContour, findCuspPair, splitContourAtChord,
-  pieceOnSideOf, areaCentroid, signedArea, SHARE_WAIST);
+  pieceOnSideOf, areaCentroid, signedArea, SHARE_WAIST, MAX_PAIR_TRIES);
 
 function textBox(left, top, right, bottom) {
   return { left: left, top: top, right: right, bottom: bottom, width: right - left, height: bottom - top };
@@ -781,12 +782,33 @@ assert.ok(
 );
 assert.ok(
   alignSplitBody[1].indexOf("var target = selection.centroid") <
-    alignSplitBody[1].indexOf("_splitOutlineAtCusps(outline, bounds, report)"),
+    alignSplitBody[1].indexOf("_splitOutlineAtCusps(outline, anchorBox, report)"),
   "the cut must refine the centroid, never replace the fallback that a single balloon relies on"
 );
 assert.ok(
   /_centreInsideOutline\(outline, split\)/.test(alignSplitBody[1]),
   "a cut centre outside the region it came from must be refused"
+);
+/*
+ * The side test has to be asked of the box the line had, not the one the layout
+ * gave it. With `resizeTextBox` on, the box is grown to the whole selection
+ * before the cut runs, so its centre lands between the two balloons: measured on
+ * the reference pages with resize and padding, three regions were cut from that
+ * moved box and centred 313 to 467 px away. The moved box still positions the
+ * layer; only "which piece is this line in" uses the box it started with.
+ */
+assert.ok(
+  alignSplitBody[1].indexOf("var anchorBox = bounds;") <
+    alignSplitBody[1].indexOf("if (state.resize && !wasPoint)"),
+  "the anchor box must be taken before the resize moves the text box"
+);
+assert.ok(
+  /if \(state\.resize && !wasPoint\) \{[\s\S]*bounds = _getCurrentTextLayerBounds\(\);[\s\S]*\}/.test(alignSplitBody[1]),
+  "and the resized bounds must still be what positions the layer"
+);
+assert.ok(
+  alignSplitBody[1].indexOf("_splitOutlineAtCusps(outline, bounds") < 0,
+  "the cut must not be handed the resized bounds"
 );
 assert.ok(
   /_hostState\.lastOutlineKey === _selectionBoundsKey\(selection\)/.test(alignSplitBody[1]),
@@ -1033,6 +1055,159 @@ const bottomSize = Math.sqrt(Math.abs(signedArea(bottomPoints)));
 assert.ok(
   bottomPair.length <= MAX_NECK * bottomSize,
   "a pair carried by one corner is only allowed across a waist"
+);
+
+/* ---------- the pair behind the narrowest one ---------- */
+
+/*
+ * "The narrowest chord between admissible corners" and "the narrowest chord
+ * whose piece survives the guards" are not the same pair, and the pass used to
+ * end at the first one. These two outlines are what the host traced on the
+ * reference pages where that happened: on the first the narrowest chord leaves
+ * the text on neither side, on the second it shaves 86% off the region. Both
+ * plainly hold two balloons, and both used to keep the merged centroid — 115 px
+ * and 60 px from where the typesetter had put the line.
+ *
+ * They are the engine's own 400-point resample of what `Make Work Path` traced,
+ * captured from the align path, so the shape here is the shape it decided on.
+ */
+const retryCases = [
+  { name: "retryAfterNoSide", guard: "noSide" },
+  { name: "retryAfterShare", guard: "share" },
+];
+for (let r = 0; r < retryCases.length; r++) {
+  const shape = outlines[retryCases[r].name];
+  const label = retryCases[r].name;
+  const got = splitCentreFor(shape);
+  assert.ok(got.centre, label + ": a region whose second pair works has to be cut");
+  const merged = centroid([shape.contour]);
+  const cutError = distanceTo(got.centre, shape.savedCentre);
+  const mergedError = distanceTo(merged, shape.savedCentre);
+  assert.ok(
+    cutError * 2 < mergedError,
+    label + ": the cut has to land nearer the typesetter's centre than the merged centroid (" +
+      cutError + " px against " + mergedError + " px)"
+  );
+
+  // And why it needed the pair behind: the narrowest one is refused, on the
+  // guard this case exists for.
+  const points = resampleContour(largestContour([shape.contour]), CONTOUR_POINTS);
+  const first = findCuspPair(points, 0);
+  assert.ok(first && first.a >= 0, label + ": there has to be a narrowest pair at all");
+  const pieces = splitContourAtChord(points, first.a, first.b);
+  assert.ok(pieces, label + ": the narrowest pair still has to produce two arcs");
+  const side = pieceOnSideOf(pieces, points[first.a], points[first.b], shape.box.xMid, shape.box.yMid);
+  if (retryCases[r].guard === "noSide") {
+    assert.ok(!side, label + ": the narrowest chord is the one that leaves the text on neither side");
+  } else {
+    assert.ok(side, label + ": the narrowest chord does give the text a side");
+    assert.ok(
+      side.share > 1 - MIN_PIECE_SHARE && first.length > SHARE_WAIST * Math.sqrt(Math.abs(signedArea(points))),
+      label + ": and it is refused because it shaves the region instead of crossing a waist"
+    );
+  }
+  const second = findCuspPair(points, 1);
+  assert.ok(second, label + ": there has to be a pair behind the narrowest one");
+  assert.ok(
+    second.length >= first.length,
+    "pairs are offered narrowest first: " + second.length + " must not be under " + first.length
+  );
+}
+
+// The order is total and stable, and running off the end says so instead of
+// handing back the last pair again.
+const orderPoints = resampleContour(largestContour([outlines.retryAfterShare.contour]), CONTOUR_POINTS);
+let previousLength = -1;
+let offered = 0;
+for (let k = 0; k < 40; k++) {
+  const pair = findCuspPair(orderPoints, k);
+  if (!pair) break;
+  assert.ok(pair.length >= previousLength, "pair " + k + " must not be narrower than pair " + (k - 1));
+  previousLength = pair.length;
+  offered++;
+}
+assert.ok(offered >= 2, "this outline has more than one admissible pair");
+assert.strictEqual(findCuspPair(orderPoints, offered), null, "past the last pair there is no pair");
+
+/* ---------- a sequence that goes too thin keeps the cuts that already passed ---------- */
+
+/*
+ * Four lobes in a row, joined by necks, with the line in the third. Each cut on
+ * its own keeps a legal share — 0.35 and then 0.41 — but multiplied they fall
+ * under the sixth a piece is allowed to be, and the guard used to answer that by
+ * throwing away every cut, including the first one that had passed on its own.
+ * The region then went back to the centroid of all four lobes.
+ *
+ * Rectilinear on purpose: the corner is a right angle at a known point, so the
+ * shares below are arithmetic rather than a sampling artefact.
+ */
+function boxChain(widths, gap, necks, height) {
+  const spans = [];
+  let x = 0;
+  for (let i = 0; i < widths.length; i++) {
+    spans.push([x, x + widths[i]]);
+    x += widths[i] + gap;
+  }
+  const points = [];
+  for (let i = 0; i < spans.length; i++) {
+    points.push([spans[i][0], 0], [spans[i][1], 0]);
+    if (i < spans.length - 1) {
+      const y = (height - necks[i]) / 2;
+      points.push([spans[i][1], y], [spans[i + 1][0], y]);
+    }
+  }
+  for (let i = spans.length - 1; i >= 0; i--) {
+    points.push([spans[i][1], height], [spans[i][0], height]);
+    if (i > 0) {
+      const y = (height + necks[i - 1]) / 2;
+      points.push([spans[i][0], y], [spans[i - 1][1], y]);
+    }
+  }
+  return { points: points, spans: spans };
+}
+
+const chain = boxChain([400, 250, 140, 210], 30, [80, 40, 60], 200);
+const chainBox = textBox(chain.spans[2][0] + 20, 60, chain.spans[2][1] - 20, 140);
+const chainReport = {};
+const chainCentre = splitAtCusps([chain.points], chainBox, chainReport);
+
+// What the sequence would have been: two legal cuts whose product is not legal.
+let chainPoints = resampleContour(chain.points, CONTOUR_POINTS);
+const chainShares = [];
+for (let pass = 0; pass < MAX_CUTS; pass++) {
+  const pair = findCuspPair(chainPoints, 0);
+  if (!pair || pair.a < 0) break;
+  const parts = splitContourAtChord(chainPoints, pair.a, pair.b);
+  if (!parts) break;
+  const kept = pieceOnSideOf(parts, chainPoints[pair.a], chainPoints[pair.b], chainBox.left + chainBox.width / 2, 100);
+  if (!kept) break;
+  chainShares.push(kept.share);
+  chainPoints = kept.points;
+}
+assert.ok(chainShares.length >= 2, "the chain has to admit at least two cuts");
+assert.ok(chainShares[0] >= MIN_PIECE_SHARE, "the first cut is legal on its own: " + chainShares[0]);
+assert.ok(chainShares[1] >= MIN_PIECE_SHARE, "so is the second: " + chainShares[1]);
+assert.ok(
+  chainShares[0] * chainShares[1] < MIN_PIECE_SHARE,
+  "and together they go under the floor, which is the case this covers: " + chainShares[0] * chainShares[1]
+);
+
+assert.ok(chainCentre, "a sequence that would go too thin must keep the cuts that already passed");
+assert.strictEqual(chainReport.cuts, 1, "exactly the prefix that passed, not the cut that would not");
+assert.ok(
+  chainReport.share >= MIN_PIECE_SHARE,
+  "and the piece it keeps is above the floor: " + chainReport.share
+);
+assert.ok(
+  chainCentre.x > chain.spans[1][1],
+  "the centre has to sit in the piece the first cut kept, not back in the whole chain"
+);
+const wholeChain = centroid([chain.points]);
+const chainTextCentre = { x: (chain.spans[2][0] + chain.spans[2][1]) / 2, y: 100 };
+assert.ok(
+  Math.abs(chainCentre.x - chainTextCentre.x) < Math.abs(wholeChain.x - chainTextCentre.x),
+  "and it is nearer the lobe the line is in than the centroid of all four: " +
+    chainCentre.x.toFixed(1) + " against " + wholeChain.x.toFixed(1)
 );
 
 console.log("balloon centroid tests passed");

@@ -261,6 +261,27 @@ var _CUSP_SPAN_DIVISOR = 24;
 // the contour is one corner measured twice.
 var _CUSP_MIN_GAP = 0.20;
 
+// How many admissible pairs a region may be offered before it keeps the merged
+// centroid, and only while it has no cut yet.
+//
+// "The shortest chord between admissible corners" and "the shortest chord whose
+// piece survives the guards" are not the same pair. When the first one's piece
+// fails — the chord leaves nothing on the text's side, or shaves a bump — the
+// pass used to end, and a region that plainly holds two balloons kept the centre
+// of both. Measured over the 392 traced regions of the reference pages, offering
+// the next pair recovers four of them (115 to 27, 108 to 11, 60 to 7 and 203 to
+// 57 px) and moves nothing else.
+//
+// Only while there is no cut yet, and that half is measured too: letting a later
+// pass hunt for another chord took three regions of the four-balloon page from
+// 16, 21 and 54 px to 106, 80 and 70 px. A region with a cut already has a
+// balloon-shaped answer; a region with none has the merged blob, which is the
+// answer this exists to avoid.
+//
+// The budget is not a tuning knob: 2, 3, 4, 6 and 10 give byte-identical results
+// over the corpus, because the pair that works is the first or second one.
+var _CUSP_MAX_PAIR_TRIES = 3;
+
 
 // Bubble detection and outline sampling fire dozens of selection, channel
 // and modify operations, and Photoshop records every one of them as a
@@ -2462,6 +2483,22 @@ function _alignCurrentTextLayerToSelection() {
 
   var wasPoint = _textLayerIsPointText();
   var bounds = _getCurrentTextLayerBounds();
+  /*
+   * Where the line was standing before the layout moved it.
+   *
+   * The cut below asks which side of the chord the text is on, and the only
+   * honest answer comes from where the typesetter left it. With `resizeTextBox`
+   * on, the box is first grown to the *selection* — the whole merged region —
+   * so its centre lands near the centre of both balloons and the side test is
+   * being asked about a rectangle that no longer says anything about which
+   * balloon the line belongs to. Measured on the fifteen reference pages with
+   * resize on and 12 px of padding, three regions of `13.psd` and `14.psd` were
+   * being cut from that moved box and centred 313 to 467 px away.
+   *
+   * The moved box is still the one the layer is positioned by; only the question
+   * "which piece is this line in" is asked of the box it had.
+   */
+  var anchorBox = bounds;
 
   if (state.resize && !wasPoint) {
     var dimensions = _calculateSelectionDimensions(selection, state.padding);
@@ -2495,7 +2532,7 @@ function _alignCurrentTextLayerToSelection() {
   if (outline) {
     try {
       var report = _hostState.partition;
-      var split = _splitOutlineAtCusps(outline, bounds, report);
+      var split = _splitOutlineAtCusps(outline, anchorBox, report);
       if (split && isFinite(split.x) && isFinite(split.y)) {
         if (_centreInsideOutline(outline, split)) {
           target = split;
@@ -3834,67 +3871,83 @@ function _splitOutlineAtCusps(polygons, activeBox, report) {
 
   for (var pass = 0; pass < _CUSP_MAX_CUTS; pass++) {
     var pieceArea = Math.abs(_polygonSignedArea(points));
-    var pair = _findCuspPair(points);
-    if (!pair) {
-      if (report && !cuts) report.skip = "noCusp";
-      break;
-    }
-    if (report) {
-      report.concavity += (report.concavity ? " " : "") +
-        Math.round(pair.first * 100) + "/" + Math.round(pair.second * 100);
-    }
-    if (pair.a < 0) {
-      if (report && !cuts) report.skip = "shallow:" + Math.round(pair.first * 100);
-      break;
-    }
-    var pieces = _splitContourAtChord(points, pair.a, pair.b);
-    if (!pieces) {
-      if (report && !cuts) report.skip = "noPiece";
-      break;
-    }
-    // Which side of the chord the text is on. The side test rather than a
-    // point-in-polygon test on purpose: the ink box can sit outside the opened
-    // region, and a text with nowhere to be still has to be given a side.
-    var chosen = _pieceOnSideOf(pieces, points[pair.a], points[pair.b], cx, cy);
-    if (!chosen) {
-      if (report && !cuts) report.skip = "noSide";
-      break;
-    }
-    if (chosen.share < _CUSP_MIN_PIECE_SHARE) {
-      if (report && !cuts) report.skip = "share:" + Math.round(chosen.share * 100);
-      break;
-    }
-    // A cut that leaves almost everything on one side did one of two things: it
-    // separated a small balloon from a big one, or it shaved a bump off a single
-    // balloon. The chord says which. A waist is short next to the shape it cuts;
-    // shaving takes a long chord across it. Refusing both is what left the small
-    // neighbours of a chain merged: on the reported page the top balloon left
-    // 89% and the middle one 85% on its second cut, both across a waist, and
-    // taking them lands those lines 5 px and 7 px from the typesetter's own
-    // centre instead of 12 px and 21 px.
-    if (chosen.share > 1 - _CUSP_MIN_PIECE_SHARE) {
-      var waist = pair.length <= _CUSP_SHARE_WAIST * Math.sqrt(pieceArea > 0 ? pieceArea : 1);
-      if (!waist) {
-        if (report && !cuts) report.skip = "share:" + Math.round(chosen.share * 100);
+    var advanced = false;
+    var refused = "";
+    // A refused piece ends this pass's search, not the region's chance of being
+    // cut: while nothing has been cut yet the next-narrowest pair is offered.
+    // Once a cut exists the loop behaves exactly as it did before.
+    for (var attempt = 0; attempt < (cuts ? 1 : _CUSP_MAX_PAIR_TRIES); attempt++) {
+      var pair = _findCuspPair(points, attempt);
+      if (!pair) {
+        if (!refused) refused = "noCusp";
         break;
       }
+      if (report && !attempt) {
+        report.concavity += (report.concavity ? " " : "") +
+          Math.round(pair.first * 100) + "/" + Math.round(pair.second * 100);
+      }
+      if (pair.a < 0) {
+        if (!refused) refused = "shallow:" + Math.round(pair.first * 100);
+        break;
+      }
+      var pieces = _splitContourAtChord(points, pair.a, pair.b);
+      if (!pieces) {
+        if (!refused) refused = "noPiece";
+        continue;
+      }
+      // Which side of the chord the text is on. The side test rather than a
+      // point-in-polygon test on purpose: the ink box can sit outside the opened
+      // region, and a text with nowhere to be still has to be given a side.
+      var chosen = _pieceOnSideOf(pieces, points[pair.a], points[pair.b], cx, cy);
+      if (!chosen) {
+        if (!refused) refused = "noSide";
+        continue;
+      }
+      if (chosen.share < _CUSP_MIN_PIECE_SHARE) {
+        if (!refused) refused = "share:" + Math.round(chosen.share * 100);
+        continue;
+      }
+      // A cut that leaves almost everything on one side did one of two things: it
+      // separated a small balloon from a big one, or it shaved a bump off a single
+      // balloon. The chord says which. A waist is short next to the shape it cuts;
+      // shaving takes a long chord across it. Refusing both is what left the small
+      // neighbours of a chain merged: on the reported page the top balloon left
+      // 89% and the middle one 85% on its second cut, both across a waist, and
+      // taking them lands those lines 5 px and 7 px from the typesetter's own
+      // centre instead of 12 px and 21 px.
+      if (chosen.share > 1 - _CUSP_MIN_PIECE_SHARE) {
+        var waist = pair.length <= _CUSP_SHARE_WAIST * Math.sqrt(pieceArea > 0 ? pieceArea : 1);
+        if (!waist) {
+          if (!refused) refused = "share:" + Math.round(chosen.share * 100);
+          continue;
+        }
+      }
+      // Each cut is allowed to keep a sixth of what it was given, so two of them
+      // can legally end up holding a fortieth of the region: the second cut slices
+      // a sliver off the first piece and the text is centred on it. A piece that
+      // small is not a balloon. This used to be checked after the loop and threw
+      // the whole sequence away — including cuts that had passed every guard on
+      // their own. Refusing the cut that would go too thin keeps that prefix
+      // instead: measured, one four-balloon region goes from 203 px to 57 px and
+      // no other case in the corpus moves.
+      if (share * chosen.share < _CUSP_MIN_PIECE_SHARE) {
+        if (!refused) refused = "thinPiece:" + Math.round(share * chosen.share * 100);
+        continue;
+      }
+      points = chosen.points;
+      share = share * chosen.share;
+      cuts++;
+      advanced = true;
+      break;
     }
-    points = chosen.points;
-    share = share * chosen.share;
-    cuts++;
+    if (!advanced) {
+      if (report && !cuts) report.skip = refused || "noCusp";
+      break;
+    }
   }
 
   if (!cuts) return null;
   if (report) { report.cuts = cuts; report.share = share; }
-  // Each cut is allowed to keep a sixth of what it was given, so two of them can
-  // legally end up holding a fortieth of the region. Measured on the reference
-  // pages, that is exactly what went wrong in the two four-balloon regions that
-  // got worse: the second cut sliced a sliver off the first piece and the text
-  // was centred on it. A piece that small is not a balloon.
-  if (share < _CUSP_MIN_PIECE_SHARE) {
-    if (report) report.skip = "thinPiece:" + Math.round(share * 100);
-    return null;
-  }
   var centre = _polygonAreaCentroid(points);
   if (!centre) {
     if (report) report.skip = "noCentroid";
@@ -3992,8 +4045,12 @@ function _resampleContour(poly, count) {
  *
  * `first` and `second` are how far each corner turns back into the shape, in
  * radians, kept for the report.
+ *
+ * `skip` asks for the next-narrowest pair instead of the narrowest, so a caller
+ * whose piece was refused can try the pair behind it. Ordering is by chord
+ * length and then by index, so the same region answers the same way twice.
  */
-function _findCuspPair(points) {
+function _findCuspPair(points, skip) {
   var n = points.length;
   var span = Math.max(2, Math.round(n / _CUSP_SPAN_DIVISOR));
   if (n < span * 4) return null;
@@ -4038,7 +4095,7 @@ function _findCuspPair(points) {
 
   var area = Math.abs(_polygonSignedArea(points));
   var size = Math.sqrt(area > 0 ? area : 1);
-  var best = null;
+  var found = [];
   for (var a = 0; a < corners.length; a++) {
     for (var b = a + 1; b < corners.length; b++) {
       // One of the two still has to be a corner nobody argues about
@@ -4055,19 +4112,24 @@ function _findCuspPair(points) {
       var length = Math.sqrt(dx * dx + dy * dy);
       // A pair carried by a single corner has to be a waist, not a cut across
       if (assisted && length > _CUSP_MAX_NECK * size) continue;
-      if (!best || length < best.length) {
-        best = {
-          length: length,
-          a: corners[a],
-          b: corners[b],
-          first: concavity[corners[a]],
-          second: concavity[corners[b]]
-        };
-      }
+      found[found.length] = {
+        length: length,
+        a: corners[a],
+        b: corners[b],
+        first: concavity[corners[a]],
+        second: concavity[corners[b]]
+      };
     }
   }
-  if (!best) return { a: -1, b: -1, first: concavity[deepest], second: 0 };
-  return best;
+  if (!found.length) return { a: -1, b: -1, first: concavity[deepest], second: 0 };
+  found.sort(function (p, q) {
+    if (p.length !== q.length) return p.length - q.length;
+    if (p.a !== q.a) return p.a - q.a;
+    return p.b - q.b;
+  });
+  var wanted = skip > 0 ? skip : 0;
+  if (wanted >= found.length) return null;
+  return found[wanted];
 }
 
 /*
