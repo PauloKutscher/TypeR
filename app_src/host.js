@@ -2660,6 +2660,98 @@ function _alignTextLayerToSelection() {
   state.result = alignedCount > 0 ? "" : firstError;
 }
 
+function _textStyleRangeCount() {
+  try {
+    var reference = new ActionReference();
+    reference.putProperty(charID.Property, stringIDToTypeID("textKey"));
+    reference.putEnumerated(charID.Layer, charID.Ordinal, charID.Target);
+    var textKey = executeActionGet(reference).getObjectValue(stringIDToTypeID("textKey"));
+    return textKey.getList(stringIDToTypeID("textStyleRange")).count;
+  } catch (countError) {
+    return 1;
+  }
+}
+
+/*
+ * Resize a layer that carries more than one style run.
+ *
+ * Setting the layer's TextStyle applies one style to every character, so the
+ * bold the typesetter put on two words comes back regular: Photoshop collapses
+ * the runs into the one style being set. Walking the runs and moving each size
+ * by the same step keeps every other attribute of every run where it was.
+ */
+function _changeTextSizePerRange(delta) {
+  var params = jamText.getLayerText();
+  var text = _normalizeTextKey(params.layerText.textKey);
+  if (!text) return false;
+  var ranges = params.layerText.textStyleRange;
+  if (!ranges || !ranges.length) return false;
+
+  var oldBounds = _getCurrentTextLayerBounds();
+  var isPoint = _textLayerIsPointText();
+  var firstSize = ranges[0].textStyle.size;
+
+  // A scaled text layer stores the size in its own space and the size the page
+  // actually shows in `impliedFontSize`: 17 and 34 on a layer scaled 2x. The
+  // write interprets what it is given as the shown size, so a raw 18 came back
+  // as 9 — half the layer, every time the button was pressed. Move the raw size
+  // by the step the typesetter asked for and hand the write the shown value.
+  var layerScale = 1;
+  var firstStyle = ranges[0].textStyle;
+  if (typeof firstStyle.impliedFontSize === "number" && firstStyle.size > 0) {
+    layerScale = firstStyle.impliedFontSize / firstStyle.size;
+  } else if (params.layerText.transform && params.layerText.transform.yy > 0) {
+    layerScale = params.layerText.transform.yy;
+  }
+  if (!(layerScale > 0)) layerScale = 1;
+
+  for (var i = 0; i < ranges.length; i++) {
+    var style = ranges[i].textStyle;
+    if (typeof style.size !== "number") continue;
+    var nextSize = style.size + delta;
+    style.size = nextSize * layerScale;
+    if (typeof style.impliedFontSize === "number") style.impliedFontSize = nextSize * layerScale;
+    // Same leading rule the single-run path uses: automatic stays automatic,
+    // and a fixed leading moves with the size.
+    if (style.autoLeading || style.leading === undefined) {
+      style.autoLeading = true;
+      delete style.leading;
+    } else {
+      style.leading = (style.leading + delta) * layerScale;
+      style.autoLeading = false;
+    }
+  }
+
+  var newParams = {
+    typeUnit: params.typeUnit,
+    layerText: {
+      textKey: text,
+      textGridding: params.layerText.textGridding || "none",
+      orientation: params.layerText.orientation || "horizontal",
+      antiAlias: params.layerText.antiAlias || "antiAliasSmooth",
+      textStyleRange: ranges,
+    },
+  };
+  if (params.layerText.paragraphStyleRange) {
+    newParams.layerText.paragraphStyleRange = params.layerText.paragraphStyleRange;
+  }
+  if (!isPoint && params.layerText.textShape && firstSize) {
+    var ratio = (firstSize + delta) / firstSize;
+    newParams.layerText.textShape = [params.layerText.textShape[0]];
+    var shapeBounds = newParams.layerText.textShape[0].bounds;
+    shapeBounds.top *= ratio;
+    shapeBounds.left *= ratio;
+    shapeBounds.bottom *= ratio;
+    shapeBounds.right *= ratio;
+  }
+
+  jamText.setLayerText(newParams);
+  _applyMiddleEast(ranges[0].textStyle);
+  var newBounds = _getCurrentTextLayerBounds();
+  _moveLayer(oldBounds.xMid - newBounds.xMid, oldBounds.yMid - newBounds.yMid);
+  return true;
+}
+
 function _changeActiveLayerTextSize() {
   var state = _hostState.changeActiveLayerTextSize;
   if (!documents.length) {
@@ -2676,7 +2768,15 @@ function _changeActiveLayerTextSize() {
   // Optimized path using direct Photoshop actions.
   _forEachSelectedLayer(function () {
     try {
-      // Use the fast Photoshop action path to change text size.
+      // Every layer is resized run by run. Setting the layer's TextStyle to a
+      // descriptor holding only the size replaces the whole character style with
+      // that descriptor: the bold the typesetter put on two words comes back
+      // regular, and so does everything he set in the Character panel —
+      // tracking, faux styles, scale, baseline. Paragraph settings survive,
+      // which is why the loss looked partial. The run walk below keeps every
+      // attribute of every run and moves only the size and the leading.
+      if (_changeTextSizePerRange(state.value)) return;
+      // Only if that could not run: the fast action path, which flattens.
       var ref = new ActionReference();
       ref.putProperty(charID.Property, charID.TextStyle);
       ref.putEnumerated(charID.TextLayer, charID.Ordinal, charID.Target);
