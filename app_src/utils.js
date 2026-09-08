@@ -95,14 +95,6 @@ const prefetchUpdateZip = (downloadUrl) => {
   if (downloadUrl) fetchUpdateZip(downloadUrl).catch(() => {});
 };
 
-const getOSType = () => {
-  const os = csInterface.getOSInformation();
-  if (os && os.toLowerCase().indexOf('mac') !== -1) {
-    return 'mac';
-  }
-  return 'win';
-};
-
 const getExtendScriptString = (value) => JSON.stringify(String(value || ""));
 
 // evalScript can return non-JSON strings like "EvalScript error." — a bare
@@ -154,7 +146,7 @@ if (window.addEventListener) {
 // TextShapeR) can back off instead of contending in the ExtendScript queue
 let hostActionsPending = 0;
 const isHostActionPending = () => hostActionsPending > 0;
-const trackHostAction = (callback) => {
+const trackHostAction = (callback, timeout = 15000) => {
   notePanelActivity();
   hostActionsPending++;
   let settled = false;
@@ -165,7 +157,7 @@ const trackHostAction = (callback) => {
     return true;
   };
   // Safety net: never let a lost CEP callback disable polling forever
-  const failsafe = setTimeout(release, 15000);
+  const failsafe = setTimeout(release, timeout);
   return (...args) => {
     if (release()) clearTimeout(failsafe);
     return callback(...args);
@@ -646,6 +638,14 @@ const getCurrentSelectionShape = (samples, callback = () => {}) => {
     `getCurrentSelectionShape(${JSON.stringify({ samples })})`,
     trackHostAction((result) => callback(safeJsonParse(result)))
   );
+};
+
+// A training scan can take longer than a normal layer action on a large PSD.
+const scanTextShapeRTraining = (path, callback = () => {}) => {
+  csInterface.evalScript(`scanTextShapeRTraining(${JSON.stringify(path || "")})`, trackHostAction((result) => {
+    const data = safeJsonParse(result, { error: "scanFailed" });
+    callback(data && (data.error || Array.isArray(data.entries)) ? data : { error: "scanFailed" });
+  }, 10 * 60 * 1000));
 };
 
 const getSelectionChanged = (callback = () => {}) => {
@@ -1158,4 +1158,4 @@ const scanPsdFonts = (path, callback) => {
   );
 };
 
-export { csInterface, locale, openUrl, readStorage, writeToStorage, flushStorageWrite, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, getTypeRSelectionSnapshot, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isPhotoshopSelectionOnlyEvent, isHostActionPending, notePanelActivity, isPanelIdle, notePanelInteraction, isPanelInteracting, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, getCurrentSelectionShape, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, toggleCleaningLayers, getHotkeyPressed, onMouseShortcut, startForegroundWatcher, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, getUpdateTestConfig, clearUpdateTestConfig, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns, backupStorage };
+export { csInterface, locale, openUrl, readStorage, writeToStorage, flushStorageWrite, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, getTypeRSelectionSnapshot, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isPhotoshopSelectionOnlyEvent, isHostActionPending, notePanelActivity, isPanelIdle, notePanelInteraction, isPanelInteracting, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, getCurrentSelectionShape, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, toggleCleaningLayers, getHotkeyPressed, onMouseShortcut, startForegroundWatcher, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, getUpdateTestConfig, clearUpdateTestConfig, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns, backupStorage, scanTextShapeRTraining };
