@@ -1,4 +1,4 @@
-<#
+﻿<#
   runMeasure.ps1 — drives Photoshop through COM to measure how the real TypeR
   centering moves text inside balloons.
 
@@ -33,7 +33,8 @@ param(
   [double]$PhantomRatio = 0,
   [string]$HostJsx = "",
   [switch]$TraceGeometry,
-  [ValidateSet("none", "mid", "full", "overlap")][string]$Scatter = "none"
+  [switch]$RefreezeGroundTruth,
+  [ValidateSet("none", "mid", "full", "overlap", "overlapmid")][string]$Scatter = "none"
 )
 
 $ErrorActionPreference = "Stop"
@@ -73,16 +74,36 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $hashFile = Join-Path $Root ".centering-lab\meta\ground-truth-hashes.json"
 $groundTruthBefore = Get-GroundTruthSnapshot $Root
 $groundTruthBeforeJson = Snapshot-Json $groundTruthBefore
-$baselineCount = 0
-if (Test-Path -LiteralPath $hashFile) {
-  $oldHashes = Get-Content -Raw -LiteralPath $hashFile | ConvertFrom-Json
-  $baselineCount = @($oldHashes.psd.PSObject.Properties).Count
-}
-if ($baselineCount -ne @($groundTruthBefore.psd.Keys).Count) {
+# The manifest is frozen, not refreshed. Rewriting it whenever the file count
+# moved is how a page added, removed or renamed under psd/ used to pass a run
+# without anyone noticing: the run then measured a different population than the
+# baseline it is compared against. Adding a page is a deliberate act, so it asks
+# for -RefreezeGroundTruth and the new manifest is committed to the lab.
+if (-not (Test-Path -LiteralPath $hashFile)) {
+  if (-not $RefreezeGroundTruth) { throw "no ground-truth manifest at $hashFile; run once with -RefreezeGroundTruth" }
   New-Item -ItemType Directory -Force -Path (Split-Path $hashFile) | Out-Null
   $groundTruthBefore | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 -LiteralPath $hashFile
-} elseif ((Snapshot-Json $oldHashes) -ne $groundTruthBeforeJson) {
-  throw "ground truth differs from $hashFile"
+} else {
+  $oldHashes = Get-Content -Raw -LiteralPath $hashFile | ConvertFrom-Json
+  if ((Snapshot-Json $oldHashes) -ne $groundTruthBeforeJson) {
+    $problems = @()
+    foreach ($folder in @("psd", "true")) {
+      $now = $groundTruthBefore[$folder]
+      $then = $oldHashes.$folder
+      $thenNames = @($then.PSObject.Properties.Name)
+      foreach ($name in @($now.Keys)) {
+        if ($thenNames -notcontains $name) { $problems += "$folder/$name is new" }
+        elseif ($then.$name -ne $now[$name]) { $problems += "$folder/$name changed content" }
+      }
+      foreach ($name in $thenNames) { if (-not $now.Contains($name)) { $problems += "$folder/$name is missing" } }
+    }
+    if ($RefreezeGroundTruth) {
+      Write-Output ("refreezing ground truth: " + ($problems -join "; "))
+      $groundTruthBefore | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 -LiteralPath $hashFile
+    } else {
+      throw ("ground truth differs from ${hashFile}: " + ($problems -join "; "))
+    }
+  }
 }
 
 $files = @(Get-ChildItem $inDir -Filter *.psd | Sort-Object Name)

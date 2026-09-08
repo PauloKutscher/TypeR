@@ -12,7 +12,8 @@
  *   padding  value forwarded to alignTextLayerToSelection.padding
  *   wandTolerance  magic wand tolerance used by the plugin (20 in production)
  *   traceGeometry  capture the production outline and partition decisions
- *   scatter  "none" | "mid" | "full": how far the text layers are thrown out of
+ *   scatter  "none" | "mid" | "full" | "overlap" | "overlapmid": how far the
+ *            text layers are thrown out of
  *            place before the align, reproducing a page that has not been
  *            typeset yet (see the scatter block below)
  *
@@ -566,7 +567,7 @@ LAB_RESULT = "";
         // the fence: a line thrown into the neighbouring balloon would be a
         // different mistake than the one being measured.
         if (!(high > low)) return 0;
-        if (scatterMode === "mid") {
+        if (scatterMode === "mid" || scatterMode === "overlapmid") {
           var wanted = (nextRandom() * 2 - 1) * span;
           return Math.max(low, Math.min(high, wanted));
         }
@@ -648,28 +649,35 @@ LAB_RESULT = "";
      * the page is the messy one.
      */
     function applyScatter(active) {
-      if (scatterMode === "overlap") {
-        var pick = nearestOther(active);
-        if (pick < 0 || !homeBox[active]) return -1;
-        try {
-          // Everything is at home in this mode, so the home box is also where
-          // the invader is standing right now.
-          found[pick].layer.translate(
-            homeBox[active].xMid - homeBox[pick].xMid,
-            homeBox[active].yMid - homeBox[pick].yMid
-          );
-        } catch (e) {
-          note("overlap[" + active + "]", e);
-          return -1;
+      var overlapping = scatterMode === "overlap" || scatterMode === "overlapmid";
+      // `overlap` leaves every line at home; `overlapmid` throws them inside
+      // their own balloons first and then drops the neighbour on top of where
+      // this one now stands. A rule that reads the active layer's box can pass
+      // "the line moved" and "a neighbour covers it" separately and still fail
+      // when both happen at once, which is the page the typesetter really has.
+      if (scatterMode !== "overlap") {
+        for (var k = 0; k < found.length; k++) {
+          var off = scatterOffset[k];
+          if (!off || (off.dx === 0 && off.dy === 0)) continue;
+          try { found[k].layer.translate(off.dx, off.dy); } catch (e) { note("scatter[" + k + "]", e); }
         }
-        return pick;
       }
-      for (var k = 0; k < found.length; k++) {
-        var off = scatterOffset[k];
-        if (!off || (off.dx === 0 && off.dy === 0)) continue;
-        try { found[k].layer.translate(off.dx, off.dy); } catch (e) { note("scatter[" + k + "]", e); }
+      if (!overlapping) return -1;
+      var pick = nearestOther(active);
+      if (pick < 0 || !homeBox[active]) return -1;
+      var mine = scatterOffset[active] || { dx: 0, dy: 0 };
+      var theirs = scatterOffset[pick] || { dx: 0, dy: 0 };
+      try {
+        // Where each of the two is standing right now: home plus its own throw.
+        found[pick].layer.translate(
+          (homeBox[active].xMid + mine.dx) - (homeBox[pick].xMid + theirs.dx),
+          (homeBox[active].yMid + mine.dy) - (homeBox[pick].yMid + theirs.dy)
+        );
+      } catch (e) {
+        note("overlap[" + active + "]", e);
+        return -1;
       }
-      return -1;
+      return pick;
     }
 
     for (var n = 0; n < found.length; n++) {
