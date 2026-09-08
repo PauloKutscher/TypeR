@@ -68,8 +68,13 @@ function loadCases(run) {
   // replayed.
   const metaFile = path.join(ROOT, ".centering-lab", "runs", run, "run.json");
   const meta = fs.existsSync(metaFile) ? readJson(metaFile) : null;
-  const replayable = !(meta && meta.options && meta.options.resize);
-  if (!replayable) console.log("aviso: " + run + " usa resize, então a caixa ativa não é reconstruível — só as medições valem");
+  // An engine that takes its anchor before the layout moves the box hands the
+  // solver the ground-truth box plus the scatter, which is exactly what can be
+  // rebuilt here. One that takes it after does not, and the replay then argues
+  // with the run it is supposed to reproduce.
+  const anchored = /var anchorBox = bounds;/.test(fs.readFileSync(path.join(ROOT, "app_src", "host.js"), "utf8"));
+  const replayable = !(meta && meta.options && meta.options.resize) || anchored;
+  if (!replayable) console.log("aviso: " + run + " usa resize num motor que ancora depois do layout — só as medições valem");
   for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".json"))) {
     const report = readJson(path.join(dir, file));
     const page = path.basename(file, ".json");

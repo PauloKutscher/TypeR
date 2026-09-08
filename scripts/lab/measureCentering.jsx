@@ -302,6 +302,46 @@ LAB_RESULT = "";
       out.probe = { x: px, y: py };
       wandAt(px, py, tolerance);
       out.raw = _getCurrentSelectionBounds() || null;
+      /*
+       * The outline of the region *before* the morphological opening.
+       *
+       * Everything the split has ever been measured on is the opened outline,
+       * and opening rounds convex corners while eroding and re-dilating around
+       * the concave ones — the working hypothesis is that it is what turns one
+       * side of a junction into a bend too shallow to pair with. This is
+       * measurement only: the engine never sees it. `Make Work Path` eats the
+       * selection, so the wand is fired again afterwards and the opened
+       * measurement below runs on a fresh one.
+       */
+      if (LAB.captureRawOutline && out.raw && !_regionCoversTooMuchPage(out.raw)) {
+        try {
+          if (_findWorkPath(doc)) {
+            out.rawOutlineSkip = "userWorkPath";
+          } else {
+            _makeWorkPathFromSelection(0.5);
+            var rawPath = _findWorkPath(doc);
+            if (!rawPath) {
+              out.rawOutlineSkip = "noPath";
+            } else {
+              _hostState.lastPathAnchorCount = 0;
+              var rawPolys = _readPathAnchorPolygons(doc);
+              var rawAnchors = _hostState.lastPathAnchorCount || 0;
+              if (rawPolys && rawAnchors > 2 && rawAnchors <= _MAX_BALLOON_PATH_ANCHORS) {
+                var rawBiggest = _largestContour(rawPolys);
+                out.rawOutline = tracePoints(rawBiggest ? _resampleContour(rawBiggest, _CUSP_CONTOUR_POINTS) : null);
+                out.rawAnchors = rawAnchors;
+                out.rawContours = rawPolys.length;
+              } else {
+                out.rawOutlineSkip = "anchors:" + rawAnchors;
+              }
+              try { rawPath.remove(); } catch (e) {}
+            }
+          }
+        } catch (rawErr) {
+          out.rawOutlineSkip = "threw:" + (rawErr && rawErr.message ? rawErr.message : String(rawErr));
+        }
+        try { wandAt(px, py, tolerance); } catch (e) { note("probeTrueRegion.rewand", e); }
+      }
       if (out.raw) {
         try { out.opened = _getAdaptiveOpenedSelectionBounds(out.raw); } catch (e) { out.opened = null; }
         // The centroid the plugin itself would target, measured on the same
@@ -311,6 +351,16 @@ LAB_RESULT = "";
             ? _getSelectionAreaCentroid(out.opened || out.raw)
             : null;
         } catch (e) { out.centroid = null; }
+        // The opened outline of this very probe, so the raw one above can be
+        // compared against it without the two coming from different regions.
+        if (LAB.captureRawOutline) {
+          try {
+            var openedContour = _largestContour(_hostState.lastOutline || []);
+            out.openedOutline = tracePoints(openedContour ? _resampleContour(openedContour, _CUSP_CONTOUR_POINTS) : null);
+            out.openedContours = (_hostState.lastOutline || []).length;
+            out.openedSkip = _hostState.centroidSkip || "";
+          } catch (e) { out.openedSkip = "threw:" + e; }
+        }
         out.ok = true;
       }
     } catch (probeErr) {

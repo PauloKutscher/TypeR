@@ -34,6 +34,7 @@ param(
   [string]$HostJsx = "",
   [switch]$TraceGeometry,
   [switch]$RefreezeGroundTruth,
+  [switch]$CaptureRawOutline,
   [ValidateSet("none", "mid", "full", "overlap", "overlapmid")][string]$Scatter = "none"
 )
 
@@ -116,6 +117,7 @@ Write-Output ("photoshop=" + $ps.Version + " files=" + $files.Count)
 $resizeLiteral = if ($Resize) { "true" } else { "false" }
 $liveLiteral = if ($LiveSelection) { "true" } else { "false" }
 $traceLiteral = if ($TraceGeometry) { "true" } else { "false" }
+$rawOutlineLiteral = if ($CaptureRawOutline) { "true" } else { "false" }
 $phantomLiteral = $PhantomRatio.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 # The page composites are the same for every run — they come from the same 14
 # PSDs — so they live once, outside the runs, instead of being copied into each.
@@ -139,6 +141,7 @@ var LAB = {
   wandTolerance: $WandTolerance,
   liveSelection: $liveLiteral,
   traceGeometry: $traceLiteral,
+  captureRawOutline: $rawOutlineLiteral,
   phantomRatio: $phantomLiteral,
   scatter: "$Scatter"
 };

@@ -66,8 +66,8 @@ function liftFrom(source, overrides) {
   const centreInsideOutline = lift("_centreInsideOutline(polygons, point)", ["_pointInPolygon"])(pointInPolygon);
   const splitContourAtChord = lift("_splitContourAtChord(points, a, b)", [])();
   const pieceOnSideOf = lift("_pieceOnSideOf(pieces, a, b, x, y)", [
-    "_polygonSignedArea", "_polygonAreaCentroid",
-  ])(signedArea, areaCentroid);
+    "_polygonSignedArea", "_polygonAreaCentroid", "_pointInPolygon",
+  ])(signedArea, areaCentroid, pointInPolygon);
   const findCuspPair = liftAny(["_findCuspPair(points, skip)", "_findCuspPair(points)"], [
     "_CUSP_SPAN_DIVISOR", "_CUSP_MIN_GAP", "_CUSP_CONCAVITY", "_CUSP_ASSIST_CONCAVITY",
     "_CUSP_MAX_NECK", "_polygonSignedArea", "_polygonAreaCentroid", "_splitContourAtChord",
