@@ -3177,7 +3177,18 @@ function getAllRenderedTextLines(data) {
   var state = _hostState.getAllRenderedTextLines;
   state.scanBubbles = !!(data && data.scanBubbles);
   state.result = jamJSON.stringify({ entries: [] });
-  app.activeDocument.suspendHistory("TyperTools Read Shapes", "_getAllRenderedTextLines()");
+  // The read duplicates a layer per box text and can wand a balloon per layer,
+  // so it leaves a history state behind every time the typesetter learns from a
+  // page. Borrow one and give it back, exactly like the shape scans; if the
+  // document is not in a state where that is safe (sitting on an undo), fall
+  // back to the plain suspension rather than refusing to learn.
+  var borrowed = _withTemporaryHistory("TyperTools Read Shapes", function () {
+    _getAllRenderedTextLines();
+    return true;
+  });
+  if (!borrowed || borrowed.error) {
+    app.activeDocument.suspendHistory("TyperTools Read Shapes", "_getAllRenderedTextLines()");
+  }
   return state.result;
 }
 

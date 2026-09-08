@@ -622,12 +622,17 @@ const getActiveLayerRenderedText = (callback = () => {}) => {
 // Rendered text of every visible text layer in the document, for the "learn
 // my style from the whole page" batch feedback. scanBubbles re-detects the
 // bubble outline around each layer (slower but context-precise).
+// Learning from a whole page reads every text layer, and the precise mode also
+// wands the balloon around each one. On a chapter page that is minutes of work,
+// far past the failsafe a normal layer action gets: releasing early would let
+// every poller resume into the middle of the batch and queue behind it, which is
+// what turns "it is thinking" into "the panel is stuck".
 const getAllLayersRenderedTexts = (scanBubbles, callback = () => {}) => {
   csInterface.evalScript(`getAllRenderedTextLines(${JSON.stringify({ scanBubbles: !!scanBubbles })})`, trackHostAction((result) => {
     const data = safeJsonParse(result);
     const entries = Array.isArray(data.entries) ? data.entries : [];
     callback(entries.filter((entry) => entry && typeof entry.text === "string" && entry.text));
-  }));
+  }, 10 * 60 * 1000));
 };
 
 // The outline sampling runs on Photoshop's main thread and can take seconds on a
