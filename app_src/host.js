@@ -3264,15 +3264,16 @@ function _readTextShapeRTrainingLayers() {
     entry.text = "";
     try {
       _selectLayerById(entry.layerId);
-      if (_textLayerIsPointText()) {
-        var params = jamText.getLayerText();
-        entry.text = params && params.layerText ? params.layerText.textKey || "" : "";
-      } else {
-        _hostState.getRenderedTextLines.result = "";
-        _getRenderedTextLines();
-        entry.text = _hostState.getRenderedTextLines.result || "";
-        if (!entry.text) entry.error = "readFailed";
-      }
+      // Box text only shows its automatic wraps once converted to point text.
+      // The panel pays for a throwaway layer duplicate to keep the original
+      // intact; here the entire document is the throwaway, so the conversion
+      // happens in place. That is one layer duplicate and one delete less per
+      // box text, and those are what fill Photoshop's scratch on a long import.
+      var wasBoxText = !_textLayerIsPointText();
+      if (wasBoxText) _changeToPointText();
+      var params = jamText.getLayerText();
+      entry.text = params && params.layerText ? params.layerText.textKey || "" : "";
+      if (wasBoxText && !entry.text) entry.error = "readFailed";
     } catch (readError) {
       entry.error = "readFailed";
     }
@@ -3323,6 +3324,13 @@ function scanTextShapeRTraining(path) {
     if (workDoc) {
       try { workDoc.close(SaveOptions.DONOTSAVECHANGES); } catch (closeError) {}
     }
+    // Photoshop holds every page's undo and cache tiles for the whole session,
+    // which is why file 100 of an import is slower than file 10. Purging is
+    // free here, but it would also throw away the undo history of whatever the
+    // typesetter has open, so it only runs when the scan left Photoshop empty.
+    try {
+      if (!app.documents.length) app.purge(PurgeTarget.ALLCACHES);
+    } catch (purgeError) {}
     if (previousDoc) {
       try { app.activeDocument = previousDoc; } catch (restoreError) {}
     }

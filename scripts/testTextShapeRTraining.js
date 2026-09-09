@@ -63,6 +63,7 @@ function testPhotoshopScan() {
   const original = { name: "User PSD", fullName: { fsName: "/pages/existing.psd" }, layers: [], selected: [10, 12], saved: false };
   const closed = [];
   let duplicated = 0;
+  let converted = 0;
   let failRead = false;
   let failOpen = false;
   const layer = (id, overrides = {}) => ({ id, name: `Layer ${id}`, kind: "text", visible: true, typename: "ArtLayer", text: `Line ${id}\rSecond line`, ...overrides });
@@ -95,14 +96,18 @@ function testPhotoshopScan() {
     _selectLayerById(id) { activeLayer = flatLayers.find((item) => item.id === id); if (activeLayer.broken) throw new Error("Unreadable layer"); },
     _textLayerIsPointText: () => !activeLayer.paragraph,
     jamText: { getLayerText: () => ({ layerText: { textKey: activeLayer.text } }) },
-    _getRenderedTextLines() { box._hostState.getRenderedTextLines.result = "Automatically\nwrapped text"; },
+    // Converting in place is what exposes the wraps; the document is a
+    // throwaway, so no layer is duplicated to protect the original
+    _changeToPointText() { converted++; activeLayer.text = "Automatically\rwrapped text"; },
+    _duplicateActiveLayer() { throw new Error("A disposable training document must not duplicate layers"); },
   });
 
   const result = JSON.parse(box.scanTextShapeRTraining("/pages/existing.psd"));
   assert.strictEqual(result.entries.length, 93, "No 80-layer truncation; include hidden and nested text layers");
   assert.strictEqual(result.entries[90].visible, false, "Parent visibility must be inherited");
   assert.strictEqual(result.entries[90].layerPath, "Hidden group / Layer 101");
-  assert.strictEqual(result.entries[91].text, "Automatically\nwrapped text");
+  assert.strictEqual(result.entries[91].text, "Automatically\rwrapped text");
+  assert.strictEqual(converted, 1, "Only box text pays for a conversion");
   assert.strictEqual(result.entries[92].error, "readFailed");
   assert.strictEqual(duplicated, 1);
   assert.deepStrictEqual(closed, ["no-save"]);
