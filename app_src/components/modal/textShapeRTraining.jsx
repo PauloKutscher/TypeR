@@ -2,7 +2,7 @@ import "./textShapeRTraining.scss";
 import React from "react";
 import { FiChevronLeft, FiChevronRight, FiFolderPlus, FiStar, FiRotateCcw } from "react-icons/fi";
 import { FaFileImport, FaFileExport } from "react-icons/fa";
-import { locale, scanTextShapeRTraining } from "../../utils";
+import { locale, logTextShapeRTraining, scanTextShapeRTraining } from "../../utils";
 import { useContext } from "../../context";
 import { recordTextShapeRFeedback, setTextShapeRTuning } from "../../textShapeR";
 import { makeTrainingPage, normalizeTrainingFiles, selectedTrainingEntries, trainTextShapeREntries } from "../../textShapeRTraining";
@@ -66,6 +66,7 @@ export default function TextShapeRTraining({ onImportLearning, onExportLearning 
     setStage("scanning");
     setOffset(0);
     let firstPath = activePath;
+    logTextShapeRTraining(`import start files=${files.length}`);
     try {
       for (let index = 0; index < files.length; index++) {
         if (cancelled.current) break;
@@ -74,6 +75,9 @@ export default function TextShapeRTraining({ onImportLearning, onExportLearning 
         const data = await scanFile(file.path);
         if (!mounted.current) return;
         if (data.stopped) {
+          logTextShapeRTraining(data.error
+            ? `import stuck on ${file.name} at ${index + 1}/${files.length}`
+            : `import cancelled on ${file.name} at ${index + 1}/${files.length}`);
           // A stuck Photoshop stays stuck: every remaining file would queue
           // behind the same block. Stop and show which PSD to retry.
           if (data.error) {
@@ -90,6 +94,7 @@ export default function TextShapeRTraining({ onImportLearning, onExportLearning 
     } catch (error) {
       if (mounted.current) setMessage(locale.textShapeRTrainError);
     } finally {
+      logTextShapeRTraining("import finished");
       busyRef.current = false;
       if (mounted.current) setStage("review");
     }

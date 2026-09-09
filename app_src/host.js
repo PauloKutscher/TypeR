@@ -3321,6 +3321,44 @@ function _readTextShapeRTrainingLayers() {
   state.entries = entries;
 }
 
+// A batch import that hangs takes Photoshop down with it, so the diagnosis has
+// to be on disk before the step that hangs, not after: every phase is written
+// and flushed before the work it names. The last line of the log is the step
+// that never came back. Lives in %APPDATA%/TypeR (Application Support on Mac).
+var _TRAINING_LOG_LIMIT = 262144;
+function _trainingLog(text) {
+  try {
+    var now = new Date();
+    var stamp = now.getFullYear() + "-" + _pad2(now.getMonth() + 1) + "-" + _pad2(now.getDate()) +
+      " " + _pad2(now.getHours()) + ":" + _pad2(now.getMinutes()) + ":" + _pad2(now.getSeconds());
+    var folder = new Folder(Folder.userData + "/TypeR");
+    if (!folder.exists) folder.create();
+    var file = new File(folder.fsName + "/training.log");
+    // Bounded: a log nobody ever reads must not grow across sessions
+    if (file.exists && file.length > _TRAINING_LOG_LIMIT) file.remove();
+    file.open("a");
+    file.writeln(stamp + " " + text);
+    file.close();
+  } catch (logError) {}
+}
+
+function _pad2(value) {
+  return value < 10 ? "0" + value : String(value);
+}
+
+function _freeMemoryMB() {
+  try { return Math.round(app.freeMemory / 1048576); } catch (memoryError) { return -1; }
+}
+
+// The panel writes into the same log so its own view of the import — start,
+// cancel, the file a scan never came back from — sits next to the host phases
+// in one ordered file. If Photoshop is wedged this call only lands later, and
+// the last host line already names the step that hung.
+function logTextShapeRTraining(text) {
+  _trainingLog("panel " + String(text == null ? "" : text).replace(/[\r\n]+/g, " "));
+  return "";
+}
+
 // An empty path means the current page, including unsaved edits. A supplied
 // path reuses the open document when present, otherwise opens it without saving.
 function scanTextShapeRTraining(path) {
@@ -3329,6 +3367,9 @@ function scanTextShapeRTraining(path) {
   var workDoc = null;
   var file = null;
   var saveDialogs = app.displayDialogs;
+  var logName = String(path || "(active page)").split(/[\/]/).pop();
+  var startedAt = new Date().getTime();
+  _trainingLog("open " + logName + " freeMB=" + _freeMemoryMB() + " docs=" + app.documents.length);
   try { previousDoc = app.activeDocument; } catch (noDocument) {}
   try {
     if (path) {
@@ -3356,9 +3397,12 @@ function scanTextShapeRTraining(path) {
     }
     app.activeDocument = workDoc;
     _hostState.textShapeRTraining = { entries: [] };
+    _trainingLog("read " + logName + " openMs=" + (new Date().getTime() - startedAt));
     workDoc.suspendHistory("TypeR Read Training", "_readTextShapeRTrainingLayers()");
+    _trainingLog("layers " + logName + " n=" + _hostState.textShapeRTraining.entries.length);
     return jamJSON.stringify({ entries: _hostState.textShapeRTraining.entries });
   } catch (scanError) {
+    _trainingLog("failed " + logName + " " + (scanError && scanError.message ? scanError.message : scanError));
     return jamJSON.stringify({ error: "scanFailed" });
   } finally {
     if (workDoc) {
@@ -3376,6 +3420,8 @@ function scanTextShapeRTraining(path) {
     }
     app.displayDialogs = saveDialogs;
     _hostState.textShapeRTraining = null;
+    _trainingLog("closed " + logName + " ms=" + (new Date().getTime() - startedAt) +
+      " freeMB=" + _freeMemoryMB() + " docs=" + app.documents.length);
   }
 }
 

@@ -28,6 +28,7 @@ fs.readFileSync(path.join(__dirname, "../locale/messages.properties"), "utf8").s
   if (split > 0) locale[line.slice(0, split)] = line.slice(split + 1);
 });
 const requests = [];
+const logged = [];
 const committed = [];
 const lessons = [];
 const context = {
@@ -38,7 +39,7 @@ let liveTuning = context.state.textShapeRTuning;
 const load = require("./helpers/loadAppModule")({
   react: hooks,
   "./textShapeRTraining.scss": {},
-  "../../utils": { locale, scanTextShapeRTraining: (file, callback) => requests.push({ file, callback }) },
+  "../../utils": { locale, logTextShapeRTraining: (text) => logged.push(text), scanTextShapeRTraining: (file, callback) => requests.push({ file, callback }) },
   "../../context": { useContext: () => context },
   "../../textShapeR": {
     setTextShapeRTuning(value) { liveTuning = value; },
