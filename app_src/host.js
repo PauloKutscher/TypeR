@@ -3220,6 +3220,41 @@ function _collectTextLayerIds(container, ids, limit) {
   }
 }
 
+// Learning from the whole page without bubble outlines: the layers are the
+// typesetter's own, so they are never converted in place — the page is
+// duplicated once, the copies are converted together, read by identifier and
+// dropped in one delete. Four actions plus a cheap get per layer, instead of
+// four actions per layer, which is what made repeating it slow the session
+// down. Throws if anything is off, and the caller falls back to the walk.
+function _readPageTextsInOneBatch(ids) {
+  var texts = [];
+  _selectLayersAtOnce(ids);
+  _duplicateActiveLayer();
+  var copies = _getSelectedLayerIds();
+  if (!copies.length) throw new Error("noCopies");
+  // Photoshop leaves the copies selected. If anything ever leaves the
+  // originals selected instead, converting and deleting them would destroy the
+  // typesetter's page — refuse before touching a single one.
+  for (var copyIndex = 0; copyIndex < copies.length; copyIndex++) {
+    for (var originalIndex = 0; originalIndex < ids.length; originalIndex++) {
+      if (copies[copyIndex] === ids[originalIndex]) throw new Error("duplicateSelectionUnclear");
+    }
+  }
+  try {
+    _changeSelectionToPointText();
+    for (var index = 0; index < copies.length; index++) {
+      try {
+        var text = _getTextKeyById(copies[index]);
+        if (text) texts.push(text);
+      } catch (readError) {}
+    }
+  } finally {
+    _selectLayersAtOnce(copies);
+    _deleteActiveLayer();
+  }
+  return texts;
+}
+
 function _getAllRenderedTextLines() {
   var state = _hostState.getAllRenderedTextLines;
   var originalId = null;
@@ -3240,6 +3275,26 @@ function _getAllRenderedTextLines() {
     _collectTextLayerIds(app.activeDocument, ids, 80);
   } catch (collectError) {}
   var entries = [];
+  // No outlines to pair with, so the page can be read in one batch. The order
+  // does not matter here: the caller feeds these texts to the ranker one after
+  // another and never looks at which layer each came from.
+  if (!canScanBubbles && ids.length) {
+    try {
+      var batched = _readPageTextsInOneBatch(ids);
+      for (var batchIndex = 0; batchIndex < batched.length; batchIndex++) {
+        entries.push({ text: batched[batchIndex], bubble: null });
+      }
+    } catch (batchError) {
+      entries = [];
+    }
+    if (entries.length) {
+      if (originalId !== null) {
+        try { _selectLayerById(originalId); } catch (restoreError) {}
+      }
+      state.result = jamJSON.stringify({ entries: entries });
+      return;
+    }
+  }
   for (var index = 0; index < ids.length; index++) {
     try {
       _selectLayerById(ids[index]);

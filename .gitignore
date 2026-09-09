@@ -36,3 +36,6 @@ true/
 
 # Bug reports: screen recordings, not source
 bug/
+
+# Test corpus: PSD pages, not source
+travamento/
