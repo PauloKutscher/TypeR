@@ -15,20 +15,24 @@ const makeHost = () => {
   let dirty = false;
   let pixels = "original selection";
   let scanCalls = 0;
-  const states = ["Open", "Paint", "Selection"].map((name) => ({ name, pixels }));
+  // Photoshop restores the layer selection a history state was recorded with.
+  // The typesetter is on layer 7; every recorded state remembers layer 3.
+  let selectedLayers = [7];
+  const states = ["Open", "Paint", "Selection"].map((name) => ({ name, pixels, layers: [3] }));
   const doc = {
     historyStates: states,
     get activeHistoryState() { return states[activeIndex]; },
     set activeHistoryState(state) {
       activeIndex = states.indexOf(state);
       pixels = state.pixels;
+      selectedLayers = state.layers.slice();
     },
     suspendHistory(name, script) {
       dirty = false;
       vm.runInContext(script, context);
       if (dirty) {
         states.splice(activeIndex + 1);
-        states.push({ name, pixels });
+        states.push({ name, pixels, layers: selectedLayers.slice() });
         while (states.length > context.app.preferences.numberOfHistoryStates) states.shift();
         activeIndex = states.length - 1;
       }
@@ -43,6 +47,8 @@ const makeHost = () => {
     documents: [doc],
     _hostState: { suspendedRun: null },
     _getActiveHistoryIndex: () => activeIndex,
+    _getSelectedLayerIds: () => selectedLayers.slice(),
+    _selectLayersById: (ids) => { selectedLayers = ids.slice(); },
     ActionReference, ActionDescriptor,
     charID: { Null: "null", Delete: "delete" },
     DialogModes: { NO: "no" },
@@ -71,7 +77,7 @@ const makeHost = () => {
   ["_withTemporaryHistory", "getCurrentSelectionShape", "getActiveLayerBubbleShape"].forEach((name) => {
     vm.runInContext(extract(name), context);
   });
-  return { context, doc, states, getPixels: () => pixels, getScanCalls: () => scanCalls };
+  return { context, doc, states, getPixels: () => pixels, getScanCalls: () => scanCalls, getSelectedLayers: () => selectedLayers };
 };
 
 const host = makeHost();
@@ -82,6 +88,7 @@ for (let i = 0; i < 10000; i++) {
   assert.strictEqual(host.states.length, 3, "Repeated reads must not accumulate Photoshop history");
   assert.strictEqual(host.getPixels(), "original selection", "Each scan must restore the document");
   assert.strictEqual(host.context._hostState.suspendedRun, null, "Scan closures must be released");
+  assert.deepStrictEqual(host.getSelectedLayers(), [7], "A scan must leave the typesetter on the layer he selected");
 }
 assert.deepStrictEqual(host.states.map((state) => state.name), names);
 assert.strictEqual(host.getScanCalls(), 10000);

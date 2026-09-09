@@ -341,6 +341,13 @@ function _withTemporaryHistory(name, fn) {
   }
 
   var result = null;
+  // The rewind below restores the layer selection this state was recorded
+  // with — the balloon the typesetter was on before, not the one he just
+  // clicked. Remember his selection so the scan can hand it back.
+  var selectedIds = [];
+  try {
+    selectedIds = _getSelectedLayerIds();
+  } catch (selectionError) {}
   var previousRun = _hostState.suspendedRun;
   _hostState.suspendedRun = function () {
     try {
@@ -366,6 +373,7 @@ function _withTemporaryHistory(name, fn) {
         var descriptor = new ActionDescriptor();
         descriptor.putReference(charID.Null, reference);
         executeAction(charID.Delete, descriptor, DialogModes.NO);
+        if (selectedIds.length) _selectLayersById(selectedIds);
       }
     } catch (restoreError) {
       // A host that cannot clean up must not accumulate more scan states.
@@ -604,6 +612,38 @@ function _selectLayerById(layerId) {
   var descriptor = new ActionDescriptor();
   descriptor.putReference(charID.Null, reference);
   executeAction(charID.Select, descriptor, DialogModes.NO);
+}
+
+// A history state carries the layer selection it was recorded with, so
+// stepping the document back to one restores that selection over whatever the
+// typesetter has selected now. Anything that rewinds history has to put the
+// current selection back; this is what it needs to remember first.
+function _getSelectedLayerIds() {
+  var ids = [];
+  var targetLayers = stringIDToTypeID("targetLayers");
+  var layerIdProp = stringIDToTypeID("layerID");
+  var reference = new ActionReference();
+  reference.putProperty(charID.Property, targetLayers);
+  reference.putEnumerated(charID.Document, charID.Ordinal, charID.Target);
+  var doc = executeActionGet(reference);
+  if (!doc.hasKey(targetLayers)) {
+    try { ids.push(_getActiveLayerId()); } catch (activeError) {}
+    return ids;
+  }
+  var list = doc.getList(targetLayers);
+  var backgroundRef = new ActionReference();
+  backgroundRef.putProperty(charID.Property, charID.Background);
+  backgroundRef.putEnumerated(charID.Layer, charID.Ordinal, charID.Back);
+  var offset = executeActionGet(backgroundRef).getBoolean(charID.Background) ? 0 : 1;
+  for (var index = 0; index < list.count; index++) {
+    try {
+      var idRef = new ActionReference();
+      idRef.putProperty(charID.Property, layerIdProp);
+      idRef.putIndex(charID.Layer, list.getReference(index).getIndex() + offset);
+      ids.push(executeActionGet(idRef).getInteger(layerIdProp));
+    } catch (idError) {}
+  }
+  return ids;
 }
 
 function _selectLayersById(layerIds) {
@@ -4977,9 +5017,19 @@ function undoLastTyperChange() {
     }
     if (activeIndex < 0) activeIndex = 0;
     if (activeIndex > states.length - 1) activeIndex = states.length - 1;
+    // Same trap as the scans: the state being restored carries its own layer
+    // selection, and undoing a shape must leave the typesetter on the layer he
+    // is undoing, not on the one he happened to be on when that state was made.
+    var selectedIds = [];
+    try {
+      selectedIds = _getSelectedLayerIds();
+    } catch (selectionError) {}
     for (var search = activeIndex; search > 0; search--) {
       if (states[search].name === "TyperTools Change") {
         doc.activeHistoryState = states[search - 1];
+        if (selectedIds.length) {
+          try { _selectLayersById(selectedIds); } catch (restoreError) {}
+        }
         return "";
       }
     }

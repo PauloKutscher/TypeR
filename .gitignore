@@ -33,3 +33,6 @@ Desktop.ini
 psd/
 true/
 
+
+# Bug reports: screen recordings, not source
+bug/
