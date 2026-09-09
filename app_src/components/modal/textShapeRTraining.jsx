@@ -8,6 +8,9 @@ import { recordTextShapeRFeedback, setTextShapeRTuning } from "../../textShapeR"
 import { makeTrainingPage, normalizeTrainingFiles, selectedTrainingEntries, trainTextShapeREntries } from "../../textShapeRTraining";
 
 const PAGE_SIZE = 15;
+// A PSD packed with box text takes a while to read, layer by layer. Past this
+// it is not Photoshop working, it is Photoshop stuck.
+const SCAN_TIMEOUT = 5 * 60 * 1000;
 const format = (text, values) => Object.keys(values).reduce((result, key) => result.replace(`{${key}}`, values[key]), text);
 
 export default function TextShapeRTraining({ onImportLearning, onExportLearning } = {}) {
@@ -33,6 +36,27 @@ export default function TextShapeRTraining({ onImportLearning, onExportLearning 
   const editable = entries.filter((entry) => entry.usable);
   const allIncluded = editable.length > 0 && editable.every((entry) => entry.included);
 
+  // The host answers every scan — unless Photoshop itself is stuck: a modal
+  // dialog waiting behind the panel, a PSD it will not open. The CEP callback
+  // then never arrives, and the import sat on that file forever, deaf even to
+  // Cancel. Give the wait a way out, and let the loop name the file.
+  const scanFile = (path) => new Promise((resolve) => {
+    const startedAt = Date.now();
+    let watchdog = null;
+    let settled = false;
+    const finish = (data) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(watchdog);
+      resolve(data);
+    };
+    watchdog = setInterval(() => {
+      if (cancelled.current) finish({ stopped: true });
+      else if (Date.now() - startedAt > SCAN_TIMEOUT) finish({ error: "scanFailed", stopped: true });
+    }, 250);
+    scanTextShapeRTraining(path, finish);
+  });
+
   const scanFiles = async (files) => {
     if (busyRef.current || !files.length) return;
     busyRef.current = true;
@@ -47,8 +71,18 @@ export default function TextShapeRTraining({ onImportLearning, onExportLearning 
         if (cancelled.current) break;
         const file = files[index];
         setProgress({ current: index + 1, total: files.length, name: file.name });
-        const data = await new Promise((resolve) => scanTextShapeRTraining(file.path, resolve));
+        const data = await scanFile(file.path);
         if (!mounted.current) return;
+        if (data.stopped) {
+          // A stuck Photoshop stays stuck: every remaining file would queue
+          // behind the same block. Stop and show which PSD to retry.
+          if (data.error) {
+            setPages((current) => current.filter((page) => page.path !== file.path).concat(makeTrainingPage(file, data)));
+            setActivePath(file.path);
+            setMessage(locale.textShapeRTrainFileError);
+          }
+          break;
+        }
         if (!firstPath) { firstPath = file.path; setActivePath(firstPath); }
         // Replace a retried file, retaining all other review choices.
         setPages((current) => current.filter((page) => page.path !== file.path).concat(makeTrainingPage(file, data)));

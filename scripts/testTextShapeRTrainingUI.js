@@ -112,6 +112,17 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     assert.strictEqual(committed.length, 1, "Cancelled training must not commit a partial result");
     assert(text(tree).includes(locale.textShapeRTrainCancelled));
 
+    // A PSD Photoshop never answers for must not deafen Cancel
+    const stuck = requests.length;
+    button(tree, locale.textShapeRTrainPick).props.onClick();
+    assert.strictEqual(requests.length, stuck + 1, "The stuck scan is in flight");
+    tree = render();
+    button(tree, locale.cancel).props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.strictEqual(requests.length, stuck + 1, "Cancel must break a scan the host never answers");
+    tree = render();
+    assert.strictEqual(button(tree, locale.textShapeRTrainPick).props.disabled, false, "A cancelled import must release the panel");
+
     button(tree, locale.textShapeRTrainPick).props.onClick();
     const request = requests[requests.length - 1];
     const count = requests.length;
