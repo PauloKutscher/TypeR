@@ -64,6 +64,9 @@ function testPhotoshopScan() {
   const closed = [];
   let duplicated = 0;
   let converted = 0;
+  let batchSelects = 0;
+  let batchSize = 0;
+  let selects = 0;
   let failRead = false;
   let failOpen = false;
   const layer = (id, overrides = {}) => ({ id, name: `Layer ${id}`, kind: "text", visible: true, typename: "ArtLayer", text: `Line ${id}\rSecond line`, ...overrides });
@@ -93,12 +96,24 @@ function testPhotoshopScan() {
   const flatLayers = layers.slice(0, 90).concat(layers[90].layers, layers.slice(91));
   Object.assign(box, {
     File: function (filePath) { this.fsName = filePath; this.exists = filePath !== "/missing.psd"; },
-    _selectLayerById(id) { activeLayer = flatLayers.find((item) => item.id === id); if (activeLayer.broken) throw new Error("Unreadable layer"); },
+    _selectLayerById(id) { selects++; activeLayer = flatLayers.find((item) => item.id === id); if (activeLayer.broken) throw new Error("Unreadable layer"); },
     _textLayerIsPointText: () => !activeLayer.paragraph,
     jamText: { getLayerText: () => ({ layerText: { textKey: activeLayer.text } }) },
-    // Converting in place is what exposes the wraps; the document is a
-    // throwaway, so no layer is duplicated to protect the original
-    _changeToPointText() { converted++; activeLayer.text = "Automatically\rwrapped text"; },
+    // The page is selected once and converted once. Nothing is merged: the
+    // conversion reaches every selected layer, each still read on its own id.
+    _selectLayersAtOnce(ids) { batchSelects++; batchSize = ids.length; },
+    _changeSelectionToPointText() {
+      converted++;
+      flatLayers.forEach((layer) => {
+        if (layer.paragraph) layer.text = "Automatically\rwrapped text";
+      });
+    },
+    _getTextKeyById(id) {
+      const layer = flatLayers.find((item) => item.id === id);
+      if (!layer || layer.broken) throw new Error("Unreadable layer");
+      return layer.text;
+    },
+    _changeToPointText() { throw new Error("The batch conversion must cover the whole page"); },
     _duplicateActiveLayer() { throw new Error("A disposable training document must not duplicate layers"); },
   });
 
@@ -107,7 +122,10 @@ function testPhotoshopScan() {
   assert.strictEqual(result.entries[90].visible, false, "Parent visibility must be inherited");
   assert.strictEqual(result.entries[90].layerPath, "Hidden group / Layer 101");
   assert.strictEqual(result.entries[91].text, "Automatically\rwrapped text");
-  assert.strictEqual(converted, 1, "Only box text pays for a conversion");
+  assert.strictEqual(batchSelects, 1, "The whole page is selected in one action");
+  assert.strictEqual(batchSize, 93, "Every text layer of the page is in that selection");
+  assert.strictEqual(converted, 1, "One conversion covers the page");
+  assert.strictEqual(selects, 0, "Reading a page must not select layers one by one");
   assert.strictEqual(result.entries[92].error, "readFailed");
   assert.strictEqual(duplicated, 1);
   assert.deepStrictEqual(closed, ["no-save"]);
