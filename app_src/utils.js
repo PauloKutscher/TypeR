@@ -502,7 +502,7 @@ const setSelectedTextLayers = (items, direction, callback = () => {}, restoreLay
 // Fast text-only apply for TextShapeR: passes the layer style snapshot the
 // panel already holds so the host can skip its full layer re-read and every
 // style/stroke re-apply — only the line breaking changes
-const setLayerTextFast = (text, layerSnapshotStyle, direction, callback = () => {}) => {
+const setLayerTextFast = (text, layerSnapshotStyle, direction, callback = () => {}, layerId = null) => {
   if (!text || !layerSnapshotStyle) {
     setActiveLayerText(text, layerSnapshotStyle, direction, callback);
     return;
@@ -513,9 +513,12 @@ const setLayerTextFast = (text, layerSnapshotStyle, direction, callback = () => 
     style: layerSnapshotStyle,
     direction,
     richTextRuns: parsed.richTextRuns,
+    layerId: typeof layerId === "number" ? layerId : null,
   });
   csInterface.evalScript("setTextShapeRLayerText(" + data + ")", trackHostAction((error) => {
-    if (error) nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
+    // "staleLayer" means Photoshop moved on to another layer while the panel
+    // was still showing this one: the caller reloads, no alert to dismiss
+    if (error && error !== "staleLayer") nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
     callback(!error);
   }));
 };

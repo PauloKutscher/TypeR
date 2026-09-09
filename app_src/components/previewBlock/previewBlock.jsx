@@ -214,6 +214,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const inlineSourceSignature = React.useRef("");
   const inlineLayerIdRef = React.useRef(null);
   const inlineSourcePending = React.useRef(false);
+  const inlineSourceQueued = React.useRef(null);
   const inlineGeometryPending = React.useRef(false);
   const inlineGeometryQueued = React.useRef(false);
   const inlineContentEventVersion = React.useRef(0);
@@ -348,7 +349,15 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const [clearAllTipShown, setClearAllTipShown] = React.useState(false);
 
   const refreshInlineLayerSource = React.useCallback((showLoading = false) => {
-    if (inlineSourcePending.current) return;
+    // A layer switch that arrives while a read is in flight used to be dropped
+    // with nothing to retry it: the widget then kept the previous balloon's
+    // text until the slow fallback poll, and every click in between applied
+    // that text to the layer Photoshop has selected now. Queue one trailing
+    // read instead, like the geometry and batch refreshes already do.
+    if (inlineSourcePending.current) {
+      inlineSourceQueued.current = { showLoading: showLoading || inlineSourceQueued.current?.showLoading === true };
+      return;
+    }
     inlineSourcePending.current = true;
     inlineLastRefreshAt.current = Date.now();
     setInlineLayerSource((current) => (
@@ -357,6 +366,11 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     if (showLoading) inlineSourceSignature.current = "";
     getActiveTextLayerSource(inlineSourceSignature.current, (source) => {
       inlineSourcePending.current = false;
+      const queued = inlineSourceQueued.current;
+      inlineSourceQueued.current = null;
+      // Deferred so this answer finishes settling first; the queued read then
+      // overwrites it with the layer Photoshop is really on
+      if (queued) setTimeout(() => refreshInlineLayerSource(queued.showLoading), 0);
       if (source?.unchanged) {
         inlineSourceSignature.current = source.signature || inlineSourceSignature.current;
         setInlineLayerSource((current) => (current.loading || current.error ? { ...current, loading: false, error: "" } : current));
@@ -867,6 +881,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       }
       clearInlineShapeSettle();
       inlineSourcePending.current = false;
+      inlineSourceQueued.current = null;
       inlineGeometryPending.current = false;
       inlineGeometryQueued.current = false;
       inlineContentEventVersion.current += 1;
@@ -1216,7 +1231,14 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     // line breaking changes
     setLayerTextFast(variant.text, inlineLayerSource.style, context.state.direction, (ok) => {
       setApplyingTextShapeRId(null);
-      if (!ok) return;
+      if (!ok) {
+        // Refused because Photoshop is on another layer, or the apply failed:
+        // reload so the variants describe the balloon actually selected
+        inlineSourceKey.current = "";
+        inlineSourceSignature.current = "";
+        refreshInlineLayerSource(true);
+        return;
+      }
       context.dispatch({ type: "recordTextShapeRUse" });
       // In batch mode a picked shape moves on to the next queued layer
       if (batchRunRef.current) {
@@ -1234,8 +1256,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         return next;
       });
       if (advance) context.dispatch({ type: "nextLine", add: true });
-    });
-  }, [applyingTextShapeRId, context, inlineLayerSource.style, inlineLayerSource.loading, inlineLayerSource.layerId, advanceTextShapeRBatch]);
+    }, inlineLayerSource.layerId);
+  }, [applyingTextShapeRId, context, inlineLayerSource.style, inlineLayerSource.loading, inlineLayerSource.layerId, advanceTextShapeRBatch, refreshInlineLayerSource]);
 
   // Hover refresh is a fallback for missed Photoshop events: rate-limit it so
   // sweeping the cursor over the widget doesn't queue ExtendScript roundtrips.

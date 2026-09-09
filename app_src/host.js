@@ -2250,6 +2250,17 @@ function _setTextShapeRText() {
 }
 
 function setTextShapeRLayerText(data) {
+  // The variants the panel offers are built from a snapshot of one layer. If
+  // the typesetter selected another balloon before clicking one of them, that
+  // click would overwrite the balloon he is on with the text of the balloon he
+  // left. Refuse instead of writing to the wrong layer.
+  if (data && typeof data.layerId === "number" && documents.length) {
+    var activeId = null;
+    try {
+      activeId = _getActiveLayerId();
+    } catch (activeIdError) {}
+    if (activeId !== data.layerId) return "staleLayer";
+  }
   var valid = data && data.text && data.style && data.style.textProps && data.style.textProps.layerText &&
     data.style.textProps.layerText.textStyleRange && data.style.textProps.layerText.textStyleRange[0];
   if (!valid) return setActiveLayerText(data);
