@@ -1,8 +1,40 @@
 # Plano — centralização de texto em balões (TypeR)
 
-Documento de trabalho. Atualizado a cada etapa concluída.
+Documento de trabalho. Atualizado a cada etapa concluída. Resultados, medições, decisões e planos das tarefas de centralização ficam neste arquivo; os artefatos brutos permanecem em `.centering-lab/`.
 
-Última atualização: 2026-09-08, depois de a região deixar de desistir no primeiro par recusado, de o prefixo de cortes válidos parar de ser jogado fora, e de o corte parar de perguntar em que balão a fala está a uma caixa que o `resizeTextBox` já tinha movido.
+Última atualização: **2026-09-10 — Task 33 concluída, sem porte de candidata.** Relatório: [resultados completos da Task 33](#task-33-resultados). Plano de entrada, com gates congelados: [plano de entrada da Task 33](#task-33-plano-de-entrada).
+
+## Estado vigente após a Task 33
+
+- Baseline da investigação: `bf54511d0be87091379c3509f2afb6f846576d33`. Durante a execução, commits externos avançaram o projeto para `f9ad1f60f30832c6fca462196f861a856aaa23fb`; a reserva de ordem foi medida também nesse bundle. Fonte, bundle instalado e bundle carregado são identidades distintas, registradas no relatório.
+- Corpus: **15 páginas de desenvolvimento, 30 originais** (`psd/` e `true/`). `11.psd` deixou de ser holdout na Task 31. Balões múltiplos fazem parte das investigações atuais. Os 10/14 PSDs, 28 originais e exclusões de escopo nas seções antigas são registros da época.
+- Task 32 continua sendo o motor de centralização de partida: tentativas adicionais somente antes do primeiro corte, prefixo cumulativo válido, âncora anterior ao resize, pertencimento antes do fallback de lado e avaliador com nulos/raster. Nenhuma dessas mudanças foi reimplementada como novidade nem revertida na Task 33.
+- **A, cru propõe e aberto calcula:** 106 elegíveis de 15 páginas; sete mudanças aceitas offline; três reprovações por caso (`14#0`, GO4 `0010#2`, MUP74 `0007#3`). A média favorável não dispensou os gates. Nenhum porte.
+- **B, limpeza limitada do cru:** quatro orçamentos de simplificação e controle sem filtro, sobre anéis anteriores à redução a 400 pontos; 12 controles sintéticos preservaram a junção, mas os três falsos cortes reais persistiram. Implementação reprovada; família inteira não declarada impossível.
+- **Unilateral:** reta de quadro real confirmada no pior caso, cúspide sem parceiro no cru e perfil de largura medido. Não se demonstrou uma separação entre lobos de balões na imagem. Entalhe verdadeiro de região única também satisfaz o perfil sintético de cintura. Sem separador aprovado.
+- **Ordem:** `11.psd` reproduz 49,244 px entre ordens e até 66,940 px na segunda varredura, tanto com marquee quanto no atalho. Controle com ativa fixa e troca das disposições das vizinhas reproduziu exatamente os destinos e contornos em forward/reverse/forward. Não foi introduzido cache/histerese nem novo ranking de pares.
+- Nulo da sequência marquee passou integralmente. No atalho, houve divergência em um anel secundário, sem diferença de destino/cortes: **nulo integral reprovado**, registrado, sem afrouxar gate. Capturas A/B e execuções reais possuem auditoria própria; o detalhe está no relatório.
+- Sem novos dados disponíveis, sem validação independente. Seis cenários completos, integração e desempenho de uma candidata eram condicionados à sobrevivência; não foram executados para regras reprovadas. Desempenho de produção permanece não aprovado nesta rodada.
+- Originais re-hashados ao final: **30/30 intactos**. Mudanças desta investigação restritas ao diagnóstico, testes e documentação; nenhuma instalação, push, merge ou alteração dos arquivos do PR #2.
+
+### Errata de leitura, conservando o histórico
+
+H9 **foi medida** na Task 32: informação recuperável no cru, com substituição geral e fallback ingênuo rejeitados. A menção “ainda não medida” abaixo é anterior aos resultados. “Um filtro preservaria dez ganhos e removeria três falsos” permanece hipótese; os negativos incluem cauda, arte conectada e grito desenhado.
+
+O mapa antigo anuncia 529 regiões, mas suas quatro linhas somam 530; a tabela de grupos sem corte soma 390, não 386. Não foi encontrado ledger causal suficiente para escolher uma linha a corrigir por palpite. A reconciliação verificável por estado final nos cinco cenários sem resize é:
+
+| Runs históricos | Elegíveis | Sucesso com alvo | Partição usada | Corte produzido, alvo recusado | Sem corte | Falha sem alvo |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `170-*` | 530 | 527 | 140 | 1 | 386 | 3 |
+| `180-*` | 530 | 527 | 143 | 2 | 382 | 3 |
+
+Esse ledger não inventa a causa da inconsistência editorial. O mapa causal antigo não é automaticamente o mapa do HEAD atual. Os **53,8% são da massa de erro sem corte**, não da massa total. “Aquisição não é o problema” estava limitada à referência e à população daquele experimento; não certifica preservação de informação na abertura. “Informação não está na imagem” referia-se ao miolo das cordas amostradas, não a toda a silhueta.
+
+**Task 34 — planejada, não executada:** isolar as vizinhas e a alteração da aquisição no controle causal de ordem, resolver o nulo de anéis se forem interpretadas diferenças pequenas e procurar um discriminante de runtime antes de qualquer regra. Para unilateral/filtros, faltam exemplos específicos e negativos comparáveis; qualquer sobrevivente futuro continua exigindo validação independente e os gates do plano. Não existe candidata aprovada aguardando instalação.
+
+---
+
+**Registro histórico da atualização anterior (2026-09-08):** depois de a região deixar de desistir no primeiro par recusado, de o prefixo de cortes válidos parar de ser jogado fora, e de o corte parar de perguntar em que balão a fala está a uma caixa que o `resizeTextBox` já tinha movido. As seções seguintes conservam a evolução do trabalho; seus resumos iniciais de população e escopo não substituem o estado vigente acima.
 
 ## Objetivo
 
@@ -106,6 +138,8 @@ Baseline da medição: `resizeTextBoxOnCenter` desligado e `internalPadding = 0`
 | 30 | Porte mínimo e gate real | encerrada sem porte |
 | 31 | Balões redondos encadeados: a junção com uma cúspide só | concluída |
 | 32 | O par atrás do mais curto, o prefixo válido, a caixa que o resize moveu e o teste de lado que não era pertencimento | concluída; aprovada nos seis cenários |
+| 33 | [Investigar cru/aberto, limpeza, junção unilateral e dependência de ordem](#task-33-resultados) | concluída, sem porte; resultados e medições abaixo |
+| 34 | Isolar vizinhas e alteração da aquisição no controle causal de ordem | planejada, não executada |
 
 ## Registro do que já foi feito
 
@@ -1232,6 +1266,811 @@ lado da junção numa dobra rasa demais para parear, o contorno cru tem o par qu
 falta. O harness sabe capturá-lo (`trueRegion.rawOutline`), o teste é
 discriminatório — dá par nas 40 regiões travadas sem inventar corte nas 285 de
 uma fala só? — e não custa mudança no motor até render.
+
+<a id="task-33-resultados"></a>
+
+### Task 33 — investigação de centralização (concluída, sem porte)
+
+**Concluída, sem porte.** Execução em 09–10/09/2026. Plano de entrada: [plano de entrada da Task 33](#task-33-plano-de-entrada). Os gates desse documento foram mantidos.
+
+**Decisão: nenhuma candidata para porte.** A e a implementação delimitada de B falharam; a frente unilateral não demonstrou uma separação confiável no caso real; a reserva reproduziu a dependência de ordem e localizou mudanças na entrada adquirida. Isso não demonstra esgotamento da centralização nem de todas as famílias de técnicas.
+
+#### O que foi efetivamente testado
+
+| Frente | Execução | Resultado e limite |
+| --- | --- | --- |
+| A: cru propõe, aberto fornece peça/alvo | Captura real de 15 páginas; replay dos 106 elegíveis; transporte de cordas offline | Três reprovações por caso; não portar |
+| B: limpeza com erro geométrico limitado | Simplificação dos anéis crus completos; cinco condições, sendo uma sem filtro; 80 entradas acionáveis; 12 controles sintéticos | Oscilação sintética removida e junção preservada, mas os falsos cortes reais persistem; não portar essa implementação |
+| Junção unilateral | Imagem, máscara e contorno do pior caso; fronteira observada; perfil de largura; controles analíticos recortados | Há reta do quadro e cúspide unilateral, mas não uma cadeia de balões demonstrada. Cintura também aparece em entalhe verdadeiro de região única. Nenhum separador de runtime validado |
+| Reserva: ordem | `11.psd`, forward/reverse/twice, com marquee e sem seleção, resize desligado; rastro real | 49,24 px entre ordens; até 66,94 px na segunda varredura. Ativa/sonda iguais, vizinhas e contornos diferentes |
+| Reserva: seleção de pares | Avaliação das evidências novas de A/B | Não surgiu seletor generalizável. Nenhuma nova campanha por rank, solidez ou proximidade ao texto |
+
+Nenhuma candidata foi aplicada aos textos no Photoshop. O Photoshop executou o baseline e sua instrumentação passiva. A/B alteram somente o cálculo experimental offline. Os seis cenários completos, integração de uma candidata e custo de produção eram etapas **condicionadas à sobrevivência**; não foram executados após as reprovações.
+
+O usuário confirmou que não existem novos PSDs disponíveis. As 15 páginas continuam sendo desenvolvimento/regressão. Não houve validação independente.
+
+#### Revisões e identidade
+
+O baseline inicial e as capturas de A/B usam `develop@bf54511d0be87091379c3509f2afb6f846576d33`. Durante a investigação, outra atividade avançou o working tree para `f9ad1f60f30832c6fca462196f861a856aaa23fb`, passando por `bd1034f`. Esses commits não foram produzidos nem revertidos por esta investigação.
+
+O avanço inclui desempenho da medição de texto, descarte de closures, identidade por documento e aquisição de região do **TextShapeR**. A mudança de aquisição está em `_scanActiveLayerBubble`; não é uma nova regra de corte do Align. As funções geométricas usadas aqui permaneceram equivalentes nos testes de fonte/bundle/instrumentação. Isso permite estudar os dados antigos com sua revisão identificada; não transforma um run antigo em validação de integração ou desempenho do novo bundle.
+
+| Artefato | SHA-1 |
+| --- | --- |
+| Fonte inicial `app_src/host.js` | `d190c4f55f651f97c31c501e68a646c54af82f8f` |
+| Bundle inicial arquivado `bundles/base.jsx` | `35493a7a9f23ed56043acb00fe11b5dace737283` |
+| Mesmo bundle, com observação do solver | `f90dd2db4c2599eb566ba11fffb04a217a8e5673` |
+| Fonte em `f9ad1f6` | `3a62a3437cfae9136cb85d19fa7ddc16a7e166eb` |
+| Bundle em `f9ad1f6` | `4889895d678969797d989e71c7b58a852b2b4f3e` |
+| Bundle observado em `f9ad1f6`, usado na reserva | `f95ff53781f9c12231d0bd5862cef06a9c091076` |
+
+Os manifestos ficam em `.centering-lab/task33/bundles*/identity.json`; cada run registra HEAD, fonte presente, bundle efetivamente avaliado, harness, entradas e a função carregada via `toString()`. O nulo `task33-v6-final-*-mup74` já registra HEAD `f9ad1f6`, mas **carrega os bundles iniciais explicitamente arquivados**. Não o rotular como baseline completo de `f9ad1f6`.
+
+O avanço concorrente fez o auditor recusar a fonte do working tree para os runs antigos. O leitor agora resolve a revisão registrada com `git show`, confere SHA-1, inclusive representação de fim de linha, e levanta o solver daquela fonte. Patch local sem fonte arquivada correspondente continua sendo recusado. O rastro real também precisa coincidir; registrar HEAD sozinho não prova o motor carregado.
+
+Photoshop utilizado: **27.9.1**. Todos os PSDs foram abertos automaticamente em cópias de laboratório e fechados com `DONOTSAVECHANGES`.
+
+Na conferência final, o bundle **instalado** ainda era `35493a…`, enquanto o working tree tinha `488989…`. Esta investigação não instalou a versão nova. A sessão COM foi devolvida ao bundle instalado, sem instrumentação; Photoshop permaneceu aberto, com zero documentos. Os 30 originais foram re-hashados e coincidem integralmente com o manifesto congelado.
+
+#### Diagnóstico implementado
+
+`instrumentPartition.js` observa a função real `_splitOutlineAtCusps` em um bundle privado do laboratório. Registra tentativas, pares, recusas, prefixo aceito, guarda de área, polígonos e a caixa efetivamente recebida. Os anchors da instrumentação precisam ser únicos; mudança de código incompatível falha explicitamente.
+
+`measureCentering.jsx` deixou de produzir a sequência antiga de cortes simulados. Conserva o resultado real e acrescenta:
+
+- Aquisição identificada por documento, camada, sonda, visibilidade, origem e referência do objeto de polígonos que chegou ao solver.
+- Anéis disponíveis antes da redução a 400 pontos; contorno cru e aberto provenientes da mesma aquisição observada. Não se misturam o probe de referência e uma chamada posterior.
+- Máscaras e imagem de um subconjunto. O cru é traçado em uma duplicata com a seleção armazenada, para não consumir nem recarregar a seleção usada pelo Align.
+- Caixa do posicionador, alvo efetivo e deslocamento solicitado, incluindo fallback/phantom; primeira e segunda passagens.
+
+**Limite do cru:** a duplicata nasce da aquisição identificada, mas carregar uma seleção de canal pode quantizar a franja. O nulo prova que a instrumentação final preserva a entrada aberta e a saída do Align; não prova equivalência bit a bit entre todo possível traçado cru direto e a cópia de canal. Os anéis também já passaram por `Make Work Path`: não são a imagem original sem perda. Por isso os recortes/máscaras foram preservados e o custo/porte desse mecanismo não está aprovado.
+
+`task33Analysis.js` audita população, identidade, função carregada, polígonos produtores, decisões, alvo e movimento. Não reaplica amostragem a um dump legado de 400 pontos. Nas novas capturas, o solver recebe os anéis anteriores à sua amostragem, como na execução real. Ausência, divergência, valor não finito e restauração falha bloqueiam a análise. Falhas do motor não recebem erro zero.
+
+O `replayPartition.js` legado não foi usado para certificar estes resultados. Continua existindo para os experimentos históricos; seu modo de validação não equivale à auditoria nova. `errorTable.js` permanece um resumo descritivo.
+
+##### Falhas do próprio diagnóstico encontradas e preservadas
+
+| Versão/run | Problema | Tratamento |
+| --- | --- | --- |
+| Primeira captura, overlap em `11` | Reuso do canal temporário de produção destruía o snapshot da abertura | Nulo reprovado; canal nativo exclusivo para o laboratório |
+| `task33-v2-overlap-*11` | Alvo/movimento iguais, mas um anel diferia 1 px após recarga da seleção | Nulo de entrada reprovado; traçado cru deslocado para duplicata |
+| `task33-v3-overlap-*11` | Correção acima | Nulo passou com diferença zero em entrada, decisão final e movimento |
+| `task33-v3-none-corpus` | Na décima página, `returnedCentroid` podia ser `undefined` em `coversPage`; serializador recusou | Run completo marcado como falho. Nove páginas completas conservadas; página falha refeita com as cinco restantes |
+| `task33-v4-final-observed-mup74` e `v5-diagnose-mup74` | Contagem de anchors não medida podia ser `undefined` | Caminho exato identificado pelo erro; campo passa a `null`, sem inventar contagem zero; nulo v6 repetido |
+
+O reaproveitamento das nove páginas é explícito (`--completed-only`), com páginas omitidas listadas. O run falho não foi renomeado como sucesso. Entre v3 e v4, a captura mudou apenas a serialização de centroides ausentes e a serialização antes de abrir o arquivo; as decisões e entradas das páginas retidas foram auditadas. A união das duas partes foi conferida contra as **106 chaves elegíveis congeladas**; não há duplicação da página refeita.
+
+#### A — resultado por caso e mecanismo
+
+A0 mantém o motor atual. A1 é o solver atual sobre o cru, comparador já rejeitado historicamente. A2 transporta as cordas propostas no cru para o aberto, conservando seus anéis e usando área/alvo da peça aberta. Cortes atuais utilizáveis são preservados; recusa retorna ao alvo atual.
+
+A2 exige projeção única dos endpoints, mesmo componente aberto escolhido, distância limitada ao raio real da abertura mais 0,5 px, ausência de cruzamento de bordas/buracos, pertencimento, área mínima e exceção de cintura do motor. Registra segmento, parâmetro, distância e motivo de cada recusa. Não usa identidade da página nem gabarito para decidir.
+
+**Limite adicional demonstrado:** projeções geométricas próximas não certificam a correspondência semântica de componentes. Em GO3 `0029#0` e GO4 `0010#2`, a imagem/máscara mostra que a abertura também separa uma região. O ganho numérico de GO3 não autoriza transportar qualquer corda depois dessa mudança de topologia. Essa dificuldade reforça a recusa do porte; não foi contornada com um limiar escolhido após a falha.
+
+Os três falsos cortes históricos foram recusados por A2, mas isso não bastou. Todas as mudanças de alvo acima de 0,5 px estão abaixo. Erros em pixels de documento, relativos ao centro original da tinta; **alvos geométricos**, não pixels renderizados de uma candidata instalada.
+
+| Caso | A0 dX / dY / E | A2 dX / dY / E | Gate por caso |
+| --- | --- | --- | --- |
+| `14#0` | 22,187 / 2,624 / 22,341 | 0,703 / 5,931 / 5,973 | **Reprova:** erro absoluto Y +3,308 |
+| GO3 `0020#0` | 4,000 / −13,500 / 14,081 | 3,657 / −12,805 / 13,317 | Passa apenas este gate |
+| GO3 `0020#1` | 1,001 / 10,499 / 10,547 | 1,496 / 9,632 / 9,747 | Passa apenas este gate |
+| GO3 `0029#0` | 25,299 / −16,395 / 30,147 | 0,878 / 8,587 / 8,632 | Numérico passa; mudança de componentes limita interpretação |
+| GO4 `0010#2` | 5,814 / 1,304 / 5,958 | −8,304 / 14,571 / 16,771 | **Reprova:** E +10,813; erro absoluto Y +13,267 |
+| MUP74 `0007#3` | 10,628 / 1,733 / 10,768 | 8,685 / 3,234 / 9,268 | **Reprova:** erro absoluto Y +1,501 |
+| MUP74 `0007#4` | −11,137 / 15,996 / 19,491 | −5,046 / −6,284 / 8,059 | Passa apenas este gate |
+
+As três reprovações bastam para encerrar A2. A piora herdada de `11#4` no resize não concede exceção a esses casos.
+
+##### Os dez ganhos históricos e os negativos
+
+Tabela sobre a **aquisição real atual de none**, não substituição retroativa de H9. Os 102 pares de H9 eram do probe de referência; os 106 elegíveis atuais não são todos aquele mesmo tipo de par.
+
+| Caso | E aberto / cru / A2 | Decisão A2 | Causa demonstrada ou pendência |
+| --- | --- | --- | --- |
+| `14#0` | 22,341 / 6,242 / 5,973 | Aceita, mas reprova Y | Junção real; abertura altera a região adjacente. Imagem examinada |
+| GO3 `0016#2` | 15,722 / 14,192 / 15,722 | `shareHigh` | Causa visual do parceiro ainda não demonstrada |
+| GO3 `0016#5` | 35,895 / 14,991 / 35,895 | `shareHigh` | Idem; ganho cru não implica ganho na peça aberta |
+| GO3 `0020#0` | 14,081 / 12,714 / 13,317 | Aceita | Ganho inferior a 1 px; insuficiente para justificar aquisição extra |
+| GO3 `0020#1` | 10,547 / 8,978 / 9,747 | Aceita | Idem |
+| GO3 `0020#7` | 13,901 / 10,641 / 13,901 | `shareHigh` | Sem causa visual demonstrada |
+| GO3 `0020#8` | 11,537 / 6,504 / 11,537 | `shareHigh` | Sem causa visual demonstrada |
+| GO3 `0020#9` | 23,181 / 6,863 / 23,181 | `shareHigh` | Dois anéis abertos; relação entre componentes não certificada |
+| GO3 `0029#0` | 30,147 / 9,171 / 8,632 | Aceita | Junção verdadeira, mas a abertura também separa componentes; imagem examinada |
+| MUP62 `0023#5` | 19,461 / 9,309 / 19,461 | `shareHigh` | Dois anéis abertos; sem causa visual completa |
+| `11#8`, negativo | 9,309 / 62,440 / 9,309 | `beyondOpeningRadius` | Seleção crua conectada à arte; 88 anéis contra 1. Não é só franja de raster |
+| GO3 `0018-0019#1`, negativo | 12,954 / 76,028 / 12,954 | `boundaryCrossing` | Cauda, cabelo e arte conectada; 343 anéis contra 1. Geometria real |
+| MUP74 `0007#0`, negativo | 0,098 / 7,979 / 0,098 | `shareHigh` | Grito desenhado com pontas reais; 1 anel em cada representação |
+
+O cru do negativo GO3 resulta em 76,028 px nesta captura, enquanto a leitura histórica de H9 dava aproximadamente 74,881 px. Não são medições intercambiáveis: captura/cópia da seleção, pontos preservados e chamada produtora diferem. Nenhum desses valores foi usado para escolher um limiar salvador.
+
+Controle `11#2`: a partição atual é preservada; trocar pelo cru pode produzir erro próximo de 277 px. Pior caso MUP64 `0007#2`: A2 mantém E 353,833 px porque não há par admissível cru.
+
+##### Distribuição e acionamento
+
+Grupos congelados de `170-none/cases.json`, com `caseClass.js`. Quantil de índice `floor(p*n)`.
+
+| Grupo | n | p50 A0→A2 | p75 | p95 | Máximo | >10 | >25 | >50 |
+| --- | ---: | --- | --- | --- | --- | --- | --- | --- |
+| TOTAL | 106 | 7,23→7,23 | 13,14→12,95 | 34,91→34,91 | 353,83→353,83 | 40→36 | 9→8 | 3→3 |
+| texts:1 | 61 | 4,15→4,15 | 8,86→8,86 | 19,46→19,46 | 61,72→61,72 | 13→13 | 3→3 | 1→1 |
+| texts:2 | 30 | 13,29→11,54 | 19,49→16,58 | 110,30→110,30 | 353,83→353,83 | 21→17 | 5→4 | 2→2 |
+| texts:3+ | 15 | 7,43→7,43 | 12,30→12,30 | 26,44→26,44 | 26,44→26,44 | 6→6 | 1→1 | 0→0 |
+| normal | 31 | 4,05→4,05 | 7,56→7,56 | 34,91→34,91 | 39,54→39,54 | 5→5 | 2→2 | 0→0 |
+| cut | 28 | 5,41→5,41 | 12,82→12,82 | 19,46→19,46 | 61,72→61,72 | 8→8 | 1→1 | 1→1 |
+| scream | 2 | 9,31→9,31 | 9,31→9,31 | 9,31→9,31 | 9,31→9,31 | 0→0 | 0→0 | 0→0 |
+| leak | 45 | 10,77→10,12 | 19,06→15,72 | 35,90→35,90 | 353,83→353,83 | 27→23 | 6→5 | 2→2 |
+
+Esses resumos favoráveis não anulam os gates individuais. `texts:1` não é rótulo manual de balão único; os três negativos foram examinados geometricamente.
+
+O gatilho avaliado é “o caminho aberto chegou ao solver, mas não produziu partição utilizável”. Ele acionaria **80/106** vezes: **61/61 texts:1**, 18/30 texts:2 e 1/15 texts:3+. A2 aceita sete propostas, preserva 24 partições atuais e mantém 75 fallbacks; dois casos seguem pelo fallback atual sem entrada do solver. Os 106 elegíveis tiveram alvo/movimento, sem falha sem alvo neste cenário. “Acionamento” não significa melhoria: 73 dos 80 terminam sem novo corte.
+
+O resultado raster realmente medido pertence somente ao baseline: E p50 7,07; p75 13,04; p95 34,79; máximo **354,29**; >10 = 39, >25 = 9, >50 = 3. Mantém-se a distinção do máximo geométrico 353,83. O auditor encontrou resíduo de movimento máximo **0,499916 px por eixo** no corpus. Não se inventou raster nem segunda passada da candidata offline.
+
+#### B — experimento isolado de limpeza
+
+Foi testada simplificação Ramer–Douglas–Peucker de cada anel completo, com erro limitado em **pixels de documento**, sem A2. Orçamentos congelados antes de B: 0 (controle cru), 0,5, 1, 2 e 4 px. A região simplificada alimenta o solver atual; recusa retorna ao motor atual. A simplificação não usa comprimento total do contorno para definir a escala e não trabalha nos mesmos 400 pontos já reduzidos de H9.
+
+Ela elimina oscilações cujo afastamento do segmento substituto cabe no orçamento; mantém cantos que exigem afastamento maior. Isso não distingue uma cauda de uma junção verdadeira com suporte semelhante. Também não prova equivalência topológica de toda simplificação possível; não é uma implementação pronta para produção.
+
+Controles sintéticos: duas regiões circulares unidas, mantendo a junção conhecida, com quantização/variação de fase e oscilação de borda. São **modelos de contorno**, não uma simulação completa do antialias do Photoshop. Em 12 combinações, a junção permaneceu e houve um corte; o erro máximo ficou dentro do orçamento. A partir de 1 px, a variação angular total caiu para menos de um quarto da inicial; em 2 px caiu de aproximadamente 1703–1778 para 13,6–13,8 rad. Isso demonstra remoção da oscilação sintética, além da redução do número de vértices.
+
+| Orçamento | Entradas acionáveis | Cortes aceitos | Reprovações pelo gate numérico |
+| --- | ---: | ---: | ---: |
+| Cru, sem filtro | 80 | 19 | 10 |
+| 0,5 px | 80 | 19 | 9 |
+| 1 px | 80 | 19 | 9 |
+| 2 px | 80 | 19 | 9 |
+| 4 px | 80 | 19 | 8 |
+
+**Os três falsos cortes conhecidos continuam tendo corte em todas as variantes.** `11#8` permanece próximo de 61–63 px; o grito permanece com 2–3 cortes. Na cauda de GO3, o filtro pode reduzir E para 3,04 px, mas ainda produz um corte indevido. É um exemplo direto de por que a pontuação contra o typesetter não substitui o gate geométrico.
+
+Conclusão de B: limpeza limitada remove o ruído que foi introduzido no controle e conserva a junção, mas não separa os negativos reais. Esta implementação é reprovada. Não foi feita combinação A+B nem escolhida uma abertura maior após a falha. Outras famílias de filtros só voltam com um defeito removível demonstrado e um discriminante diferente.
+
+#### Frente unilateral
+
+A imagem da mesma aquisição do caso MUP64 `0007#2` confirma uma borda de quadro à direita em x≈2470; canvas de largura 2700. O cru possui 435 vértices a até 1,5 px dessa reta, cobrindo y=2754…3600, com desvio máximo observado de 1 px. A evidência não vem apenas do bbox.
+
+A outra fronteira acompanha o personagem/arte. A maior concavidade registrada no cru é aproximadamente **0,904 rad**, acima do limiar forte 0,6; não existe segundo parceiro admissível (`shallow:90`, segundo valor zero). Filtrar o cru não cria esse parceiro.
+
+O perfil horizontal de largura do cru varia, por exemplo: 675 px em y≈2755, 664 em 2861, 840 em 3124, 617 em 3283 e 164 em 3599. Isso não demonstra uma cintura entre balões identificáveis na imagem: há recorte real por arte e regiões de texto compartilhando espaço branco, sem três lobos desenhados demonstrados. O rótulo histórico de cadeia não basta para autorizar uma separação.
+
+Nos controles analíticos recortados por uma reta conhecida, a largura identifica a cintura do duplo (70→36,06→70) e não a de um círculo único (36,06→70→36,06). Entretanto, uma região única com entalhe verdadeiro também produz 69,62→36→69,62. Logo, “cúspide contra reta + cintura” ainda precisa de população e controles reais que distingam a classe, além do perfil.
+
+**Estado:** condição de entrada examinada, separador não validado. Não foi ajustado gap/neck/concavidade, escolhida corda pelo typesetter nem extrapolada área fora do quadro. Próximo dado necessário: junção unilateral real com origem da reta e pertencimento dos lobos demonstrados, acompanhada de negativos recortados semelhantes. Esses exemplos independentes não estão disponíveis.
+
+#### Reserva de ordem e pares
+
+`diagSequence.jsx` agora distingue os dois fluxos e observa sondas, entradas da imagem (visibilidade/caixas dos textos), seleção, anéis abertos, caixa ativa, execução real e alvo. `runSequence.ps1` registra identidade, usa cópia exclusiva por label, verifica originais e conserva a cópia. Régua, wrappers e documento previamente ativo são restaurados.
+
+Resultados no bundle de `f9ad1f6`, em `11.psd`, resize desligado:
+
+| Caso, índice completo da página | Diferença entre ordens | Cortes forward/reverse |
+| --- | ---: | --- |
+| `11#4` | 49,244 px | 3 / 3 |
+| `11#3` | 37,483 px | 2 / 1 |
+| `11#2` | 9,487 px | 2 / 2 |
+| `11#5` | 6,083 px | 0 / 0 |
+
+Os quatro valores se repetiram tanto no fluxo marquee quanto no atalho. Em todos: mesma caixa inicial da ativa e mesmas coordenadas de sonda; posições de vizinhas diferentes; contornos diferentes. O bbox cru igual não torna as seleções iguais. No atalho, a decisão registrada foi dirty nesses casos; não se pode atribuir o resultado a uma escolha clean que não ocorreu.
+
+A segunda varredura move até **66,940 px**, reproduzindo a limitação dos arquivos históricos. O índice 3 do diagnóstico sequencial corresponde ao índice completo 4 do corpus, porque a camada oculta inicial é excluída do coletor sequencial.
+
+Os registros de imagem são posições/visibilidade da tinta, não hashes de todos os pixels. O replay das 88 chamadas observadas concordou com a execução real, com diferença máxima de cerca de 5,0×10⁻¹²; o resíduo de movimento máximo foi 0,499839 px por eixo.
+
+**Nulos da sequência:** marquee passou integralmente. No atalho, centros, caixas, decisões, alvos e sondas coincidiram, mas um anel secundário da primeira varredura de `twice`, índice visível 1, apresentou quantidade de vértices diferente. O nulo integral de entrada foi **reprovado**, ficou registrado em `sequence-audit.json` e o auditor retornou erro. `nullMax=0` nesse arquivo descreve somente comparações que passaram; não apaga `nullDifferences`. Essa divergência não foi atribuída automaticamente ao observador ou à rasterização. Não certifica pequenas mudanças de geometria nesse caminho.
+
+**Controle causal executado:** em uma cópia nova, mantendo a ativa `11#4` fixa e sem resize, foram reproduzidas as disposições das vizinhas da ordem forward, reverse e forward novamente. As caixas de todas as entradas coincidiram com as prescritas, com resíduo zero. Os centros resultantes foram `(1177,5;1879)`, `(1132,5;1859)` e `(1177,5;1879)`: reprodução exata dos 49,244 px e retorno exato ao primeiro destino. Os polígonos recebidos pelo solver também coincidiram integralmente com os respectivos registros da sequência.
+
+Portanto, neste caso a disposição das vizinhas é suficiente para reproduzir a diferença sem executar a ordem inteira. Isso demonstra um mecanismo da dependência de ordem; não demonstra invariância universal do estado interno nem fornece uma regra segura para remover a tinta das vizinhas.
+
+Não foi introduzido cache/histerese. A/B não produziram um sinal novo que escolha pares admissíveis de forma generalizável; o oráculo de 885 px continua sendo oportunidade documentada, não implementação. Não se repetiu “segundo par”, busca em todas as passagens ou monotonicidade em direção ao texto.
+
+#### Validação, custo e encerramento
+
+As capturas de A/B contêm **107 camadas, 106 elegíveis, 212 passagens**. Replay das execuções: diferença numérica máxima de aproximadamente **5,0×10⁻¹² px**; residual de posicionamento abaixo de 0,51 px por eixo. Três passagens em GO4 chegam ao fallback sem entrada do solver; continuam pontuadas pelo alvo/movimento que realmente ocorreu, sem fabricar partição.
+
+| Gate/escopo | Estado |
+| --- | --- |
+| Fonte/bundle/observador | 214 verificações de equivalência, incluindo fixtures e dados locais; aprovadas |
+| Testes existentes | `testBalloonCentroid`, `testSelectionOpening` e `compareRuns --selfcheck` aprovados |
+| Nulos finais de captura | `14`, GO4 `#2/#6/#7`, MUP74 `#3/#4`, e overlap `11#2/#8`; arquivos de auditoria preservados |
+| Nulo da sequência | Marquee integral aprovado; atalho com divergência em um anel secundário, sem diferença final de centro/alvo/cortes: integral reprovado e limitação registrada |
+| Controle causal de ordem | Três disposições forward/reverse/forward; ativa fixa; destinos e polígonos reproduzidos exatamente |
+| Geometria real/rastro | População e execução auditadas; valores não finitos/ausências bloqueiam |
+| A por caso | Reprovado em três casos |
+| B numérico e falso corte | Reprovado em todos os orçamentos; três negativos continuam cortados |
+| Resize e cinco outros cenários completos | Não executados para candidatas reprovadas; ganho de Task32 não foi revalidado por esta rodada |
+| Seleção/DPI/régua/TextShapeR/Multi Bubble de candidata | Sem candidata sobrevivente; integração de porte não executada |
+| Validação independente | Não disponível |
+| Desempenho de produção | Não medido; não aprovado |
+
+O total das páginas válidas de captura é aproximadamente **1126,5 s**, além de 107,4 s da tentativa de página que falhou na serialização. A memória observada ficou aproximadamente entre 2,79 e 3,07 GB nesses blocos. São tempos de laboratório: incluem duplicatas, tracing, medições de tinta e duas passagens. Não equivalem ao custo de um Align com a futura regra.
+
+Houve reinício normal do Photoshop após verificar ausência de documentos do usuário, diante de possível degradação. A lentidão observada não ficou causalmente demonstrada como efeito de memória. Os commits externos também alteraram desempenho durante a sessão. Nenhum A/B intercalado de produção foi certificado; o teto de +15% não foi dispensado. O gatilho em 80/106, especialmente 61/61 textos simples, torna esse custo uma objeção concreta a resolver, não um detalhe aritmético.
+
+Condições de parada foram atingidas por A e B. Unilateral fica condicionada a dados e geometria discriminantes; ordem tem um diagnóstico reproduzível, sem regra aprovada; pares ficam sem novo seletor. Os ganhos anteriores da Task32 não foram reimplementados nem revertidos.
+
+#### Arquivos e reprodução
+
+Código da investigação: `scripts/lab/instrumentPartition.js`, `task33Analysis.js`, `task33ContourNoise.js`, alterações em `measureCentering.jsx`, `runMeasure.ps1`, `diagSequence.jsx`, `runSequence.ps1`, e `scripts/testTask33.js`. Sem dependência nova ou payload de produto novo. `app_src/host.js`, bundles de produção e arquivos do PR #2 não foram editados por esta investigação.
+
+Dados locais, não versionados: `.centering-lab/task33/results/`, `bundles*/`, runs `task33-*`, máscaras e recortes PNG. O histórico Git não contém esses PSDs nem toda essa evidência. O relatório presente registra os resultados; os JSON/CSV locais permitem auditoria direta nesta máquina.
+
+Resultados por caso:
+
+- `.centering-lab/task33/results/A-first-nine-final/{result.json,cases.csv}`: 66 elegíveis de nove páginas concluídas do run parcial.
+- `.centering-lab/task33/results/A-remaining-six-final/{result.json,cases.csv}`: 40 elegíveis das seis páginas retomadas.
+- `.centering-lab/task33/results/B-final.json`: B, incluindo erros assinados, cortes, gate por caso, auditoria de entrada e controles sintéticos.
+- `.centering-lab/task33/results/unilateral-entry.json`: origem observada da reta, perfil real e controles analíticos.
+- `.centering-lab/diag-seq-task33-{current,base}-{marquee,shortcut}-11.json`: sequência e seus nulos.
+- `.centering-lab/task33/results/sequence-audit.json`: divergência de anel explicitamente registrada; não é aprovação integral do atalho.
+- `.centering-lab/task33/results/order-control.json`: controle causal de três disposições, sem algoritmo candidato.
+- `.centering-lab/task33/results/null-*/result.json`: auditorias dos nulos de captura.
+
+Comandos a partir da raiz; outputs existentes nunca são sobrescritos. Análise não precisa abrir Photoshop:
+
+```powershell
+node scripts/testTask33.js
+node scripts/testBalloonCentroid.js
+node scripts/testSelectionOpening.js
+node scripts/lab/compareRuns.js --selfcheck
+
+# Saída em stdout; gate de candidata reprovado define exit code 2 no Node.
+node scripts/lab/task33Analysis.js --completed-only task33-v3-none-corpus
+node scripts/lab/task33Analysis.js task33-v4-none-remaining
+node scripts/lab/task33Analysis.js --null task33-v6-final-base-mup74 task33-v6-final-observed-mup74
+
+# Novo nome de arquivo é obrigatório.
+node scripts/lab/task33ContourNoise.js task33-v3-none-corpus task33-v4-none-remaining .centering-lab/task33/results/B-recheck.json
+
+# Helpers locais de inspeção, criados nesta rodada; não estão no Git.
+python .centering-lab/task33/renderCapture.py task33-v4-final-observed-go4
+# checkUnilateral.js e checkSequence.js recusam sobrescrever seus resultados.
+```
+
+Exemplo de uma nova captura pequena, já com opções existentes. Alterar o ID antes de repetir; isto abre o Photoshop e a cópia do PSD:
+
+```powershell
+$raizTask33 = (Get-Location).Path
+$runTask33 = 'task33-recheck-14'
+$entradaTask33 = Join-Path $raizTask33 ".centering-lab/runs/$runTask33/in"
+if (Test-Path -LiteralPath $entradaTask33) { throw 'Use um ID novo' }
+New-Item -ItemType Directory -Path $entradaTask33 | Out-Null
+Copy-Item -LiteralPath (Join-Path $raizTask33 'psd/14.psd') -Destination $entradaTask33
+& './scripts/lab/runMeasure.ps1' -Root $raizTask33 -Run $runTask33 `
+  -HostJsx '.centering-lab/task33/bundles/observed.jsx' `
+  -Only '14.psd' -Indices '0' -LiveSelection -PhantomRatio .15 `
+  -TraceGeometry -CaptureAcquisition -CaptureMasks -KeepCopies
+
+# Reserva: label novo, cópia preparada pelo próprio driver.
+& './scripts/lab/runSequence.ps1' -Root $raizTask33 -Page '11.psd' `
+  -Label 'task33-sequence-recheck' -HostJsx '.centering-lab/task33/bundles-f9ad1f6/observed.jsx' -NoSelection
+```
+
+Rollback de candidatas: nenhum porte ocorreu. Manter o motor atual como fallback; não substituir movimento por “não mover”. Não fazer reset do working tree, não desfazer os commits concorrentes, não instalar o bundle inicial por cima da versão atual do usuário. Originais e manifesto permanecem somente leitura; cópias de diagnóstico conservadas e documentos fechados sem salvar.
+
+#### Próxima decisão
+
+Uma **Task 34 — planejada**, caso seja aberta, deve começar por ablações das vizinhas no controle causal já construído: variar uma por vez, identificar a alteração concreta na seleção/abertura e procurar um sinal de aquisição disponível em runtime. Resolver primeiro o nulo de anéis se a hipótese depender de diferenças pequenas. Não é autorização para esconder todos os textos, aplicar cache ou retunar pares.
+
+Para unilateral ou outro filtro, adquirir exemplos específicos quando existirem: junção perdida, unilateral realmente delimitada, entalhe/cauda legítimos e controles com raster variável. Separar descoberta de validação; os dados atuais não viram holdout por terem sido recapturados.
+
+O primeiro experimento que agora mais reduz a incerteza é **isolar qual vizinha e qual parte da aquisição geram o deslocamento reproduzido pelo controle causal**, sem alterar o solver. Nenhuma nova candidata de produção está aprovada.
+
+<a id="task-33-plano-de-entrada"></a>
+
+<details>
+<summary>Plano de entrada da Task 33 — hipóteses e gates congelados antes da execução</summary>
+
+### Próxima investigação de centralização — TypeR
+
+**Plano de entrada da Task 33, congelado quando estava planejada.** Preparado em 09/09/2026, após leitura integral e cronológica do `plano.md`. O texto abaixo conserva as hipóteses e os gates anteriores aos experimentos. A execução foi posteriormente autorizada e concluída em 09–10/09, sem porte: [resultados completos da Task 33](#task-33-resultados). Resultados executados estão nesse relatório, não nas previsões preservadas aqui.
+
+#### 1. Veredito e estado verdadeiro
+
+**Vale uma rodada curta de investigação, com possibilidade explícita de terminar sem porte.** A prioridade é descobrir se uma junção localizada no cru pode separar uma peça válida do aberto. Há informação recuperável demonstrada em H9 e um sinal geométrico novo nos dados locais. Ainda não há separador demonstrado para todos os falsos cortes, nem custo aceitável demonstrado no Photoshop.
+
+A limpeza de ruído deixa de ser a explicação presumida: os negativos incluem geometria desenhada real. A frente unilateral fica condicionada a confirmar exemplos dessa classe; o maior erro do corpus, sozinho, não a justifica.
+
+##### Identidade e alcance da leitura
+
+| Item | Estado conferido |
+| --- | --- |
+| Branch e HEAD local | `develop`, `bf54511d0be87091379c3509f2afb6f846576d33` |
+| HEAD remoto de `origin/develop` | Mesmo SHA, confirmado com `git ls-remote` no início e no fim da investigação |
+| Árvore local antes da criação deste plano | Limpa; nenhuma alteração local a absorver ou reverter |
+| Instruções locais | Nenhum `AGENTS.md` ou `CLAUDE.md` encontrado na árvore relevante ou nos diretórios ancestrais; restrições do pedido e do `plano.md` preservadas |
+| Última tarefa de centralização | Task 32; próximo número confirmado: **33** |
+| Posterior à Task 32 | Melhorias de treinamento/leitura de páginas, aplicação do TextShapeR à camada correta e preservação da camada ao restaurar histórico |
+| Núcleo de centralização | Corpos de oito funções centrais, incluindo aquisição, abertura, partição, pertencimento, Align e posicionamento, idênticos entre `57ecdbb` e HEAD |
+| Bundle local e instalado em `Adobe/CEP/extensions/typertools/app/host.jsx` | SHA-1 `35493a7a9f23ed56043acb00fe11b5dace737283`, iguais em disco |
+| Bundle efetivamente carregado no Photoshop | **Não verificado nesta etapa**; não foi feita chamada ao Photoshop |
+| Originais | 15 PSDs em `psd/` e 15 em `true/`; 30 hashes conferidos contra o manifesto, zero divergências |
+| PR #2 | Fechado, não mergeado, head `d09ef24d975be21a265869990183fbc40b571092`; nenhuma operação sobre ele |
+
+O histórico recente importa mesmo com as funções geométricas iguais: o bundle atual difere do medido na Task 32, e houve alteração em um helper compartilhado de histórico. Portanto, igualdade do solver não certifica toda a integração atual.
+
+**Versionado:** `plano.md`, motor, testes, fixtures e todos os scripts de laboratório citados no pedido. **Somente local:** `.centering-lab/`, PSDs, manifesto, relatórios, CSVs, composites, diagnósticos e runs. A presença local permite conferir números; não torna esses dados disponíveis em um clone do GitHub.
+
+Fontes versionadas: [histórico e plano](https://github.com/PauloKutscher/TypeR/blob/bf54511d0be87091379c3509f2afb6f846576d33/plano.md), [motor](https://github.com/PauloKutscher/TypeR/blob/bf54511d0be87091379c3509f2afb6f846576d33/app_src/host.js), [captura](https://github.com/PauloKutscher/TypeR/blob/bf54511d0be87091379c3509f2afb6f846576d33/scripts/lab/measureCentering.jsx), [replay](https://github.com/PauloKutscher/TypeR/blob/bf54511d0be87091379c3509f2afb6f846576d33/scripts/lab/replayPartition.js) e [PR #2](https://github.com/PauloKutscher/TypeR/pull/2).
+
+#### 2. Estado consolidado e correções do histórico
+
+##### O que a Task 32 já entregou
+
+Preservar como baseline, sem reapresentar como candidatas:
+
+- Procurar o próximo par admissível após uma recusa **somente antes do primeiro corte**; orçamento atual de três tentativas.
+- Recusar extensão abaixo da área cumulativa mínima, mantendo o prefixo válido.
+- Usar a caixa anterior ao resize para pertencimento e a posterior para posicionar.
+- Preferir pertencimento inequívoco à peça; teste de lado continua como fallback.
+- Auditar população, manifesto, opções, repetição e ruído de rasterização por experimentos nulos.
+
+O solver tem um único chamador em produção: `_alignCurrentTextLayerToSelection`. Paste e Multi Bubble compartilham abertura/centroide/posicionamento, mas não chamam a partição. Alterar aquisição compartilhada pode afetá-los mesmo que a partição continue exclusiva do Align.
+
+##### Resultados históricos verificados diretamente
+
+Reexecutados em Node v26.5.0, sem Photoshop: testes de centroide e abertura, self-check do avaliador, seis comparações `170-*` contra `180-*`, dois nulos e resumos dos JSONs existentes. Todos esses comandos terminaram com código 0. Isso verifica artefatos existentes; não constitui nova medição do HEAD no Photoshop.
+
+| Cenário | Elegíveis / comparáveis | Melhoraram / iguais / pioraram | Não resolvidos herdados |
+| --- | --- | --- | --- |
+| none | 106 / 106 | 0 / 106 / 0 | 0 |
+| mid | 106 / 106 | 1 / 105 / 0 | 0 |
+| full | 106 / 106 | 2 / 104 / 0 | 0 |
+| overlap | 106 / 104 | 0 / 104 / 0 | 2 |
+| resize + padding 12 | 106 / 106 | 10 / 95 / 1 | 0 |
+| overlapmid | 106 / 105 | 0 / 105 / 0 | 1 |
+
+São 107 camadas por cenário, uma oculta excluída, 636 entradas elegíveis e **633 comparações**. Repetições da mesma camada em cenários distintos não são amostras independentes.
+
+| Distribuição de E | Antes | Depois |
+| --- | --- | --- |
+| Agregado: p50 / p75 / p95 / máximo | 7,3 / 16,0 / 78,7 / 354 px | 7,2 / 14,9 / 65,0 / 354 px |
+| Agregado: >10 / >25 / >50 px | 254 / 99 / 57 | 248 / 88 / 46 |
+| Resize, `texts:3+`: p95 / >50 px | 241,8 px / 6 | 26,3 px / 0 |
+| Resize, `11#4`: E | 6,8 px | 26,3 px |
+
+As três entradas não comparáveis são `smallSelection` nos dois motores: `GO_…4話_2023~0010#7` em overlap e `MUP_育成…74話-1_2023~0007#3` em overlap e overlapmid. Não entram como erro zero nem como acertos.
+
+Os bundles dos runs finais são `4fdd163d7a3c73f8597c55877bbf3db437fb0f48` e `d22925dbdd7b304378954e78fd490835a162028b`. As doze corridas `170/180` têm harness `b030a42cd7a85f703d607df70179c197ae5f8a56`. O harness atual tem SHA-1 `a08b8df26f410bda7054da5847db9ac47bbef717`; o run 190 registra outro hash. Não juntar essas aquisições como uma única campanha homogênea.
+
+##### O que ainda é documental ou incompleto
+
+- O relatório local da Task 32 contém resultados intermediários, inclusive reprovação de overlapmid e bundles anteriores. A seção final do plano e os `170/180` prevalecem para o resultado consolidado.
+- O oráculo de **885 px em 19 casos** está documentado no plano para seu baseline/população. O início de `task32-report.md` relata **1266 px em 23 casos** sobre uma população anterior de 392 regiões. Não confundir os experimentos. A receita e o resultado por caso do oráculo de 885 px não foram localizados; não foi refeito nesta preparação.
+- DPI: os JSONs locais nomeados `diag-dpi-base/cand.json` confirmam diferença de alvo 0 e mesmos números de cortes entre resoluções. Não certificam o bundle atualmente carregado.
+- `diag-capture-cand.json` tem **zero bytes**. A integração de captura da candidata está documentada, mas esse arquivo não permite verificá-la. Existem diagnósticos antigos válidos de preservação de seleção; não substituem a candidata.
+- Sequência: `diag-seq-base/cand-11.json` confirma 84,9 para 49,2 px de diferença máxima entre ordens. Entretanto, a segunda varredura ainda move até **66,9 px**, índice 3, nos dois arquivos. “Igual entre motores” não significa “imóvel”.
+- Na ordem inversa de `13.psd`, os arquivos base/cand diferem em dois centros, por 37,9 e 10,0 px; as duas varreduras consecutivas são iguais entre eles e ainda movem até 4 px. Esses diagnósticos não registram hash do host/harness: registrar divergência com o resumo “idênticos”, sem atribuí-la automaticamente ao HEAD.
+- Desempenho real permanece inconclusivo. Tempo aritmético em Node não mede recomposição, seleção, path, leitura nem monitor.
+
+##### Errata proposta para `plano.md`, sem apagar registros anteriores
+
+Acrescentar um bloco “Estado consolidado após Task 32” e marcar os trechos antigos como históricos:
+
+| Trecho | Correção proposta |
+| --- | --- |
+| Objetivo inicial, 10/14 páginas, 28 PSDs, múltiplos fora de escopo | Estado vigente: 15 páginas de desenvolvimento, 30 originais, múltiplos já investigados e implementados |
+| `11.psd` como holdout, decisões 1–3 | Válido nas Tasks 25–30; deixou de ser holdout na Task 31 |
+| H9 “ainda não medida”, linhas 1226–1234 | H9 medida: sinal recuperável confirmado; substituição geral e fallback ingênuo rejeitados |
+| “Um filtro ficaria com dez ganhos sem três falsos” | Hipótese não comprovada; há negativos com geometria real |
+| “A informação não está na imagem” | A ausência medida foi no miolo das cordas; não exclui silhueta, extremos ou fronteiras observadas |
+| “A aquisição não é o problema” | Conclusão limitada à população, referência e métrica daquela análise; não prova preservação de detalhe ou topologia |
+| `motor atual: 041-*`, comandos de 10 PSDs e arquitetura inicial | Identificar revisão de cada época; usar baseline novo para a próxima rodada |
+| “segunda varredura igual” e “13 idêntico” | Distinguir igualdade entre builds de estabilidade e registrar a divergência encontrada nos arquivos locais |
+
+**Reconciliação do mapa:** as quatro linhas históricas somam 530, não 529; a tabela seguinte de grupos “sem corte” soma 390, não 386. Não há ledger por caso nem receita preservada suficiente para identificar qual linha causal foi escrita errada. Não corrigir um número por palpite.
+
+Um ledger verificável, exclusivamente por estado final, fornece:
+
+| Cinco cenários sem resize | Elegíveis | Com alvo e sucesso | Partição usada | Cortes produzidos, alvo recusado | Sem corte | Falha sem alvo |
+| --- | --- | --- | --- | --- | --- | --- |
+| `170-*` | 530 | 527 | 140 | 1 | 386 | 3 |
+| `180-*` | 530 | 527 | 143 | 2 | 382 | 3 |
+
+As três falhas são aquelas nomeadas acima. Essa tabela reconcilia a população **sem inventar uma atribuição causal à aquisição**. O replay atual chega a 529 erros finitos porque cria dois fallbacks para chamadas que terminaram em `smallSelection`; isso não prova que foi a origem do “529” histórico. A próxima rodada deve gerar seu mapa a partir dos estados auditados e adicionar causas somente onde demonstradas.
+
+Os **53,8% são da massa sem corte**, não da massa total. Mesmo o produto das porcentagens históricas seria cerca de 37,3% do total, sujeito aos problemas de população; não reutilizá-lo como estimativa atual.
+
+##### Frentes que não voltam sem premissa nova
+
+Já implementadas ou rejeitadas conforme a cronologia: afrouxamento global de gap/neck/share/concavidade/cortes; busca de pares em passagens posteriores; teto global de dois cortes; cru geral ou fallback ingênuo; escolha por rank, proximidade ao texto, contenção isolada ou monotonicidade; vizinhas como sementes; esconder todos os textos; veto clean/dirty; busca global, DT, fixed-point e multi-escala nos mesmos 400 pontos; traço apagado no miolo da corda; reconstrução de círculo/elipse com arco insuficiente; offset óptico constante, caixa tipográfica e estreitamento indiscriminado.
+
+Uma implementação negativa não elimina toda a família. Reabertura exige informar **a premissa alterada, um sinal novo disponível em runtime e um teste diferente**. Os seis resíduos distintos de balão único não justificam alteração tipográfica global.
+
+#### 3. Condição de entrada: diagnóstico mínimo confiável
+
+Não reconstruir a bancada. Corrigir apenas os pontos necessários aos experimentos abaixo, antes de pontuar uma candidata.
+
+##### Rastro da execução
+
+Em `measureCentering.jsx:124`, a reconstrução auxiliar ignora novas tentativas, exceção de cintura e guarda cumulativa. `traceCuspCandidates` omite parceiros assistidos. Diagnóstico com as fixtures e funções atuais reproduziu:
+
+| Fixture | Cortes reais | Reconstrução antiga | Diferença de centro |
+| --- | --- | --- | --- |
+| chainTop | 1 | Para em share | 13,7 px |
+| chainMiddle | 2 | Para depois do primeiro | 15,0 px |
+
+`engineCentroid` e `geometry.final` vêm da chamada real. Portanto, o defeito do rastro **não invalida as métricas finais por si só**.
+
+Na futura cópia laboratorial do motor, registrar eventos passivos dentro da execução real: passagem, tentativa, par, cúspides fortes/assistidas, guarda, share local/acumulado, peça retida e motivo do encerramento. Gravar o argumento `activeBox` efetivo e a caixa recebida pelo posicionador, além de alvo e movimento solicitado. Usar instrumentação apenas na cópia de laboratório e provar saída idêntica nas fixtures e no experimento nulo. Não manter outro solver explicativo.
+
+`overlayPartition.js` também reconstrói só o primeiro par e não a guarda cumulativa; usa o host do working tree. Passar a desenhar eventos capturados/replayados com revisão identificada. Overlays antigos devem aparecer como reconstruções, nunca como sequência executada.
+
+##### Aquisição e representações
+
+`CaptureRawOutline` atual ocorre em `probeTrueRegion`, antes de scatter, e refaz a varinha após traçar o cru. É um par do probe de referência, não necessariamente da aquisição usada pelo Align.
+
+Para cada aquisição relevante, associar um identificador único a:
+
+- documento e camada; hash da entrada; DPI/régua; posição real da sonda e sua tentativa;
+- visibilidade da ativa e IDs/estado das vizinhas escondidas; origem marquee, shape, dirty, clean ou estreitamento;
+- seleção anterior à abertura, raio solicitado/efetivo, componente e correspondência cru/aberto;
+- anéis completos lidos por AM **antes** da redução, unidades, contagens de âncoras e motivos de descarte;
+- amostras realmente entregues ao solver, caixa ativa, seleção escolhida, fallback e primeira/segunda passada.
+
+Preservar a mesma seleção por canal/snapshot; não parear contornos por bbox, primeiro ponto ou aparência. Capturar clean e dirty separadamente e apontar qual foi escolhido. Shape sem seleção não ganha um cru fictício.
+
+Para o subconjunto causal, guardar máscara cru/aberto e recorte do composite **no estado da aquisição**. Os demais anéis são necessários para componentes/buracos; os pontos anteriores à redução são necessários para ruído e suporte local. Os dumps de 400/401 pontos não permitem recuperar o detalhe descartado.
+
+Há mais um campo legado: `trueRegion.centroid` chama um helper removido e está nulo no run 190. O centroide do aberto está em `trueRegion.opened.centroid`; a ferramenta de leitura deve usar esse campo explicitamente.
+
+##### Replay e auditoria
+
+`replayPartition.js:75` decide a reconstrução da âncora olhando o working tree. Corrigir para o motor **efetivamente medido**, preferindo sempre o argumento gravado. Runs antigos com resize e âncora posterior não são reconstruíveis com o dado disponível.
+
+Provas nesta preparação:
+
+- `170-resize-pad12`, motor correto `012ef34`: **9 decisões divergentes**, erro máximo de alvo de replay **237,7 px**, e mesmo assim saída 0.
+- Cinco `180-*` sem resize: nenhuma divergência booleana “cortou/não cortou”, mas máximo **2,073 px** de diferença de centro em `full/0016#3`; fallback difere até **1,329 px**. Saída 0 também.
+- Nesses cinco runs há 527 chamadas resolvidas; o ranking imprime 529 erros finitos, incluindo fallbacks sintéticos para as duas falhas da página `育成…0007#3`.
+
+Antes do ranking, exigir auditoria de população, motor, entrada, fonte, decisão, peça e alvo. Ausência, exceção ou divergência não explicada impede pontuar aquela população. Imprimir “VALIDAÇÃO” não é aprovação. Não reamostrar o contorno inicial já amostrado; conservar a semântica das etapas posteriores do motor medido.
+
+Acrescentar uma auditoria de entrada estreita ao avaliador: manifesto de casos e originais, metadados obrigatórios, opções de captura, hashes e segunda passada. Hoje metadados ausentes geram só aviso, falhas nos dois lados podem não reprovar e o contador WORSENED não veta toda piora. Preservar o comparador histórico e acrescentar os gates novos da seção 5 **antes** das candidatas.
+
+#### 4. Hipóteses priorizadas
+
+##### Frente 1 — cru localiza; aberto define a região segura
+
+**Causa proposta:** a abertura perde uma junção útil, mas também elimina arte, caudas ou pontas que provocam cortes indevidos no cru. Precisamos distinguir perda de esquina de mudança de componente e de estrutura real de balão único.
+
+###### Evidência e tabela inicial
+
+No run `190-rawoutline`, 102/106 camadas têm ambos os contornos: 61 `texts:1`, 26 `texts:2`, 15 `texts:3+`. As quatro ausentes são `0010#6/#7` e `育成…0007#3/#4`, com `coversPage` na captura crua.
+
+Reproduzido sobre o mesmo probe, sem reamostrar novamente o contorno inicial: cortes aberto/cru = **0/3, 10/24, 14/11** por grupo. Cru geral continua rejeitado. Os dez ganhos abaixo são especificamente **novos cortes** em `texts:2`; pequenas mudanças de centroide sem corte não aumentam essa contagem.
+
+Abreviações: GO3 = `GO_やがて黒幕へと至る最適解3話_2023~`; MUP62 = `MUP_難攻不落の魔王城へようこそ62話_2023~`; MUP74 = `MUP_育成スキルはもういらない74話-1_2023~`.
+
+| Caso | E aberto / cru | Anéis cru / aberto | Classe causal inicial |
+| --- | --- | --- | --- |
+| 14#0 | 22,3 / 6,2 | 46 / 1 | Junção candidata recuperada; confirmar detalhe e componentes |
+| GO3 0016#2 | 15,7 / 14,2 | 31 / 1 | Ganho pequeno; confirmar contra nulo |
+| GO3 0016#5 | 35,9 / 15,0 | 67 / 1 | Junção candidata recuperada |
+| GO3 0020#0 | 14,1 / 12,7 | 42 / 1 | Ganho pequeno; causa não demonstrada |
+| GO3 0020#1 | 10,5 / 9,0 | 67 / 1 | Ganho pequeno; causa não demonstrada |
+| GO3 0020#7 | 13,9 / 10,6 | 87 / 1 | Junção candidata recuperada |
+| GO3 0020#8 | 11,5 / 6,5 | 56 / 1 | Junção candidata recuperada |
+| GO3 0020#9 | 23,2 / 6,9 | 49 / 2 | Junção candidata; associação de componentes obrigatória |
+| GO3 0029#0 | 30,1 / 9,2 | 7 / 2 | Junção candidata; associação de componentes obrigatória |
+| MUP62 0023#5 | 19,5 / 9,3 | 29 / 2 | Junção candidata; associação de componentes obrigatória |
+| **11#8** | **9,3 / 62,4** | 88 / 1 | Falso corte; cru incorpora área de arte/contorno irregular eliminada pela abertura |
+| **GO3 0018-0019#1** | **13,0 / 74,9** | 343 / 1 | Falso corte; balão com cauda/contato com arte; não demonstrado como mero ruído |
+| **MUP74 0007#0** | **0,1 / 8,0** | 1 / 1 | Falso corte em grito desenhado; concavidades reais entre pontas |
+| 11#2 | 11,9 / 277,5, documentado | Conferir na tabela completa | Controle de partição atual utilizável; preservar integralmente |
+| Fixtures chainTop/chainMiddle e singleBalloon | Gates existentes | Contornos das fixtures | Controles de junção legítima e balão único |
+
+Os rótulos de forma congelados classificam `11#8` e MUP74 como scream. Esses rótulos não são prova causal nem entrada permitida ao solver. A inspeção visual foi feita em composites locais existentes; o composite da página do pior caso abaixo coincide byte a byte com a composição do PSD atual pelo leitor existente. Para MUP74 essa comparação tem 593 pixels diferentes em 1.152.000; não presumir equivalência pixel a pixel para estudar ruído.
+
+**Sinal novo, apenas diagnóstico:** nos dois primeiros falsos cortes, a primeira corda aceita pelo solver cru tem 0/99 amostras internas no maior contorno aberto. Nos dez ganhos acima, são 88–99/99. Porém MUP74 também tem **98/99**. A correspondência pode eliminar alguns mecanismos ruins, mas sozinha ainda não demonstrou separar o grito. Isso prioriza A e refuta a promessa de que bastaria “tirar ruído”.
+
+Completar a tabela com cinco classes causais: junção perdida; irregularidade de raster/franja/retícula comprovada; cauda/entalhe/recorte real; componente/buraco/origem/amostragem; não demonstrado. Usar os rótulos somente para avaliação e descoberta.
+
+###### Experimento A — duas representações, papéis distintos
+
+- **População:** inicialmente as chamadas em que a partição atual não é utilizável, mais controles com corte atual preservado. Começar pelos dez ganhos, três negativos e controles da tabela; depois todos os elegíveis.
+- **Comparação isolada:** A0 motor atual no aberto; A1 solver atual no cru, comparador negativo; A2 cru propõe cordas e aberto fornece peça, área e alvo. Mesma caixa efetiva, estado e aquisição nos três braços.
+- **Correspondência:** identificar componentes e os trechos vizinhos aos endpoints; intersectar a corda proposta com a peça aberta e verificar correspondência única. Não transportar uma corda para um componente diferente ou prolongá-la para inventar outro corte. Múltiplas associações ou uma região já desconectada tornam o caso “mapeamento não demonstrado”, com fallback atual.
+- **Regra experimental:** manter a ordenação e os limites do solver atual; mudar apenas a origem da proposta e o domínio do cálculo. Não exigir cúspide forte no aberto. Conservar os cortes atuais quando utilizáveis e todas as guardas aplicáveis à peça final.
+- **Previsão:** algumas junções recuperadas continuam gerando peça aberta correspondente à ativa, enquanto cordas de estruturas eliminadas deixam de ser aplicáveis.
+- **Refutação:** persistência de falso corte, associação ambígua, peça incompatível com a ativa ou ausência de ganho relevante no aberto. O grito MUP74 é controle decisivo, não exceção a cadastrar.
+- **Primeiro teste barato futuro:** após a captura fiel do subconjunto, auditar correspondência completa e calcular a peça aberta para dois ganhos fortes, os três negativos e um controle já cortado. A checagem de interior feita nesta preparação é apenas a entrada desse teste.
+- **Diferença para Task 24:** cru/aberto são estágios da mesma seleção; clean/dirty são imagens com visibilidades diferentes. Não usar concordância clean/dirty como veto.
+
+###### Experimento B — remover somente ruído demonstrado
+
+B é uma ablação separada e **condicional**, não um filtro escolhido de antemão. Os negativos atuais já enfraquecem a hipótese de que todos sejam ruído.
+
+Medir nos pontos anteriores à redução e nas máscaras: amplitude, largura e suporte dos defeitos em pixels, relativos à espessura local do traço e à dimensão do balão. O perímetro global não será a única escala.
+
+Construir controles com a mesma geometria e junção, variando somente fase de rasterização, antialias e ruído. Incluir cauda, entalhe, ponta de grito e recorte reais na mesma escala. Testar uma única simplificação local limitada por erro: substituir oscilações curtas por segmentos, ancorando os cantos sustentados por trechos mais longos que o ruído. Proibir mudança de componentes, buracos ou cruzamentos.
+
+O orçamento geométrico vem dos controles de rasterização; escolher o menor que remova a perturbação conhecida mantendo a junção, e exigir faixa estável ao redor. Não escolher limiar pelo erro do typesetter. Se as escalas de ruído e junção/cauda se sobrepuserem, B é refutada antes de implementar filtro.
+
+Comparar cru sem filtro contra cru filtrado com o mesmo solver. Demonstrar preservação da junção e remoção do ruído, além de E. Recusar filtro que apague parceiro legítimo, preserve os falsos cortes reais ou funcione só num limiar estreito. Não repetir multi-escala nos mesmos 400 pontos, nem recomendar bilateral, reconstrução morfológica ou simplificação pelo nome.
+
+Combinar A+B somente se as ablações A, B e A+B mostrarem contribuição independente e todos os gates passarem.
+
+###### Gatilho e custo da frente 1
+
+Gatilho inicial mensurável: **Align com contorno/centroide válidos e sem partição utilizável**, respeitando as guardas de custo e work path. Não usa `texts:2`, identidade do caso, gabarito ou a cúspide que a abertura apagou.
+
+Esse gatilho é caro em cobertura: em `180-none`, 82/106 chamadas não usam partição; 80 têm contorno. No agregado dos seis cenários, são 469/636 sem partição, 453 com contorno. Portanto, testar “só quando não corta” significa potencialmente traçar de novo em aproximadamente 71% dos Align, não em poucos casos raros.
+
+Medir cobertura dos recuperáveis, ativações em negativos, propostas aceitas, mapeamentos recusados, fallbacks e custo de **todas** as ativações. Caso o gatilho amplo não caiba no orçamento, só continuar com sinal mais seletivo obtido de dados já pagos e validado fora dos exemplos de ajuste. Ausência de tal sinal encerra a candidata.
+
+Custo inclui aquisição/recomposição, retenção e restauração de seleção, Make Work Path, leitura AM, filtragem, mapeamento, descarte e monitor. A instrumentação pode capturar mais para diagnosticar; o custo de produção deve medir o caminho que realmente seria portado. Não adicionar traçado ao poll de seleção por consequência indireta.
+
+##### Frente 2 — unilateral e reta real, somente após confirmar a classe
+
+**Causa proposta:** uma junção legítima encontra borda reta observada e não possui segunda cúspide. Limiares menores ou limpeza não criam informação ausente.
+
+**Evidência que restringe esta frente:** em `MUP_難攻不落の魔王城へようこそ64話_2023~0007#2`, o cru também não tem par admissível (`shallow:90`). Seu maior contorno dá E aproximado de 338,6 px, contra 353,8 px do alvo aberto, sem corte em ambos. O recorte mostra a reta direita na borda do quadro, em torno de x=2470 de um canvas de 2700 px, e área branca limitada pelo personagem à esquerda. Não aparece ali uma cadeia inequivocamente desenhada de três balões. **Tratar a classificação semântica como pendente, não como obrigação de resolver 354 px.**
+
+- **Entrada:** exemplos visualmente confirmados de junção unilateral, incluindo novos dados. O pior caso atual entra inicialmente como controle de espaço branco/arte.
+- **Sinal runtime a investigar:** reta sustentada no contorno e na máscara/imagem, com origem verificável — quadro, canvas, balão ou seleção — e uma cúspide compatível. Um lado de bbox ou nome de página não conta.
+- **Primeiro experimento barato:** verificar origem da reta e traços adjacentes nos recortes/máscaras; em modelos sintéticos recortados por fronteira conhecida, medir identificabilidade antes de qualquer pontuação contra o typesetter.
+- **Experimento discriminante:** perfil de largura perpendicular à reta observada, procurando cintura sustentada entre alargamentos. Só continuar se a orientação e os trechos observados restringirem uma separação. Se houver várias separações, medir a dispersão dos centros possíveis, sem escolher pela posição correta da fala.
+- **Controles:** balão único com cauda, balão cortado, grito, caixa de narração e espaço branco delimitado por arte. Não extrapolar área fora do quadro.
+- **Previsão:** separação restrita por geometria observável e estável à rasterização; ausência de acionamento nos controles.
+- **Refutação:** separações plausíveis com centros muito diferentes, controles satisfazendo o mesmo sinal, reta criada pelo traçado ou necessidade de informação indisponível em runtime.
+- **Custo:** perfil sobre contorno já disponível é barato; verificação da borda na imagem pode exigir aquisição adicional. Contabilizar ambas. Se a origem da fronteira só puder ser rotulada manualmente, não há candidata portável.
+
+Esta frente difere do perfil bimodal genérico antigo pela fronteira observada e população verificada. Sem essa premissa nova, encerra antes de propor regra.
+
+##### Reserva — ordem; escolha de pares apenas com sinal novo
+
+Abrir somente após conclusão discriminante das duas frentes anteriores.
+
+Separar marquee criada antes de cada Align, como `diagSequence.jsx` faz com resize desligado, do atalho sem seleção. Fixar ativa e opções; variar só posição/visibilidade das vizinhas e ordem. Comparar a primeira etapa que muda: composite, sonda, seleção, clean/dirty, cru/aberto, partição e estado. Repetir as mesmas entradas gravadas em ambiente limpo para separar dependência de tinta de dependência de estado.
+
+Predição: a primeira divergência explica a diferença de alvo. Entradas idênticas com saídas diferentes indicam estado; composites diferentes pedem diagnóstico da aquisição. Refutação de um suposto bug de estado: mesma entrada sempre reproduz a mesma resposta. Não usar cache ou histerese para mascarar o efeito.
+
+O custo inicial é leitura dos JSONs e recortes; a reprodução específica no Photoshop vem depois. Os diagnósticos sequenciais existentes precisam de identidade do motor, estado e variante sem marquee antes de atribuir seus números ao produto inteiro.
+
+Escolha entre pares admissíveis só retorna se A/B revelar um discriminante novo. Oráculo é teto, não seletor. Não escolher segundo par, máxima solidez ou sequência mais próxima do texto; não abrir campanha paralela de tuning.
+
+#### 5. Dados, matriz e gates congelados antes das candidatas
+
+##### Dados
+
+Manter as 15 páginas como desenvolvimento e regressão, com grupos históricos congelados. Acrescentar rótulos de geometria real em eixo separado; não reclassificar grupos para melhorar resultado.
+
+Solicitar dois lotes intencionais separados, cada um com **oito exemplos**: junção perdida pela abertura, junção unilateral verdadeira, concavidade de balão único, cauda, retícula, recorte por quadro, grito e caixa de narração/espaço de texto junto à arte. É um orçamento inicial de cobertura, não tamanho mínimo universal nem garantia estatística.
+
+O primeiro lote serve para causa e implementação experimental. O segundo fica reservado em outras páginas, preferencialmente outros capítulos/desenhistas, sem versões derivadas dos exemplos de desenvolvimento. Escolher página porque a candidata funciona a transforma em desenvolvimento. Congelar configuração antes de revelar a reserva; qualquer ajuste posterior exige nova reserva.
+
+Sem novos dados, a rodada pode demonstrar fidelidade, mecanismo e ausência de regressões no corpus conhecido. O encerramento padrão será “candidata experimental; aguarda validação independente” ou “sem intervenção”, sem promessa de generalização.
+
+##### Matriz histórica a repetir somente para sobreviventes offline
+
+| Cenário | Scatter | Seleção viva | PhantomRatio | Resize | Padding |
+| --- | --- | --- | --- | --- | --- |
+| none | none | Sim | 0,15 | Não | 0 |
+| mid | mid | Sim | 0,15 | Não | 0 |
+| full | full | Sim | 0,15 | Não | 0 |
+| overlap | overlap | Não | 0 | Não | 0 |
+| resize-pad12 | none | Sim | 0,15 | Sim | 12 |
+| overlapmid | overlapmid | Não | 0 | Não | 0 |
+
+Tolerância da varinha: 20. Congelar nomes dos arquivos, ordem das camadas, seed derivada do basename e offsets efetivamente gerados. O driver atual não tem opção `-Seed`; não inventá-la nos comandos.
+
+##### Gates de entrada, benefício, segurança e custo
+
+1. **Identidade e população:** baseline identificado por HEAD, patch, hashes de fonte/bundle/harness, bundle instalado e carregado. Mesmo corpus, manifesto, opções e seeds. Nenhum caso ausente, duplicado, valor não finito ou exceção não explicada. Falhas herdadas têm lista explícita e não podem mudar de motivo silenciosamente.
+2. **Fidelidade:** decisões, tentativas, fonte e peça reproduzidas na população usada. Alvos de execução e replay devem concordar até o erro de serialização; discrepância acima de 0,5 px bloqueia ranking até explicação ou nova captura. Não contar fallback inventado em chamada falha.
+3. **Nulo e movimento:** executar nulo relevante antes de interpretar mudança pequena. Preservar a regra de até 0,5 px de diferença de alvo para atribuição a raster; manter os efeitos raster nomeados. Verificar separadamente movimento solicitado e aplicado usando a caixa efetiva do posicionador. Nos dados atuais o resíduo alvo/tinta chega a cerca de 0,5 px por eixo; registrar ambos os eixos e bloquear discrepância não explicada acima de 0,51 px nesse modelo de medição. Fallback com phantom exige registrar o alvo efetivo, não só `lastAlignRegion`.
+4. **Por caso, inclusive os já ruins:** na presença de mudança de alvo acima de 0,5 px, **qualquer aumento de E maior que 1 px ou aumento do erro absoluto de qualquer eixo maior que 1 px reprova**. É um gate novo conservador, declarado antes da candidata. Não há exceção para casos já fora da tolerância. `11#4` começa em 26,3 px; não concede nova margem de 19,5 px.
+5. **Grupos e cauda:** manter gates históricos de p95 por eixo, categorias e topologias, tolerância de 1 px. Adicionar E p95/máximo sem aumento maior que 1 px; contagens >10/>25/>50 não podem piorar por mudança real do motor. Preservar especialmente resize/`texts:3+`, seus casos individuais e ausência de casos >50 px.
+6. **Geometria:** zero novo falso corte nos controles rotulados; peças válidas e correspondentes à ativa; sem novos destinos fora da região válida. Um falso corte reprova mesmo que mova pouco ou reduza E por sorte.
+7. **Utilidade:** exigir mecanismo confirmado e pelo menos um ganho causal de 10 px ou mais, acima do nulo, sem regressões; benefícios menores permanecem descritivos e não justificam aquisição extra. Esse limiar é de utilidade desta rodada, não evidência de generalização. Configuração deve permanecer estável em perturbações de raster e numa faixa de parâmetros.
+8. **Segunda passada e ordem:** nenhum caso antes estável pode adquirir oscilação real; em casos herdados, nenhum aumento material de movimento/deriva de alvo. Para o sequencial, comparar a mesma variante e as duas passagens, sem chamar o movimento herdado de zero.
+9. **Integração:** sobrevivente deve passar Photoshop real: Align com/sem seleção, resize/padding, phantom, DPI 72/300 sem reamostrar, régua pixels/cm, TextShapeR, seleção temporária e Multi Bubble; Paste entra se qualquer helper compartilhado for tocado. Work path existente, recusa por área/orçamento, path vazio, exceção e interrupção devem preservar estado recuperável.
+10. **Custo:** A/B intercalado, alternar ordem AB/BA, mesma sessão e memória comparável, separar frio/quente e manter captura de telemetria equivalente. Começar com três pares intercalados por cenário representativo e adicionar pares somente se a dispersão impedir decisão. Mediana e p95 por Align não podem superar baseline em mais de **15%**, teto histórico; medir também total por página, pior chamada, número de ativações e custo dos fallbacks. Se pressão de memória impedir interpretação, resultado “inconclusivo”; não promover. Nenhum trabalho adicional periódico no monitor.
+
+Os números novos desses gates são decisões propostas **antes** da execução, não testes já passados. Não afrouxá-los depois de uma falha.
+
+Tabelas futuras: por caso e por grupo, dX/dY assinados, E, erro relativo, p50/p75/p95/máximo, >10/>25/>50, decisão/fonte, falsos cortes, ativações, propostas, recusas, não resolvidos, fallback, segunda passada, tempo total e por etapa. Quantil histórico: índice `floor(p*n)`; com n=15, p95 é o máximo. Não tratar seis cenários como seis vezes mais independência.
+
+#### 6. Sequência executável de decisões e encerramento
+
+1. **Congelar estado e gates.** Verificar HEAD novamente, manifestos e mudanças locais; registrar a errata sem apagar o histórico. Arquivar identidade das ferramentas antes de qualquer ajuste.
+2. **Fechar diagnóstico.** Instrumentação passiva, captura de caixa real e anéis completos; auditoria de entradas e saída. Validar em fixtures e pequeno nulo. Se não houver dado suficiente, parar em “captura específica necessária”.
+3. **Subconjunto causal.** Capturar apenas as camadas selecionadas de 14#0, GO3 0029#0, os três falsos cortes, 11#2 como controle e o caso de 354 px para confirmar a origem da fronteira. Começar em none; acrescentar uma condição sem marquee com sobreposição para verificar transferência à chamada real.
+4. **A antes de B.** Executar as três representações de A; inspecionar correspondência, falsos cortes e alvo no aberto. Confirmada: ampliar ao corpus conhecido e aos controles. Refutada: arquivar causa; não procurar limiar salvador. B só prossegue no subconjunto onde ruído foi demonstrado.
+5. **Frente unilateral condicional.** Prosseguir somente com exemplo real confirmado e origem da reta disponível em runtime. Se a classe não existir nos dados disponíveis, pedir exemplos específicos e encerrar essa frente sem algoritmo.
+6. **Congelar sobrevivente.** Uma mudança causal por experimento; A+B somente após ablações. Rodar os seis cenários, reserva independente e depois integração/custo reais. Reutilizar run apenas após prova de compatibilidade de código, dados, harness e opções; padrão seguro é medir novo baseline.
+7. **Reserva.** Diagnosticar ordem apenas se ainda necessária e após conclusões anteriores. Pares admissíveis exigem novo discriminante; nenhum tuning adicional sem ele.
+8. **Decisão final da Task 33:** candidata justificável para etapa posterior; aquisição adicional identificada; ou nenhuma intervenção justificada. Todas são conclusões válidas.
+
+**Parada:** mecanismo refutado, falha de gate, limiar estreito, ambiguidade não resolvida, ausência de sinal runtime, custo fora do teto ou evidência insuficiente de identidade/população. Repetir uma medição só para resolver uma dúvida nomeada. Falha em várias técnicas não prova esgotamento da família.
+
+**Rollback:** descartar a candidata laboratorial e retornar ao alvo do motor atual, sem “não mover”. Se houver instalação temporária na execução futura, restaurar os bundles preservados, verificar hashes e confirmar o carregamento da versão restaurada. Reverter apenas alterações da rodada; nunca `reset --hard` sobre trabalho do usuário.
+
+Originais permanecem somente leitura; entradas são cópias de laboratório, fechadas com `DONOTSAVECHANGES`. Preservar documentos abertos, ativa, visibilidade, seleção, canais temporários, work path, histórico e régua em saídas normais e excepcionais. Não fechar documentos do usuário nem limpar diretórios de experimentos anteriores.
+
+#### 7. Arquivos e integrações prováveis na execução futura
+
+| Área | Alteração mínima justificada |
+| --- | --- |
+| `scripts/lab/measureCentering.jsx` e `runMeasure.ps1` | Caixa efetivamente recebida, eventos reais, pares ligados à mesma aquisição, anéis anteriores à redução, subset de camadas e metadados de identidade/captura |
+| `scripts/lab/liftHost.js` | Reutilizar extração do motor; observação passiva e revisão explícita, sem manter outro solver |
+| `scripts/lab/replayPartition.js` e `overlayPartition.js` | Recusar replay incompatível, eliminar pontuação de fallbacks inventados, usar anéis e caixa reais, renderizar o rastro identificado |
+| `scripts/lab/compareRuns.js` e `errorTable.js` | Auditoria complementar e gate por caso antes das candidatas; resumo descritivo só sobre população auditada |
+| `scripts/testBalloonCentroid.js` e fixtures | Prova de equivalência da instrumentação; preservação de casos existentes; acrescentar geometria nova somente quando medida |
+| `diagSequence.jsx`, `diagDpiSplit.jsx` e drivers | Identidade do bundle/harness, restauração em finally e variante sem marquee se a reserva for acionada; não reconstruir todos os diagnósticos |
+| `app_src/host.js`, somente em eventual etapa de porte posterior | Pontos prováveis: aquisição/abertura/retensão temporária de contorno, seleção clean/dirty e chamada de partição em Align; motivo depende de A, B ou unilateral sobreviver |
+| `plano.md` | Bloco de estado consolidado, errata e linha da Task 33 **planejada**, sem reescrever resultados antigos |
+
+A Task 33 não autoriza portar uma candidata nem alterar arquivos do PR #2. Seu head e seus arquivos específicos continuam intocados. A lista acima identifica pontos do `develop` que um **porte futuro separado** teria de avaliar; não importa nem adapta a implementação do PR. Nenhuma dependência pesada, novo payload público, UI ou alteração tipográfica é prevista.
+
+Ferramentas ainda **a criar**, sem comandos fictícios: modo de captura da aquisição real com subset, auditoria de correspondência/máscaras, fixtures sintéticas de raster, gate complementar por caso e runner intercalado com memória/latência. Reutilizar os leitores, geometrias e serialização existentes.
+
+#### 8. Comandos reproduzíveis
+
+Executar a partir da raiz. A seção 8.1 é somente leitura e foi conferida contra os scripts atuais. O trecho Node da seção 8.2 foi executado literalmente e reproduziu a tabela de H9; os sete blocos PowerShell passaram na análise sintática. Os comandos de Photoshop em 8.3 são **para a execução futura**, após as condições de entrada; não foram executados nesta preparação.
+
+##### 8.1 Estado, testes e artefatos históricos
+
+```powershell
+git status --short --branch
+git rev-parse HEAD
+git ls-remote origin refs/heads/develop
+git log -20 --oneline
+
+node scripts/testBalloonCentroid.js
+node scripts/testSelectionOpening.js
+node scripts/lab/compareRuns.js --selfcheck
+
+$cenarios = @('none', 'mid', 'full', 'overlap', 'resize-pad12', 'overlapmid')
+foreach ($cenario in $cenarios) {
+    node scripts/lab/compareRuns.js "170-$cenario" "180-$cenario" "170-$cenario"
+    if ($LASTEXITCODE -ne 0) { throw "Falha no cenário $cenario" }
+}
+node scripts/lab/compareRuns.js 170-none 171-none 170-none
+node scripts/lab/compareRuns.js 170-resize-pad12 171-resize-pad12 170-resize-pad12
+node scripts/lab/errorTable.js
+```
+
+Não usar `errorTable.js` como auditoria: ele pula ausentes e recusas. Ler também as linhas de população e falhas do comparador.
+
+Diagnósticos de replay que expõem os limites atuais, **não comandos de aprovação**:
+
+```powershell
+node scripts/lab/replayPartition.js --runs 180-none,180-mid,180-full,180-overlap,180-overlapmid --validate --engine bf54511d0be87091379c3509f2afb6f846576d33 --host bf54511d0be87091379c3509f2afb6f846576d33
+node scripts/lab/replayPartition.js --runs 170-resize-pad12 --validate --engine 012ef3438abf8c1dc83ccbdd449acdb3427e785b --host 012ef3438abf8c1dc83ccbdd449acdb3427e785b
+```
+
+O primeiro ainda aceita diferença de alvo; o segundo usa âncora reconstruída incompatível. Ambos podem sair com código 0. Não usar `--engine HEAD` para atribuir runs antigos ao motor novo.
+
+##### 8.2 Reproduzir a pequena leitura de H9, sem Photoshop
+
+O trecho abaixo usa funções existentes, o par do probe de referência e grupos congelados de 170-none. Imprime os novos cortes com ganho e os três cortes em `texts:1`; não implementa A ou B.
+
+```powershell
+@'
+const fs = require("fs");
+const path = require("path");
+const assert = require("assert");
+const root = process.cwd();
+const read = file => JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, ""));
+const { liftFrom } = require(path.join(root, "scripts/lab/liftHost"));
+const { topology } = require(path.join(root, "scripts/lab/caseClass"));
+let initial = null;
+const host = liftFrom(fs.readFileSync("app_src/host.js", "utf8"), {
+  resample: real => (points, count) => points === initial ? points : real(points, count)
+});
+const cases = new Map(read(".centering-lab/runs/170-none/cases.json").cases
+  .filter(c => !c.skipped).map(c => [c.page + "#" + c.index, c]));
+const dir = ".centering-lab/runs/190-rawoutline/out";
+const rows = [];
+let eligible = 0;
+for (const file of fs.readdirSync(dir).filter(f => f.endsWith(".json"))) {
+  for (const layer of read(path.join(dir, file)).layers) {
+    if (layer.skipped) continue;
+    eligible++;
+    const region = layer.region.trueRegion;
+    if (!region.rawOutline?.length || !region.openedOutline?.length) continue;
+    const key = file.slice(0, -5) + "#" + layer.index;
+    const truth = layer.before.ink || layer.before.metric;
+    function solve(points, fallback) {
+      initial = points;
+      const report = {};
+      let target = host.splitAtCusps([points], layer.before.metric, report);
+      if (target && !host.centreInsideOutline([points], target)) target = null;
+      const cut = !!target;
+      target = target || fallback;
+      assert(target && Number.isFinite(target.x) && Number.isFinite(target.y));
+      return { cut, cuts: report.cuts,
+        E: Math.hypot(target.x - truth.xMid, target.y - truth.yMid) };
+    }
+    const open = solve(region.openedOutline, region.opened.centroid);
+    const raw = solve(region.rawOutline, host.areaCentroid(region.rawOutline));
+    rows.push({ key, group: topology(cases.get(key)), open, raw });
+  }
+}
+console.log({ eligible, paired: rows.length });
+for (const group of ["texts:1", "texts:2", "texts:3+"]) {
+  const set = rows.filter(r => r.group === group);
+  console.log(group, {
+    n: set.length,
+    openCuts: set.filter(r => r.open.cut).length,
+    rawCuts: set.filter(r => r.raw.cut).length
+  });
+}
+for (const row of rows) {
+  if (!row.open.cut && row.raw.cut &&
+      (row.group === "texts:1" || row.raw.E < row.open.E - 1))
+    console.log(JSON.stringify(row));
+}
+'@ | node
+```
+
+Essa leitura usa apenas o maior contorno para a geometria crua: não substitui a captura de todos os anéis necessária para A/B. O campo legado `trueRegion.centroid` não é usado.
+
+##### 8.3 Comandos atuais para uma medição futura
+
+O driver exige `runs/<run>/in` já preparado e **apaga esse diretório ao terminar**. Ele não cria as cópias. Usar ID novo e staging com somente as entradas pretendidas; verificar paths absolutos dentro do laboratório. Não reutilizar `170-*`, `180-*` ou `190-rawoutline`.
+
+Exemplo válido de preparação de uma página, com run novo:
+
+```powershell
+$raizRodada = (Resolve-Path -LiteralPath '.').Path
+$idRodada = 'task33-probe-14'
+$dirRodada = Join-Path $raizRodada ".centering-lab/runs/$idRodada"
+if (Test-Path -LiteralPath $dirRodada) { throw 'ID de run já existe' }
+$entradaRodada = Join-Path $dirRodada 'in'
+New-Item -ItemType Directory -Path $entradaRodada -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $raizRodada 'psd/14.psd') -Destination $entradaRodada
+
+powershell -NoProfile -File scripts/lab/runMeasure.ps1 -Root $raizRodada -Run $idRodada -Only '14.psd' -HostJsx "$raizRodada/app/host.jsx" -Scatter none -LiveSelection -PhantomRatio 0.15 -TraceGeometry -CaptureRawOutline
+```
+
+**Limite do comando atual:** mede a página inteira e captura cru/aberto no probe de referência. O filtro por camada e a captura ligada ao Align descritos na seção 3 ainda precisam ser criados. Não apresentar esse comando como implementação dessa captura.
+
+Para a matriz posterior, preparar cada `in/` com todas as entradas e usar IDs distintos, passando os parâmetros da seção 5. Exemplos de combinações existentes:
+
+```powershell
+powershell -NoProfile -File scripts/lab/runMeasure.ps1 -Root $raizRodada -Run task33-base-mid -HostJsx "$raizRodada/.centering-lab/task33/base/host.jsx" -Scatter mid -LiveSelection -PhantomRatio 0.15 -TraceGeometry
+powershell -NoProfile -File scripts/lab/runMeasure.ps1 -Root $raizRodada -Run task33-base-resize-pad12 -HostJsx "$raizRodada/.centering-lab/task33/base/host.jsx" -Scatter none -LiveSelection -PhantomRatio 0.15 -Resize -Padding 12 -TraceGeometry
+powershell -NoProfile -File scripts/lab/runMeasure.ps1 -Root $raizRodada -Run task33-base-overlapmid -HostJsx "$raizRodada/.centering-lab/task33/base/host.jsx" -Scatter overlapmid -TraceGeometry
+```
+
+Os paths dos bundles acima são destinos planejados, **ainda não criados**. Base, candidata e nulo usam bundles arquivados e manifestos próprios. Para dados novos, registrar também hashes de origem e das cópias: o driver atual protege `psd/` e `true/`, não automaticamente fontes externas.
+
+Após preparar um baseline novo, gerar/classificar seus casos **uma vez** e congelar a cópia usada na comparação:
+
+```powershell
+node scripts/lab/buildCases.js task33-base-none
+node scripts/lab/compareRuns.js task33-base-none task33-cand-none task33-base-none --csv .centering-lab/task33/gate-none.csv
+node scripts/lab/errorTable.js none:task33-base-none:task33-cand-none
+```
+
+`buildCases.js` depende dos composites locais; verificar sua correspondência com entradas novas antes de usá-lo. Manter os grupos históricos ao comparar as 15 páginas, conferindo-os contra os `cases.json` congelados da Task 32.
+
+Integração posterior, com assinaturas atuais:
+
+```powershell
+powershell -NoProfile -File scripts/lab/runDpiSplit.ps1 -Root $raizRodada -Page '13.psd' -Dpi 300 -Label task33-base
+powershell -NoProfile -File scripts/lab/runSequence.ps1 -Root $raizRodada -Page '11.psd' -Label task33-base
+powershell -NoProfile -File scripts/lab/runCapture.ps1 -Root $raizRodada -Run task33-capture -Page '11' -Index 8 -Label task33-base
+powershell -NoProfile -File scripts/lab/runMultiBubble.ps1 -Root $raizRodada -Run task33-capture -Page '11' -Label task33-base
+```
+
+Os dois últimos exigem cópia em `task33-capture/in/11.psd`; `-Page` não recebe a extensão nesses drivers. DPI/Sequence recebem a extensão e criam suas próprias cópias. A variante sequencial sem marquee ainda não existe. Os checks de build/`npm run verify` ficam para a execução futura, após mudanças justificadas; não foram rodados nesta preparação.
+
+#### 9. Próxima Task e primeiro experimento
+
+**Task 33 — “Identificar junções recuperáveis e falsos cortes em aquisições cru/aberto fiéis” — planejada.**
+
+Entrega da Task: ledger auditado, tabela causal, ablações separadas, veredito por hipótese, matriz/gates quando aplicáveis e decisão de portar em etapa posterior, adquirir dados ou manter o motor. Nenhum porte, push ou merge é resultado obrigatório.
+
+**Primeiro experimento que mais reduz a incerteza:** após o ajuste mínimo de captura, registrar a aquisição efetiva dos dois ganhos fortes **14#0 e GO3 0029#0**, dos negativos **11#8, GO3 0018-0019#1 e MUP74 0007#0**, com anéis completos e caixa real; usar **11#2** como controle de preservação. Testar se as cordas propostas pelo cru têm correspondência única e peça válida no aberto, especialmente se o grito ainda produz falso corte. Esse teste distingue oportunidade de A de uma mera troca de representação, antes de escolher filtro ou iniciar qualquer campanha completa.
+
+</details>
 
 ## Decisões feitas
 

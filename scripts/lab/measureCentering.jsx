@@ -35,17 +35,99 @@ LAB_RESULT = "";
       wandTolerance: LAB.wandTolerance || 20,
       liveSelection: !!LAB.liveSelection,
       traceGeometry: !!LAB.traceGeometry,
+      captureAcquisition: !!LAB.captureAcquisition,
+      captureMasks: !!LAB.captureMasks,
+      indices: LAB.indices || null,
       phantomRatio: LAB.phantomRatio || 0,
       scatter: LAB.scatter || "none"
     },
     doc: null,
     layers: [],
-    errors: []
+    errors: [],
+    identity: LAB.identity || null
   };
 
   /* Bench-only wrappers: observe the production geometry without changing it. */
   var geometryTrace = null;
   var cleanLayersHidden = 0;
+  var acquisition = null;
+  var acquisitionRefs = [];
+  var lastWand = null;
+  var acquisitionSerial = 0;
+  var narrowing = false;
+
+  function visibilityTree(container, prefix, out) {
+    for (var vi = 0; vi < container.layers.length; vi++) {
+      var vl = container.layers[vi];
+      var vp = prefix + "/" + vi;
+      out.push({ path: vp, id: vl.id, visible: vl.visible });
+      if (vl.typename === "LayerSet") visibilityTree(vl, vp, out);
+    }
+    return out;
+  }
+
+  function recordWand(x, y, tolerance) {
+    if (!geometryTrace) return;
+    lastWand = { x: x, y: y, tolerance: tolerance,
+      visibility: visibilityTree(app.activeDocument, "", []) };
+    geometryTrace.probes.push(lastWand);
+  }
+
+  function maskPath(stage) {
+    return LAB.outFile.replace(/\.json$/i, "") + ".layer" + n + ".pass" + geometryTrace.pass + ".acq" + acquisition.id + "." + stage + ".raw";
+  }
+
+  function saveSelectionMask(stage, channel) {
+    if (!LAB.captureMasks || geometryTrace.pass !== 1) return null;
+    var temporary = channel || createLabSelectionChannel(app.activeDocument);
+    if (!temporary) throw new Error("mask selection snapshot failed");
+    try { return exportComposite(app.activeDocument, maskPath(stage), false, temporary.name); }
+    finally { if (!channel) temporary.remove(); }
+  }
+
+  // The production helper deliberately replaces its named channel. Calling it
+  // from inside an opening would delete that opening's restoration snapshot.
+  // Keep the native, unique channel name and remove only the channel we own.
+  function createLabSelectionChannel(currentDoc) {
+    var channel = currentDoc.channels.add();
+    try { currentDoc.selection.store(channel); return channel; }
+    catch (storeError) { channel.remove(); throw storeError; }
+  }
+
+  function captureRawSelection(bounds) {
+    var currentDoc = app.activeDocument;
+    var saved = { lastOutline: _hostState.lastOutline, lastOutlineKey: _hostState.lastOutlineKey,
+      centroidSkip: _hostState.centroidSkip, lastPathAnchorCount: _hostState.lastPathAnchorCount };
+    var channel = createLabSelectionChannel(currentDoc);
+    if (!channel) throw new Error("raw selection snapshot failed");
+    var result = { bounds: traceBounds(bounds), polygons: null, skip: "", milliseconds: 0 };
+    var snapshotDoc = null;
+    var started = new Date().getTime();
+    try {
+      result.mask = saveSelectionMask("raw-mask", channel);
+      // Trace the very same stored selection on a duplicate. A second
+      // load/store roundtrip on the measured document can quantize its fringe
+      // and change a hole by one pixel even when the final target is unchanged.
+      snapshotDoc = currentDoc.duplicate();
+      snapshotDoc.selection.load(snapshotDoc.channels.getByName(channel.name));
+      result.snapshotDocumentId = snapshotDoc.id;
+      result.centroid = originalOpenedSelectionCentroid(snapshotDoc, bounds);
+      result.polygons = _hostState.lastOutline;
+      result.skip = _hostState.centroidSkip || "";
+      result.anchors = typeof _hostState.lastPathAnchorCount === "number" ? _hostState.lastPathAnchorCount : null;
+    } finally {
+      try { if (snapshotDoc) snapshotDoc.close(SaveOptions.DONOTSAVECHANGES); }
+      finally {
+        app.activeDocument = currentDoc;
+        try { channel.remove(); }
+        finally {
+          for (var key in saved) _hostState[key] = saved[key];
+          result.milliseconds = new Date().getTime() - started;
+        }
+      }
+    }
+    return result;
+  }
 
   function traceNumber(value) {
     return typeof value === "number" && isFinite(value) ? Math.round(value * 1000) / 1000 : null;
@@ -85,83 +167,12 @@ LAB_RESULT = "";
     };
   }
 
-  function traceCuspCandidates(points) {
-    var n = points.length;
-    var span = Math.max(2, Math.round(n / _CUSP_SPAN_DIVISOR));
-    var turn = [];
-    var total = 0;
-    var i;
-    for (i = 0; i < n; i++) {
-      var back = points[(i - span + n + n) % n];
-      var here = points[i];
-      var ahead = points[(i + span) % n];
-      var ux = here[0] - back[0];
-      var uy = here[1] - back[1];
-      var vx = ahead[0] - here[0];
-      var vy = ahead[1] - here[1];
-      turn[i] = Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
-      total += turn[i];
-    }
-    var winding = total >= 0 ? 1 : -1;
-    var concavity = [];
-    for (i = 0; i < n; i++) concavity[i] = -winding * turn[i];
-    var candidates = [];
-    for (i = 0; i < n; i++) {
-      if (concavity[i] < _CUSP_CONCAVITY) continue;
-      var top = true;
-      for (var k = -span; k <= span; k++) {
-        if (concavity[(i + k + n + n) % n] > concavity[i]) { top = false; break; }
-      }
-      if (top) candidates[candidates.length] = {
-        index: i,
-        point: [traceNumber(points[i][0]), traceNumber(points[i][1])],
-        depth: traceNumber(concavity[i])
-      };
-    }
-    return { span: span, candidates: candidates };
-  }
-
-  function replayCurrentPartition(polygons, activeBox) {
-    var contour = _largestContour(polygons);
-    var points = contour ? _resampleContour(contour, _CUSP_CONTOUR_POINTS) : null;
-    var replay = { contour: tracePoints(points), passes: [], piece: [], centroid: null };
-    if (!points || !activeBox) return replay;
-    var cx = (activeBox.left + activeBox.right) / 2;
-    var cy = (activeBox.top + activeBox.bottom) / 2;
-    for (var pass = 0; pass < _CUSP_MAX_CUTS; pass++) {
-      var found = traceCuspCandidates(points);
-      var pair = _findCuspPair(points);
-      var step = { candidates: found.candidates, chord: null, share: 0, guard: "" };
-      replay.passes[replay.passes.length] = step;
-      if (!pair || pair.a < 0) { step.guard = pair ? "shallow" : "noCusp"; break; }
-      step.chord = {
-        a: pair.a,
-        b: pair.b,
-        from: [traceNumber(points[pair.a][0]), traceNumber(points[pair.a][1])],
-        to: [traceNumber(points[pair.b][0]), traceNumber(points[pair.b][1])],
-        first: traceNumber(pair.first),
-        second: traceNumber(pair.second),
-        length: traceNumber(pair.length)
-      };
-      var pieces = _splitContourAtChord(points, pair.a, pair.b);
-      if (!pieces) { step.guard = "noPiece"; break; }
-      var chosen = _pieceOnSideOf(pieces, points[pair.a], points[pair.b], cx, cy);
-      if (!chosen) { step.guard = "noSide"; break; }
-      step.share = traceNumber(chosen.share);
-      if (chosen.share < _CUSP_MIN_PIECE_SHARE || chosen.share > 1 - _CUSP_MIN_PIECE_SHARE) {
-        step.guard = "share";
-        break;
-      }
-      points = chosen.points;
-    }
-    replay.piece = tracePoints(points);
-    replay.centroid = tracePoint(_polygonAreaCentroid(points));
-    return replay;
-  }
 
   function beginGeometryTrace(pass) {
     if (LAB.traceGeometry) {
-      geometryTrace = { pass: pass, outlines: [], partition: null, exceptions: [] };
+      geometryTrace = { version: 2, pass: pass, outlines: [], acquisitions: [], probes: [], partition: null, exceptions: [] };
+      acquisitionRefs = [];
+      lastWand = null;
       // These are reports, not inputs. Clear them so an early return such as
       // `smallSelection` cannot inherit the previous layer's target or cut.
       _hostState.lastAlignRegion = null;
@@ -176,6 +187,11 @@ LAB_RESULT = "";
     if (!current) return null;
     var finalPartition = tracePartitionReport(_hostState.partition);
     current.source = _hostState.probe && _hostState.probe.cleaned ? "clean" : "dirty";
+    if (current.partition && current.partition.acquisitionId !== null) {
+      for (var ai = 0; ai < current.acquisitions.length; ai++) {
+        if (current.acquisitions[ai].id === current.partition.acquisitionId) current.source = current.acquisitions[ai].source;
+      }
+    }
     current.final = {
       partition: finalPartition,
       target: _hostState.lastAlignRegion ? {
@@ -196,6 +212,59 @@ LAB_RESULT = "";
   }
 
   if (LAB.traceGeometry) {
+    var originalWandAt = _wandAt;
+    _wandAt = function (x, y, tolerance) {
+      var value = originalWandAt(x, y, tolerance);
+      recordWand(x, y, tolerance);
+      return value;
+    };
+    var originalNarrow = _narrowSelectionToTextNeighbourhood;
+    _narrowSelectionToTextNeighbourhood = function () {
+      narrowing = true;
+      try { return originalNarrow(); } finally { narrowing = false; }
+    };
+    var originalModifySelectionBounds = _modifySelectionBounds;
+    _modifySelectionBounds = function (amount) {
+      var value = originalModifySelectionBounds(amount);
+      if (acquisition) acquisition.modifications.push({ amount: amount, bounds: traceBounds(_getCurrentSelectionBounds()) });
+      return value;
+    };
+    var originalAdaptiveOpen = _getAdaptiveOpenedSelectionBounds;
+    _getAdaptiveOpenedSelectionBounds = function (bounds) {
+      if (!geometryTrace || !LAB.captureAcquisition || !bounds) return originalAdaptiveOpen(bounds);
+      var parent = acquisition;
+      var activeDoc = app.activeDocument;
+      acquisition = { id: ++acquisitionSerial, documentId: activeDoc.id, layerId: activeDoc.activeLayer.id,
+        source: narrowing ? "narrowed" : (cleanLayersHidden ? "clean" : (LAB.liveSelection ? "marquee" : "dirty")),
+        probe: lastWand, visibilityAtOpening: visibilityTree(activeDoc, "", []),
+        rawBounds: traceBounds(bounds), modifications: [], outlines: [] };
+      geometryTrace.acquisitions.push(acquisition);
+      try {
+        if (LAB.captureMasks && geometryTrace.pass === 1) {
+          acquisition.image = exportComposite(activeDoc, maskPath("image"), false, null, lastWand ? lastWand.visibility : null);
+          acquisition.imageState = lastWand ? "probe-visibility-on-duplicate" : "opening-visibility";
+        }
+        acquisition.raw = captureRawSelection(bounds);
+        var result = originalAdaptiveOpen(bounds);
+        acquisition.returnedBounds = traceBounds(result);
+        acquisition.returnedCentroid = result && result.centroid ? result.centroid : null;
+        return result;
+      } catch (captureError) {
+        geometryTrace.exceptions.push("acquisition:" + captureError);
+        throw captureError;
+      } finally { acquisition = parent; }
+    };
+
+    var originalPosition = _positionLayerWithinSelection;
+    _positionLayerWithinSelection = function (selection, bounds, phantomOffsetX, target) {
+      if (geometryTrace) {
+        var tx = target && isFinite(target.x) ? target.x : selection.xMid + (Number(phantomOffsetX) || 0);
+        var ty = target && isFinite(target.y) ? target.y : selection.yMid;
+        geometryTrace.position = { bounds: traceBounds(bounds), selection: traceBounds(selection),
+          target: { x: tx, y: ty }, requested: { x: tx - bounds.xMid, y: ty - bounds.yMid } };
+      }
+      return originalPosition(selection, bounds, phantomOffsetX, target);
+    };
     var originalSetLayerVisibilityByIds = _setLayerVisibilityByIds;
     _setLayerVisibilityByIds = function (ids, visible) {
       if (geometryTrace && !visible) cleanLayersHidden++;
@@ -206,6 +275,13 @@ LAB_RESULT = "";
     var originalOpenedSelectionCentroid = _openedSelectionCentroid;
     _openedSelectionCentroid = function (doc, openedBounds) {
       var centre = null;
+      var captured = null;
+      if (acquisition) {
+        var mods = acquisition.modifications;
+        var last = mods.length ? mods[mods.length - 1] : null;
+        captured = { stage: acquisition.outlines.length || !last || last.amount <= 0 || !last.bounds || last.bounds.width * last.bounds.height < 200 ? "rawRetry" : "opened",
+          bounds: traceBounds(openedBounds), mask: saveSelectionMask("outline" + acquisition.outlines.length + "-mask") };
+      }
       try {
         centre = originalOpenedSelectionCentroid(doc, openedBounds);
       } catch (traceOpenError) {
@@ -213,6 +289,14 @@ LAB_RESULT = "";
         throw traceOpenError;
       }
       if (geometryTrace) {
+        if (captured) {
+          captured.polygons = _hostState.lastOutline;
+          captured.centroid = centre;
+          captured.skip = _hostState.centroidSkip || "";
+          captured.anchors = typeof _hostState.lastPathAnchorCount === "number" ? _hostState.lastPathAnchorCount : null;
+          acquisition.outlines.push(captured);
+          acquisitionRefs.push({ polygons: _hostState.lastOutline, id: acquisition.id, stage: captured.stage });
+        }
         var contour = _largestContour(_hostState.lastOutline || []);
         geometryTrace.outlines[geometryTrace.outlines.length] = {
           source: cleanLayersHidden ? "clean" : "dirty",
@@ -228,7 +312,15 @@ LAB_RESULT = "";
 
     var originalSplitOutlineAtCusps = _splitOutlineAtCusps;
     _splitOutlineAtCusps = function (polygons, activeBox, partitionReport) {
-      var replay = replayCurrentPartition(polygons, activeBox);
+      var replay = { activeBox: traceBounds(activeBox), polygons: polygons,
+        contour: tracePoints(_resampleContour(_largestContour(polygons), _CUSP_CONTOUR_POINTS)),
+        acquisitionId: null, stage: null, execution: null };
+      for (var ri = 0; ri < acquisitionRefs.length; ri++) {
+        if (acquisitionRefs[ri].polygons === polygons) {
+          replay.acquisitionId = acquisitionRefs[ri].id;
+          replay.stage = acquisitionRefs[ri].stage;
+        }
+      }
       var centre = null;
       try {
         centre = originalSplitOutlineAtCusps(polygons, activeBox, partitionReport);
@@ -237,6 +329,7 @@ LAB_RESULT = "";
         throw traceSplitError;
       }
       replay.engineCentroid = tracePoint(centre);
+      replay.execution = partitionReport.execution || null;
       if (geometryTrace) geometryTrace.partition = replay;
       return centre;
     };
@@ -244,6 +337,18 @@ LAB_RESULT = "";
 
   function note(where, err) {
     report.errors.push(where + ": " + (err && err.message ? err.message : String(err)));
+  }
+
+  function invalidJsonPath(value, path) {
+    var type = typeof value;
+    if (type === "undefined" || type === "function" || (type === "number" && !isFinite(value))) return path + " (" + type + ")";
+    if (value && type === "object") {
+      for (var key in value) if (value.hasOwnProperty(key)) {
+        var invalid = invalidJsonPath(value[key], path + "." + key);
+        if (invalid) return invalid;
+      }
+    }
+    return "";
   }
 
   // Layer bounds excluding layer effects. The plugin reads "bounds", which
@@ -438,14 +543,32 @@ LAB_RESULT = "";
   // Flatten a throwaway duplicate to 8-bit grayscale and write it as headerless
   // Photoshop RAW: width * height bytes, no image decoder needed on the Node
   // side. The measured document is never modified.
-  function exportComposite(sourceDoc, outPath, hideText) {
+  function exportComposite(sourceDoc, outPath, hideText, maskChannelName, visibility) {
     var dup = null;
     try {
       dup = sourceDoc.duplicate();
+      if (visibility) {
+        for (var vs = 0; vs < visibility.length; vs++) {
+          var indices = visibility[vs].path.substring(1).split("/");
+          var targetLayer = dup;
+          for (var pi = 0; pi < indices.length; pi++) targetLayer = targetLayer.layers[Number(indices[pi])];
+          targetLayer.visible = visibility[vs].visible;
+        }
+      }
       if (hideText) hideAllText(dup);
       try { dup.flatten(); } catch (flatErr) { dup.mergeVisibleLayers(); }
       if (dup.mode !== DocumentMode.GRAYSCALE) dup.changeMode(ChangeMode.GRAYSCALE);
       if (dup.bitsPerChannel !== BitsPerChannelType.EIGHT) dup.bitsPerChannel = BitsPerChannelType.EIGHT;
+      if (maskChannelName) {
+        dup.activeChannels = [dup.channels[0]];
+        var black = new SolidColor(); black.gray.gray = 100;
+        var white = new SolidColor(); white.gray.gray = 0;
+        dup.selection.selectAll();
+        dup.selection.fill(black);
+        dup.selection.load(dup.channels.getByName(maskChannelName));
+        dup.selection.fill(white);
+        dup.selection.deselect();
+      }
       var opts = new RawSaveOptions();
       opts.alphaChannels = false;
       opts.spotColors = false;
@@ -458,6 +581,7 @@ LAB_RESULT = "";
       if (dup !== null) {
         try { dup.close(SaveOptions.DONOTSAVECHANGES); } catch (e2) {}
       }
+      try { app.activeDocument = sourceDoc; } catch (restoreDocError) {}
     }
   }
 
@@ -475,6 +599,8 @@ LAB_RESULT = "";
     return info;
   }
 
+  var previousDoc = null;
+  try { previousDoc = app.activeDocument; } catch (noPreviousDoc) {}
   var doc = null;
   try {
     doc = app.open(new File(LAB.inFile));
@@ -731,6 +857,11 @@ LAB_RESULT = "";
     }
 
     for (var n = 0; n < found.length; n++) {
+      if (LAB.indices && LAB.indices.length) {
+        var selectedIndex = false;
+        for (var si = 0; si < LAB.indices.length; si++) if (LAB.indices[si] === n) selectedIndex = true;
+        if (!selectedIndex) continue;
+      }
       var entry = found[n];
       var layer = entry.layer;
       restoreVisibility();
@@ -834,12 +965,14 @@ LAB_RESULT = "";
         row.scatter = { dx: scatterOffset[n].dx, dy: scatterOffset[n].dy, mode: scatterMode };
         if (invader >= 0) row.scatter.invader = invader;
 
+        beginGeometryTrace(1);
         var phantomOffsetX = 0;
         if (LAB.liveSelection) {
           var liveBox = row.before.ink || row.before.metric;
           try {
             layer.visible = false;
             wandAt(Math.round(liveBox.xMid + scatterOffset[n].dx), Math.round(liveBox.yMid + scatterOffset[n].dy), report.options.wandTolerance);
+            recordWand(Math.round(liveBox.xMid + scatterOffset[n].dx), Math.round(liveBox.yMid + scatterOffset[n].dy), report.options.wandTolerance);
           } catch (liveError) {
             note("liveSelection[" + n + "]", liveError);
           }
@@ -865,7 +998,6 @@ LAB_RESULT = "";
         }
 
         // The real engine, same entry point the panel calls.
-        beginGeometryTrace(1);
         row.align.result = alignTextLayerToSelection({
           resizeTextBox: report.options.resize,
           padding: report.options.padding,
@@ -920,17 +1052,18 @@ LAB_RESULT = "";
          * the same pixel as the first.
          */
         try {
+          beginGeometryTrace(2);
           var phantom2 = 0;
           if (LAB.liveSelection) {
             var box2 = row.after.ink || row.after.metric;
             layer.visible = false;
             wandAt(Math.round(box2.xMid), Math.round(box2.yMid), report.options.wandTolerance);
+            recordWand(Math.round(box2.xMid), Math.round(box2.yMid), report.options.wandTolerance);
             layer.visible = row.visible;
             var live2 = _getCurrentSelectionBounds() || null;
             if (live2 && LAB.phantomRatio) phantom2 = LAB.phantomRatio * live2.width;
             doc.activeLayer = layer;
           }
-          beginGeometryTrace(2);
           row.align.result2 = alignTextLayerToSelection({
             resizeTextBox: report.options.resize,
             padding: report.options.padding,
@@ -989,18 +1122,30 @@ LAB_RESULT = "";
 
   try { app.preferences.rulerUnits = oldUnits; } catch (e) {}
   try { app.displayDialogs = oldDialogs; } catch (e) {}
+  if (LAB.traceGeometry) {
+    _wandAt = originalWandAt;
+    _narrowSelectionToTextNeighbourhood = originalNarrow;
+    _modifySelectionBounds = originalModifySelectionBounds;
+    _getAdaptiveOpenedSelectionBounds = originalAdaptiveOpen;
+    _positionLayerWithinSelection = originalPosition;
+    _setLayerVisibilityByIds = originalSetLayerVisibilityByIds;
+    _openedSelectionCentroid = originalOpenedSelectionCentroid;
+    _splitOutlineAtCusps = originalSplitOutlineAtCusps;
+  }
 
   try {
     var out = new File(LAB.outFile);
     out.encoding = "UTF-8";
+    var serializedReport = jamJSON.stringify(report, "\t");
     out.open("w");
-    out.write(jamJSON.stringify(report, "\t"));
+    out.write(serializedReport);
     out.close();
   } catch (writeErr) {
-    LAB_RESULT = "ERROR write: " + writeErr;
+    LAB_RESULT = "ERROR write: " + writeErr + " " + invalidJsonPath(report, "report");
   }
 
   try { doc.close(SaveOptions.DONOTSAVECHANGES); } catch (closeErr) { note("close", closeErr); }
+  if (previousDoc) { try { app.activeDocument = previousDoc; } catch (restorePreviousDocError) {} }
 
   if (!LAB_RESULT) {
     LAB_RESULT = "OK layers=" + report.layers.length + " errors=" + report.errors.length;

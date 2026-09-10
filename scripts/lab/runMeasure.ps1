@@ -35,11 +35,20 @@ param(
   [switch]$TraceGeometry,
   [switch]$RefreezeGroundTruth,
   [switch]$CaptureRawOutline,
+  [switch]$CaptureAcquisition,
+  [switch]$CaptureMasks,
+  [string]$Indices = "",
+  [switch]$KeepCopies,
   [ValidateSet("none", "mid", "full", "overlap", "overlapmid")][string]$Scatter = "none"
 )
 
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path -LiteralPath $Root).Path
+if ($Run -notmatch '^[a-zA-Z0-9_.-]+$' -or $Run -in @('.', '..')) { throw 'invalid run ID' }
+if ($Indices -and $Indices -notmatch '^\d+(,\d+)*$') { throw 'Indices must be comma-separated nonnegative integers' }
+if ($Indices -and -not $Only) { throw '-Indices requires -Only to identify the page' }
+if ($CaptureMasks -and -not $CaptureAcquisition) { throw '-CaptureMasks requires -CaptureAcquisition' }
+if ($CaptureAcquisition) { $TraceGeometry = $true }
 
 function To-JsxPath([string]$p) { return ($p -replace '\\', '/') }
 
@@ -62,10 +71,18 @@ function Snapshot-Json($snapshot) { return ($snapshot | ConvertTo-Json -Depth 4 
 $inDir = Join-Path $Root ".centering-lab\runs\$Run\in"
 $outDir = Join-Path $Root ".centering-lab\runs\$Run\out"
 $runDir = Join-Path $Root ".centering-lab\runs\$Run"
+$labRoot = [System.IO.Path]::GetFullPath((Join-Path $Root '.centering-lab\runs'))
+$resolvedInput = [System.IO.Path]::GetFullPath($inDir)
+if (-not $resolvedInput.StartsWith($labRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'input path escaped lab' }
+if ((Test-Path -LiteralPath $outDir) -and @(Get-ChildItem -LiteralPath $outDir -File).Count) { throw 'run already has output; use a new ID' }
 $hostJsx = if ($HostJsx) {
   if ([System.IO.Path]::IsPathRooted($HostJsx)) { $HostJsx } else { Join-Path $Root $HostJsx }
 } else { Join-Path $Root "app\host.jsx" }
 $harness = Join-Path $Root "scripts\lab\measureCentering.jsx"
+$hostHashBefore = (Get-FileHash -Algorithm SHA1 -LiteralPath $hostJsx).Hash
+$harnessHashBefore = (Get-FileHash -Algorithm SHA1 -LiteralPath $harness).Hash
+$sourceHashBefore = (Get-FileHash -Algorithm SHA1 -LiteralPath (Join-Path $Root 'app_src\host.js')).Hash
+$engineHead = (& git -C $Root rev-parse HEAD).Trim()
 
 foreach ($required in @($inDir, $hostJsx, $harness)) {
   if (-not (Test-Path $required)) { throw "missing: $required" }
@@ -118,6 +135,9 @@ $resizeLiteral = if ($Resize) { "true" } else { "false" }
 $liveLiteral = if ($LiveSelection) { "true" } else { "false" }
 $traceLiteral = if ($TraceGeometry) { "true" } else { "false" }
 $rawOutlineLiteral = if ($CaptureRawOutline) { "true" } else { "false" }
+$acquisitionLiteral = if ($CaptureAcquisition) { 'true' } else { 'false' }
+$masksLiteral = if ($CaptureMasks) { 'true' } else { 'false' }
+$indicesLiteral = if ($Indices) { '[' + $Indices + ']' } else { 'null' }
 $phantomLiteral = $PhantomRatio.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 # The page composites are the same for every run — they come from the same 14
 # PSDs — so they live once, outside the runs, instead of being copied into each.
@@ -125,8 +145,12 @@ $pageDir = Join-Path $Root ".centering-lab\pages"
 New-Item -ItemType Directory -Force -Path $pageDir | Out-Null
 $runStarted = Get-Date
 $pageTimings = @()
+$failed = $false
 
 foreach ($f in $files) {
+  $inputHash = (Get-FileHash -Algorithm SHA1 -LiteralPath $f.FullName).Hash
+  if ($groundTruthBefore.psd.Contains($f.Name) -and $inputHash -ne $groundTruthBefore.psd[$f.Name]) { throw ('input differs from original: ' + $f.Name) }
+  $memoryBefore = (Get-Process -Name Photoshop | Measure-Object WorkingSet64 -Sum).Sum
   $outFile = Join-Path $outDir ($f.BaseName + ".json")
   $rawWith = if ($DumpRaw) { Join-Path $pageDir ($f.BaseName + ".withtext.raw") } else { "" }
   $rawNo = if ($DumpRaw) { Join-Path $pageDir ($f.BaseName + ".notext.raw") } else { "" }
@@ -142,10 +166,15 @@ var LAB = {
   liveSelection: $liveLiteral,
   traceGeometry: $traceLiteral,
   captureRawOutline: $rawOutlineLiteral,
+  captureAcquisition: $acquisitionLiteral,
+  captureMasks: $masksLiteral,
+  indices: $indicesLiteral,
+  identity: { head: "$engineHead", sourceSha1: "$sourceHashBefore", hostSha1: "$hostHashBefore", harnessSha1: "$harnessHashBefore", inputSha1: "$inputHash" },
   phantomRatio: $phantomLiteral,
   scatter: "$Scatter"
 };
 `$.evalFile(new File("$(To-JsxPath $hostJsx)"));
+LAB.identity.loadedPartition = String(_splitOutlineAtCusps);
 `$.evalFile(new File("$(To-JsxPath $harness)"));
 LAB_RESULT;
 "@
@@ -156,12 +185,15 @@ LAB_RESULT;
     $result = "COM ERROR: " + $_.Exception.Message
   }
   $secs = [math]::Round(((Get-Date) - $started).TotalSeconds, 1)
-  $pageTimings += [ordered]@{ file = $f.Name; seconds = $secs; result = $result }
+  $memoryAfter = (Get-Process -Name Photoshop | Measure-Object WorkingSet64 -Sum).Sum
+  $pageTimings += [ordered]@{ file = $f.Name; inputSha1 = $inputHash; seconds = $secs; memoryBefore = $memoryBefore; memoryAfter = $memoryAfter; result = $result }
   Write-Output ("[" + $f.Name + "] " + $result + " (" + $secs + "s)")
+  if ($result -notmatch '^OK layers=\d+ errors=0$') { $failed = $true; break }
 }
 
 $groundTruthAfterJson = Snapshot-Json (Get-GroundTruthSnapshot $Root)
 if ($groundTruthAfterJson -ne $groundTruthBeforeJson) { throw "ground truth changed during run $Run" }
+if ((Get-FileHash -Algorithm SHA1 -LiteralPath $hostJsx).Hash -ne $hostHashBefore -or (Get-FileHash -Algorithm SHA1 -LiteralPath $harness).Hash -ne $harnessHashBefore) { throw 'host/harness changed during measurement' }
 
 $runFinished = Get-Date
 [ordered]@{
@@ -169,6 +201,11 @@ $runFinished = Get-Date
   hostJsx = $hostJsx
   hostSha1 = (Get-FileHash -Algorithm SHA1 -LiteralPath $hostJsx).Hash
   harnessSha1 = (Get-FileHash -Algorithm SHA1 -LiteralPath $harness).Hash
+  head = $engineHead
+  sourceSha1 = $sourceHashBefore
+  groundTruthBefore = $groundTruthBefore
+  groundTruthAfter = (Get-GroundTruthSnapshot $Root)
+  failed = $failed
   photoshop = $ps.Version
   startedAt = $runStarted.ToUniversalTime().ToString("o")
   finishedAt = $runFinished.ToUniversalTime().ToString("o")
@@ -181,10 +218,17 @@ $runFinished = Get-Date
     phantomRatio = $PhantomRatio
     scatter = $Scatter
     traceGeometry = [bool]$TraceGeometry
+    captureRawOutline = [bool]$CaptureRawOutline
+    captureAcquisition = [bool]$CaptureAcquisition
+    captureMasks = [bool]$CaptureMasks
+    indices = $Indices
   }
   pages = $pageTimings
 } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $runDir "run.json")
 
 # Photoshop is done with them. buildCases.js reads out/ and the shared pages/.
-Remove-Item -Recurse -Force $inDir
-Write-Output ("copies removed: " + $inDir)
+if ($failed) { throw 'measurement failed; copies and diagnostics retained' }
+if (-not $KeepCopies) {
+  Remove-Item -LiteralPath $resolvedInput -Recurse -Force
+  Write-Output ("copies removed: " + $resolvedInput)
+}
