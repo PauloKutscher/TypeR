@@ -494,6 +494,63 @@ assert.ok(styledBubbleTop.lines.length >= 5,
   `learned compact style should survive bubble-aware mode, got ${styledBubbleTop.lines.length} lines:\n${styledBubbleTop.text}`);
 assert.ok(styledBubbleTop.lines.length * bubbleCalibration.linePx <= 300,
   `styled bubble top must still physically fit:\n${styledBubbleTop.text}`);
+// A shape learned by the fast paths (whole-page learn, PSD training) carries
+// no bubble context. The bubble scan lands a couple of seconds after the layer
+// is selected: it must not drop those exemplars and swap the user's own shape
+// for a generic one.
+const contextFreeText = "I never thought that we would meet again after everything that happened back there.";
+const contextFreeChoice = [
+  "I never thought that we",
+  "would meet again after",
+  "everything that happened",
+  "back there.",
+].join("\n");
+let contextFreeTuning = null;
+for (let round = 0; round < 3; round++) {
+  contextFreeTuning = recordTextShapeRFeedback(
+    contextFreeChoice,
+    { limit: 12, allowHyphenation: true, profile: "balanced", shapeProfile: null },
+    contextFreeTuning
+  ).tuning;
+}
+assert.strictEqual(contextFreeTuning.exemplars.length, 1);
+assert.strictEqual(contextFreeTuning.exemplars[0].bubble, null,
+  "learning without a wand scan stores a context-free exemplar");
+setTextShapeRTuning(contextFreeTuning);
+const contextFreeCalibration = { unitPx: 20, linePx: 48 };
+const beforeScanTop = generateTextShapeRVariants(contextFreeText, {
+  limit: 12,
+  allowHyphenation: true,
+  profile: "balanced",
+  calibration: contextFreeCalibration,
+})[0];
+assert.strictEqual(beforeScanTop.text, contextFreeChoice,
+  "the learned shape should lead before the bubble is detected");
+const afterScanTop = generateTextShapeRVariants(contextFreeText, {
+  limit: 12,
+  allowHyphenation: true,
+  profile: "balanced",
+  shapeProfile: { rows: ellipseRows },
+  width: 640,
+  height: 300,
+  calibration: contextFreeCalibration,
+})[0];
+assert.strictEqual(afterScanTop.text, contextFreeChoice,
+  `the bubble scan must not discard a context-free exemplar:\n${afterScanTop.text}`);
+// ...but a context-free exemplar never proves it fits: a bubble too narrow for
+// it must still rank shapes that physically fit above it
+const narrowScanTop = generateTextShapeRVariants(contextFreeText, {
+  limit: 12,
+  allowHyphenation: true,
+  profile: "balanced",
+  shapeProfile: { rows: ellipseRows },
+  width: 300,
+  height: 460,
+  calibration: contextFreeCalibration,
+})[0];
+assert.notStrictEqual(narrowScanTop.text, contextFreeChoice,
+  "a context-free exemplar must not bypass the physical fit check");
+
 setTextShapeRTuning(null);
 const restoredShippedDefaultTop = generateTextShapeRVariants(defaultProbeText, { limit: 12, profile: "balanced" })[0];
 assert.strictEqual(restoredShippedDefaultTop.text, shippedDefaultTop.text,

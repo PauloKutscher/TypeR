@@ -964,22 +964,31 @@ const curveDistance = (a, b) => {
   return distance / STYLE_RESOLUTION;
 };
 
-// Exact layouts are only authoritative in a comparable bubble. Reusing an
-// old break pattern in a differently proportioned or differently shaped
-// bubble can otherwise bypass physical-fit checks merely because the dialogue
-// text happens to be identical.
+// Exact layouts are only authoritative in a comparable bubble: an exemplar
+// validated in a differently proportioned or differently shaped bubble does
+// not describe this one. An exemplar with no recorded outline is a different
+// case — the fast learning paths (whole-page learn, PSD training without the
+// wand scans) store every shape with `aspect: null, bubble: null`. Those carry
+// no evidence against this bubble, only less evidence for it, so they keep
+// matching. Rejecting them made the bubble scan erase the user's own learned
+// shapes a couple of seconds after the layer was selected.
+const exemplarHasBubbleContext = (exemplar) => exemplar.aspect != null || !!exemplar.bubble;
+
 const exemplarContextMatches = (exemplar, aspect, bubble) => {
-  if (aspect != null) {
-    if (exemplar.aspect == null || Math.abs(Math.log(exemplar.aspect / aspect)) > 0.3) return false;
+  if (aspect != null && exemplar.aspect != null) {
+    if (Math.abs(Math.log(exemplar.aspect / aspect)) > 0.3) return false;
   }
-  if (bubble) {
-    if (!exemplar.bubble || curveDistance(bubble, exemplar.bubble) > 0.025) return false;
+  if (bubble && exemplar.bubble) {
+    if (curveDistance(bubble, exemplar.bubble) > 0.025) return false;
   }
   return true;
 };
 
+// Storage keeps the stricter rule: a shape validated without an outline stays
+// its own entry instead of being overwritten by a bubble-aware one.
 const exemplarStorageContextMatches = (exemplar, aspect, bubble) => {
   if (aspect == null && !bubble) return exemplar.aspect == null && !exemplar.bubble;
+  if (!exemplarHasBubbleContext(exemplar)) return false;
   return exemplarContextMatches(exemplar, aspect, bubble);
 };
 
@@ -1901,9 +1910,13 @@ const generateTextShapeRVariants = (text, options = {}) => {
     tuning.exemplars.forEach((exemplar) => {
       if (normalizeText(exemplar.lines.join(" ")) !== normalized) return;
       if (!exemplarContextMatches(exemplar, aspect, bubbleSignature)) return;
+      // Only a shape validated inside a comparable bubble proves it physically
+      // fits this one; a context-free exemplar still has to pass the fit check
+      const inBubble = exemplarHasBubbleContext(exemplar);
       const exemplarText = exemplar.lines.join("\n");
       if (resultMap.has(exemplarText)) {
         const existing = resultMap.get(exemplarText);
+        if (inBubble) existing.injectedInBubble = true;
         if (!existing.injected) {
           existing.injected = true;
           existing.score -= EXEMPLAR_RECALL_BONUS;
@@ -1919,6 +1932,7 @@ const generateTextShapeRVariants = (text, options = {}) => {
         score: scoreCandidate(tokenLines, exemplar.hyphens, scoringProfile) - EXEMPLAR_RECALL_BONUS,
         hyphenCount: exemplar.hyphens,
         injected: true,
+        injectedInBubble: inBubble,
       });
     });
   }
@@ -1929,9 +1943,9 @@ const generateTextShapeRVariants = (text, options = {}) => {
   // one that escapes it, whatever their aesthetic scores say
   if (fit) {
     variants.forEach((variant) => {
-      // An injected exemplar physically existed as a rendered layer in this
-      // bubble: trust that over the calibration estimate
-      variant.fits = variant.injected || variantFitsBubble(variant.lines, fit);
+      // An exemplar injected from this same bubble physically existed as a
+      // rendered layer in it: trust that over the calibration estimate
+      variant.fits = variant.injectedInBubble || variantFitsBubble(variant.lines, fit);
     });
     // Escaping the bubble is disqualifying, not just penalizing: overflowing
     // variants never reach the list while at least two alternatives fit
