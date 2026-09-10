@@ -13,7 +13,7 @@
     "test": "node scripts/runTests.js",
     "test:update:prepare": "node scripts/prepareUpdateTest.js",
     "test:update:server": "node scripts/updateTestServer.js",
-    "test:build": "node scripts/testBuildArtifacts.js",
+    "test:build": "node scripts/testBuildArtifacts.js && node scripts/testTask33.js",
     "verify": "npm test && npm run build && npm run test:build",
     "release": "npm run verify && node scripts/buildRelease.js"
   },
