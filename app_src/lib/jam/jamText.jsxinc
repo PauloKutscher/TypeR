@@ -459,55 +459,78 @@ if (typeof jamText !== 'object')
          *     $.writeln (jamJSON.stringify (layerTextObj, '\t'));
          * }
          */
+        /*
+         * Hoisted out of fromLayerTextObject, with its two locals alongside it.
+         * ExtendScript never reclaims a closure, and the panel reads the active
+         * layer's text on every poll and every Photoshop event while TextShapeR
+         * is on: one function expression per call was enough to make the read
+         * grow without bound over a shift. See the note on simplifyDesc in
+         * jamEngine for the measurements. The state is saved and restored around
+         * the walk because the hook can re-enter through fromPathComponentList.
+         */
+        var unitsHookTypeUnit;
+        var unitsHookTypeDone = false;
+
+        function getUnitsHook (desc, key)
+        {
+            var result;
+            if (key === "path")
+            {
+                result = jamHelpers.fromPathComponentList (desc[key][1][1]["pathComponents"], true);
+            }
+            else if (!unitsHookTypeDone)
+            {
+                // First type unit encountered, depending on ruler units preferences; assumed to be the same for all others
+                switch (key)
+                {
+                    case "rowGutter":
+                    case "columnGutter":
+                    case "spacing":
+                    case "firstBaselineMinimum":
+                    case "size":
+                    case "leading":
+                    case "baselineShift":
+                    case "underlineOffset":
+                    case "lineWidth":
+                    case "miterLimit":
+                    case "firstLineIndent":
+                    case "startIndent":
+                    case "endIndent":
+                    case "spaceBefore":
+                    case "spaceAfter":
+                    case "leftAki":     // In CS, not in CS4...
+                    case "rightAki":    // In CS, not in CS4...
+                        var value = desc[key];
+                        if (value[0] === "<unitDouble>")
+                        {
+                            unitsHookTypeUnit = value[1][0];
+                        }
+                        unitsHookTypeDone = true;
+                        break;
+                }
+            }
+            return result;
+        }
+
         jamText.fromLayerTextObject = function (layerTextObject)
         {
             var layerText = { };
-            var typeUnit;
-            var typeDone = false;
-            function getUnitsHook (desc, key)
+            var saveTypeUnit = unitsHookTypeUnit;
+            var saveTypeDone = unitsHookTypeDone;
+            unitsHookTypeUnit = undefined;
+            unitsHookTypeDone = false;
+            try
             {
-                var result;
-                if (key === "path")
+                layerText["layerText"] = jamEngine.simplifyObject (layerTextObject, getUnitsHook);
+                if (unitsHookTypeUnit)
                 {
-                    result = jamHelpers.fromPathComponentList (desc[key][1][1]["pathComponents"], true);
+                    layerText["typeUnit"] = unitsHookTypeUnit;
                 }
-                else if (!typeDone)
-                {
-                    // First type unit encountered, depending on ruler units preferences; assumed to be the same for all others
-                    switch (key)
-                    {
-                        case "rowGutter":
-                        case "columnGutter":
-                        case "spacing":
-                        case "firstBaselineMinimum":
-                        case "size":
-                        case "leading":
-                        case "baselineShift":
-                        case "underlineOffset":
-                        case "lineWidth":
-                        case "miterLimit":
-                        case "firstLineIndent":
-                        case "startIndent":
-                        case "endIndent":
-                        case "spaceBefore":
-                        case "spaceAfter":
-                        case "leftAki":     // In CS, not in CS4...
-                        case "rightAki":    // In CS, not in CS4...
-                            var value = desc[key];
-                            if (value[0] === "<unitDouble>")
-                            {
-                                typeUnit = value[1][0];
-                            }
-                            typeDone = true;
-                            break;
-                    }
-                }
-                return result;
             }
-            layerText["layerText"] = jamEngine.simplifyObject (layerTextObject, getUnitsHook);
-            if (typeUnit)
+            finally
             {
-                layerText["typeUnit"] = typeUnit;
+                unitsHookTypeUnit = saveTypeUnit;
+                unitsHookTypeDone = saveTypeDone;
             }
             return layerText;
         };

@@ -113,6 +113,7 @@ const getActiveTextLayerSource = (signature, callback) => {
       const source = {
         text: normalizeLayerText(data.textProps.layerText.textKey),
         layerId: typeof data.layerId === "number" ? data.layerId : null,
+        documentId: typeof data.documentId === "number" ? data.documentId : null,
         bounds: data.bounds || null,
         style: {
           textProps: data.textProps,
@@ -213,6 +214,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   const inlineSourceKey = React.useRef("");
   const inlineSourceSignature = React.useRef("");
   const inlineLayerIdRef = React.useRef(null);
+  const inlineDocumentIdRef = React.useRef(null);
   const inlineSourcePending = React.useRef(false);
   const inlineSourceQueued = React.useRef(null);
   const inlineGeometryPending = React.useRef(false);
@@ -380,6 +382,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         inlineSourceKey.current = "";
         inlineSourceSignature.current = "";
         inlineLayerIdRef.current = null;
+        inlineDocumentIdRef.current = null;
         inlineLayerBoundsRef.current = null;
         setInlineLayerSource((current) => {
           const error = locale.textShapeRLayerNoText || "Select a Photoshop text layer first.";
@@ -389,6 +392,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         return;
       }
       inlineLayerIdRef.current = source.layerId;
+      inlineDocumentIdRef.current = source.documentId != null ? source.documentId : null;
       inlineSourceSignature.current = source.signature || "";
       inlineLayerBoundsRef.current = source.bounds || null;
       inlineTextSizeRef.current = getLayerTextSize(source);
@@ -462,6 +466,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
               phantomOffsetX: geometry ? geometry.offsetX * data.bounds.width : 0,
               source: "bubble",
               textSize: inlineTextSizeRef.current,
+              documentId: inlineDocumentIdRef.current,
             };
           }
         }
@@ -482,7 +487,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     scanActiveBubbleShape((shape) => {
       inlineShapePending.current = false;
       if (shape) {
-        const bubbleKey = getBubbleCacheKey(inlineLayerIdRef.current, inlineLayerBoundsRef.current, inlineSourceKey.current);
+        const bubbleKey = getBubbleCacheKey(inlineDocumentIdRef.current, inlineLayerIdRef.current, inlineLayerBoundsRef.current, inlineSourceKey.current);
         inlineShapeKey.current = bubbleKey;
         rememberBubbleShape(bubbleShapeCache.current, bubbleKey, shape);
         setInlineSelectionShape(shape);
@@ -498,7 +503,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       // the memoized bubble for this layer must not short-circuit the rescan
       inlineShapeKey.current = "";
       bubbleShapeCache.current.delete(
-        getBubbleCacheKey(inlineLayerIdRef.current, inlineLayerBoundsRef.current, inlineSourceKey.current)
+        getBubbleCacheKey(inlineDocumentIdRef.current, inlineLayerIdRef.current, inlineLayerBoundsRef.current, inlineSourceKey.current)
       );
     }
     inlineShapePending.current = true;
@@ -574,7 +579,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       // (same detection as align-without-selection). Cached per layer ID, not
       // per layer content: the bubble doesn't move when the text changes, so
       // applying a shape must not pay for a new wand scan.
-      const bubbleKey = getBubbleCacheKey(inlineLayerIdRef.current, inlineLayerBoundsRef.current, inlineSourceKey.current);
+      const bubbleKey = getBubbleCacheKey(inlineDocumentIdRef.current, inlineLayerIdRef.current, inlineLayerBoundsRef.current, inlineSourceKey.current);
       if (bubbleKey === inlineShapeKey.current) {
         inlineShapePending.current = false;
         return;
@@ -600,7 +605,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       const sharedBubble = findEnclosingBubbleShape(
         bubbleShapeCache.current,
         inlineLayerBoundsRef.current,
-        inlineTextSizeRef.current
+        inlineTextSizeRef.current,
+        inlineDocumentIdRef.current
       );
       if (sharedBubble) {
         inlineShapePending.current = false;

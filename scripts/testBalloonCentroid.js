@@ -877,6 +877,24 @@ assert.ok(
 );
 
 /*
+ * TextShapeR's bubble outline comes from the same probe. It used to wand five
+ * pixels to the left of the ink box, and on a balloon the text nearly fills that
+ * point is outside it: the fill took the panel, and the suggestions were shaped
+ * to a wide strip of page — one long line where the balloon wanted six.
+ */
+const scanStart = hostSource.indexOf("function _scanActiveLayerBubble(");
+assert.ok(scanStart >= 0, "the shared bubble scan must exist");
+const scanBody = hostSource.slice(scanStart, hostSource.indexOf("\n}", scanStart));
+assert.ok(
+  scanBody.indexOf("_createBalloonWandSelection(") >= 0,
+  "the bubble scan must probe the balloon the way Align does"
+);
+assert.ok(
+  hostSource.indexOf("bounds.left - 5") < 0,
+  "no path may go back to wanding beside the ink box"
+);
+
+/*
  * The bite the lines lying over this one take out of the balloon is taken out of
  * the region too: they are hidden and the balloon is filled again. That fill is
  * only ever a candidate — where two balloons touch, the neighbours' ink is the

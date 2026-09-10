@@ -1851,9 +1851,34 @@ if (typeof jamEngine !== 'object')
             return simplifiedList;
         }
         //
+        /*
+         * ExtendScript never gives a closure back. A loop that evaluates one
+         * function expression per iteration goes from 0.001 to 0.010 us per
+         * iteration over 12,000 iterations and stays there; the same loop
+         * building a plain object is flat, and $.gc() changes neither.
+         *
+         * simplifyDesc recurses once per nested object, and a page-sized textKey
+         * descriptor nests hundreds of them, so building getDefaultValue here
+         * left hundreds of closures in the engine on every call. Measured on a
+         * manga page, jamText.getLayerText() cost 8 ms on the first call and
+         * 46 ms by the two hundredth, climbing linearly for as long as the panel
+         * stayed open. TextShapeR calls it on every poll and every Photoshop
+         * event, which is why TypeR only slowed down over a shift with it on.
+         *
+         * The closure never depended on the frame anyway: its own parameters
+         * shadow desc and key, so all it ever read from the enclosing scope was
+         * `hook`. A module-level function plus a stack of the hooks currently
+         * running gives every caller the same value and allocates nothing.
+         */
+        var simplifyHooks = [ ];
+
+        function simplifyDefaultValue (desc, key)
+        {
+            return simplifyItem (desc[key], simplifyHooks[simplifyHooks.length - 1]);
+        }
+
         function simplifyDesc (desc, hook)
         {
-            var getDefaultValue = function (desc, key) { return simplifyItem (desc[key], hook); };
             var simplifiedDesc = { };
             for (var key in desc)
             {
@@ -1862,7 +1887,7 @@ if (typeof jamEngine !== 'object')
                     var value = undefined;
                     if (typeof hook === 'function')
                     {
-                        value = hook (desc, key, getDefaultValue);
+                        value = hook (desc, key, simplifyDefaultValue);
                     }
                     if (typeof value === 'undefined')
                     {
@@ -1887,7 +1912,15 @@ if (typeof jamEngine !== 'object')
          */
         jamEngine.simplifyObject = function (object, hookFunction)
         {
-            return simplifyDesc ((this.normalizeJsonItem (object, { meaningfulIds: true, parseFriendly: true }))[1][1], hookFunction);
+            simplifyHooks.push (hookFunction);
+            try
+            {
+                return simplifyDesc ((this.normalizeJsonItem (object, { meaningfulIds: true, parseFriendly: true }))[1][1], hookFunction);
+            }
+            finally
+            {
+                simplifyHooks.pop ();
+            }
         };
         //
         /**
@@ -1903,7 +1936,15 @@ if (typeof jamEngine !== 'object')
          */
         jamEngine.simplifyList = function (list, hookFunction)
         {
-            return simplifyList ((this.normalizeJsonItem (list, { meaningfulIds: true, parseFriendly: true }))[1], hookFunction);
+            simplifyHooks.push (hookFunction);
+            try
+            {
+                return simplifyList ((this.normalizeJsonItem (list, { meaningfulIds: true, parseFriendly: true }))[1], hookFunction);
+            }
+            finally
+            {
+                simplifyHooks.pop ();
+            }
         };
         //
         /**

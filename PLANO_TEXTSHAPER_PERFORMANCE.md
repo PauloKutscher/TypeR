@@ -579,3 +579,333 @@ Duas armadilhas que custaram tempo:
    do Photoshop. `eval(File.read())` troca as funções em memória, e reiniciar o
    Photoshop é o jeito limpo de medir o host novo. Sem isso dá para medir o
    código antigo achando que é o novo — aconteceu aqui duas vezes.
+
+## Fase 3 — sugestões trocando, contorno errado e a degradação ao longo do turno (2026-09-09)
+
+Rodada aberta por três queixas do usuário, tratadas como uma só investigação
+porque as três caem no TextShapeR:
+
+1. "jogo o texto, seleciono, o shapeR mostra as formas boas por 2 segundos e
+   depois troca pra forma ruim"
+2. "o contorno que ele pega às vezes é bugado" (com print: sugestões de 1-2
+   linhas larguíssimas para um balão redondo)
+3. "com o tempo o TypeR vai ficando mais lento; começa rapidinho, mas tu vai
+   passando as páginas e ele vai ficando mais lento" — e, confirmado depois,
+   **com o TextShapeR desligado não degrada**
+
+Tudo medido no Photoshop 27.9.1 via COM (`New-Object -ComObject
+Photoshop.Application` + `DoJavaScript`), no mesmo padrão de `runLive.ps1`, com
+páginas reais copiadas de `psd/` para `.centering-lab/`. Os originais nunca são
+abertos.
+
+### 3.1 O que muda aos 2 segundos
+
+Só uma coisa muda de forma assíncrona depois de selecionar a camada: o wand scan
+do balão chega e `inlineSelectionShape` dispara a regeração do memo de variantes
+(`previewBlock.jsx:299`). Antes disso as sugestões são ranqueadas sem contorno;
+depois, com ele. A queixa é sobre o que acontece **quando** ele chega.
+
+### 3.2 Exemplares sem contorno eram descartados
+
+`exemplarContextMatches` (`app_src/textShapeR.js`) rejeitava todo exemplar sem
+contorno gravado assim que um balão ao vivo era detectado:
+
+```js
+if (aspect != null) {
+  if (exemplar.aspect == null || ...) return false;   // exemplar sem balão: fora
+}
+```
+
+Os caminhos rápidos de aprendizado gravam exatamente assim — o modal de treino
+por PSD (`_readTextShapeRTrainingLayers` só lê texto, nunca escaneia balão) e o
+learn-all por Ctrl-click (`entries.push({ text: ..., bubble: null })`). Antes do
+scan, `aspect == null` e todos casavam; depois, nenhum. O usuário via a forma
+aprendida por 2 s e ela sumia.
+
+Corrigido: exemplar sem contorno não é evidência **contra** este balão, só
+evidência menor a favor — volta a casar. Contrapeso: só exemplar validado dentro
+de balão comparável pula o teste físico de caber (`variant.injectedInBubble`,
+antes `variant.injected`); um exemplar sem contexto ainda passa por
+`variantFitsBubble`. `exemplarStorageContextMatches` segue estrito, então nada é
+sobrescrito no armazenamento.
+
+Repro antes/depois, com exemplar aprendido sem contorno:
+
+```
+BEFORE bubble scan : [4] I never thought that we / would meet again after / ...
+AFTER  bubble scan : [4] I never thought / that we would meet again / ...   <- trocava
+AFTER  (corrigido) : [4] I never thought that we / would meet again after / ...
+```
+
+Escopo real do estrago, para não superdimensionar: o corte valia só para o
+**recall de texto exato** (o bônus de 480). `lineTargetBias`, `weights`, `style`
+e a densidade via `getMatchedExemplars` (que é distância, não corte) sempre se
+aplicaram. E o treino em massa não fica envenenado por contorno errado, porque o
+modal de PSD nunca escaneia balão.
+
+### 3.3 O contorno bugado: o scan do TextShapeR usava o probe velho
+
+Esta é a causa do print. `_scanActiveLayerBubble` chamava
+`_createMagicWandSelection`, que dava **uma varinha só, 5 px à esquerda da caixa
+de tinta**. O comentário do `_bestBalloonProbe` — o probe que o Align já usa —
+descreve o bug literalmente:
+
+> *"Sampling next to the text failed whenever the text nearly filled the balloon,
+> because the probe landed outside and the fill grabbed the panel instead."*
+
+Foi corrigido para o Align e o TextShapeR ficou para trás. No print do usuário o
+texto preenche o balão quase todo, `left - 5` cai fora, o fill pega a faixa
+branca da página, o contorno sai largo e baixo, e `estimateFitLineCount` pede 1-2
+linhas compridas. A guarda que existia (`areaRatio > 60`) nunca ia pegar: a faixa
+de página tem ~15x a área do texto.
+
+`_scanActiveLayerBubble` passa a usar `_createBalloonWandSelection` — 5 pontos de
+sondagem dentro da caixa de texto, glifos escondidos antes de varinhar, rejeita
+região que cobre página demais e região que não contém o centro do texto, e trata
+linha vizinha caída por cima. `_createMagicWandSelection` foi deletada. Custo
+igual em página limpa: o probe 0 dá `break` no primeiro acerto, uma varinha só.
+
+### 3.4 O cache de balão cruzava documentos
+
+`bubbleShapeCache` guardava `bubble:<layerId>:<w>,<h>` e **IDs de camada
+recomeçam a cada documento** (medido: página 1 layerId=9, página 2 layerId=27,
+página 3 layerId=25). Pior que a colisão direta era
+`findEnclosingBubbleShape`: testa os quatro cantos em **coordenada absoluta da
+página** e só exige mesmo corpo de fonte. Páginas do mesmo volume põem balões nas
+mesmas coordenadas com a mesma fonte, então uma camada da página aberta agora
+cabia dentro de um balão traçado noutra e recebia aquele contorno, **sem
+escanear**. Outra fonte de "contorno bugado", que o fix do probe não cobre.
+
+Limpar o cache na troca de documento resolveria e custaria caro: voltar para a
+página anterior perderia os balões e pagaria o scan de novo. Em vez disso o cache
+foi **escopado por documento** — mesma correção, cache preservado entre páginas.
+`_getCurrentDocumentId()` (Action Manager, ~0 ms) entra em `getActiveLayerText`,
+e daí na chave do cache, na forma escaneada e no filtro do
+`findEnclosingBubbleShape`.
+
+**Regressão que isso quase introduziu:** a mesma assinatura
+`layerId:historyIndex` também é montada por `getActiveTextLayerGeometry`, e o
+painel devolve ela para `getActiveLayerTextIfChanged`. Se só um dos dois ganhasse
+`documentId`, o guard de "não mudou nada" nunca mais casaria e **todo nudge de
+seta pagaria leitura completa da camada**. Os dois foram corrigidos juntos.
+Verificado ao vivo:
+
+```
+pagina1 documentId=422 sig=422:9:1  geoSig=422:9:1  sigsIguais=true unchangedComGeoSig=true
+pagina2 documentId=431 sig=431:27:1 geoSig=431:27:1 sigsIguais=true unchangedComGeoSig=true
+pagina3 documentId=434 sig=434:25:1 geoSig=434:25:1 sigsIguais=true unchangedComGeoSig=true
+```
+
+De brinde, a assinatura deixou de colidir entre páginas: antes, camada 2 no
+estado 5 da página 12 respondia "unchanged" para a camada 2 no estado 5 da página
+11, e o painel mantinha o texto da outra página.
+
+### 3.5 A degradação ao longo do turno: ExtendScript nunca devolve um closure
+
+Esta é a descoberta grande, e não era nenhuma das hipóteses iniciais (histórico
+do Photoshop, scratch, cache do painel — todas medidas e descartadas).
+
+Bancada: `scripts/lab/diagShaperDrift.jsx`, três modos (`pages`, `session`,
+`read`). Primeiro o que **não** degrada:
+
+```
+scanMs (getActiveLayerBubbleShape), 42 ciclos abre/fecha:  885 ms, plano
+motor de sugestões em Node, 3000 chamadas:                 4,2 ms, plano, heap estável
+variantCache (teto 16) e bubbleShapeCache (teto 120):      com evicção, sem crescimento
+```
+
+O que degrada, medido em 48 ciclos de abrir/fechar 6 páginas, 4 camadas cada:
+
+```
+                    volta:  0    1    2    3    4    5    6    7
+ANTES  jamGetLayerText(ms): 16   43   68   91  120  140  162  192   slope 1,0656 ms/chamada
+```
+
+Linear, sem plateau. Resto do caminho plano o tempo todo (`bounds`, `stroke`,
+`layerId`, `pointText`: 0-1 ms).
+
+Bisseção dentro do jam:
+
+```
+rawActionManager:        0,7 0,6 0,7 0,6 0,6 0,6    plano
+jsonGet_plainIds:        2,4 2,4 2,4 2,4 2,4 2,4    plano
+jsonGet_meaningfulIds:   2,8 2,8 2,7 2,8 2,6 2,7    plano
+jamText.getLayerText:    8,1 13,5 21,3 32,4 39,3 46 <- vaza
+normalizeJsonItem:       2,5 2,4 2,4 2,5 2,8 2,7    plano
+simplifyObject:          3,4 5,0 6,2 8,0 10,1 12,5  <- vaza
+```
+
+E a causa, isolada em teste sintético puro:
+
+```
+loop, sem closure          (us/iter): 0,000 0,001 0,000 0,001 0,000 0,001   plano
+loop, objeto puro por iter (us/iter): 0,001 0,001 0,001 0,001 0,001 0,001   plano
+loop, 1 closure por iter   (us/iter): 0,001 0,003 0,004 0,005 0,008 0,010   10x, linear
+loop, 10 closures por iter (us/iter): 0,018 0,024 0,026 0,028 0,036 0,038
+```
+
+**Todo closure criado em runtime no ExtendScript fica no engine para sempre e
+torna toda alocação seguinte mais lenta.** Objeto puro não. `$.gc()` não
+recupera — testado, a curva continua igual.
+
+`simplifyDesc` recursa uma vez por objeto aninhado e alocava um `getDefaultValue`
+em cada nível; o descritor `textKey` de uma página aninha centenas. Mais um
+`getUnitsHook` por chamada em `fromLayerTextObject`. O TextShapeR é o único
+recurso que chama isso num timer (`getActiveLayerTextIfChanged` a cada poll e a
+cada evento do Photoshop), e `refreshInlineLayerSource` está dentro de
+`if (!context.state.inlineTextShapeR) return undefined;` — por isso desligar o
+TextShapeR fazia a degradação sumir.
+
+Correção:
+
+- `jamEngine.jsxinc` — `getDefaultValue` vira `simplifyDefaultValue`, função de
+  módulo. Ela nunca dependeu do frame: os próprios parâmetros sombreiam `desc` e
+  `key`, então só lia `hook` do escopo. `simplifyObject`/`simplifyList` empilham
+  o hook e desempilham em `finally`, o que preserva a reentrância que o changelog
+  do jam registra — `replaceChannelHook` (jamHelpers:1248, jamStyles:634) chama
+  `getDefaultValue` de dentro do walk e continua recebendo o hook certo.
+- `jamText.jsxinc` — `getUnitsHook` sai para o escopo do módulo, com
+  `unitsHookTypeUnit`/`unitsHookTypeDone` salvos e restaurados em volta do walk
+  (o hook re-entra via `fromPathComponentList` quando o texto está num path).
+
+Resultado, mesmo soak:
+
+```
+DEPOIS jamGetLayerText(ms):  8    8    8    8    8    8    8    8   slope 0,0012 ms/chamada
+```
+
+Slope 1,0656 -> 0,0012 ms/chamada, e o custo base caiu 16 -> 8 ms.
+
+**Não-regressão:** saída idêntica byte a byte em 6 páginas e 42 camadas,
+`jamText.getLayerText()` e `getActiveLayerText()` completos — 592.475 bytes
+iguais nos dois builds.
+
+Guarda: `scripts/testJamClosureLeak.js` — nenhuma function expression em
+`simplifyDesc` nem em `fromLayerTextObject`, e o push/pop tem que estar em
+`finally`.
+
+### 3.6 O Paste em camada de parágrafo: a caixa de medição
+
+Encontrado por acidente enquanto se media o caminho de escrita, e é o maior
+número da rodada.
+
+`_setActiveLayerText` põe o texto numa caixa grande demais para o Photoshop
+quebrar linha sozinho, lê a extensão real e encolhe a caixa em volta. A caixa era
+`_getMeasureBoxSpanPoints()` = 2x o maior lado da página, em cada eixo — 7680 x
+7680 px numa página de 2700 x 3840, ou seja 59 MP para o motor de tipo refazer o
+layout. O branch é `if (!isPoint && ...)`: camada point escapa, camada de
+parágrafo paga.
+
+Medido em 8 páginas reais, contando o tipo de cada camada:
+
+```
+p1 1760x2560  12 camadas  point=0 paragraph=12  span=5120pt   paste= 5.344 ms
+p2 1760x2560   9 camadas  point=0 paragraph=9   span=5120pt   paste= 4.102 ms
+p3 1760x2560   7 camadas  point=0 paragraph=7   span=5120pt   paste= 3.914 ms
+p4 2700x3840   4 camadas  point=0 paragraph=4   span=7680pt   paste=18.564 ms
+p5 2700x3840   7 camadas  point=0 paragraph=7   span=7680pt   paste=24.206 ms
+p6 5400x3840   3 camadas  point=0 paragraph=3   span=10800pt  paste=45.550 ms
+p7 2700x3840  11 camadas  point=0 paragraph=11  span=7680pt   paste=23.909 ms
+p8 2700x3840   8 camadas  point=0 paragraph=8   span=7680pt   paste=23.022 ms
+```
+
+**61 de 61 camadas são paragraph.** Não é coincidência: `context.jsx:295` tem
+`pastePointText: false` como padrão e nenhum estilo define `textType`, então o
+TypeR cria box text. As páginas são 100% parágrafo porque foi ele que as fez
+assim.
+
+Quem dispara: `previewBlock.jsx:1160`, `textBlock.jsx:96`,
+`shortcutCommands.js:130` e `:137` — ou seja, **reescrever o texto de um balão já
+feito**. `createTextLayerInSelection` (colar criando camada nova) não passa por
+aqui. Para comparação, na mesma página e camada: `contentOnly` 76 ms,
+`setTextShapeRLayerText` 219 ms, `setActiveLayerText` em camada point 389 ms.
+
+Correção: `_getMeasureBoxSpanForText(text, textSize)` dimensiona a caixa pelo
+texto, não pela página.
+
+- largura = maior linha (em chars) x corpo x 1,5 + 4x corpo — nenhum glifo passa
+  de 1 em, então a linha mais longa limita a largura
+- altura = número de linhas x corpo x 3 + 4x corpo
+- teto na caixa antiga (`pageSpan`); se a estimativa der maior, usa a antiga
+
+Rede de segurança: depois do set, se a tinta encostar em qualquer borda da caixa
+estimada (dentro de 1 em), a medida não vale — pode ter havido quebra automática
+na largura, ou texto cortado na altura. Refaz na caixa de página inteira e
+remede. Pior caso = comportamento de hoje.
+
+**Não-regressão.** Corpus em `scripts/lab/diagMeasureBox.jsx`, comparação em
+`scripts/lab/compareMeasureBox.js`: 8 páginas reais, todas as camadas, 6 textos
+cada (curto, linha longa que precisa ser medida, quebrado à mão, longo demais, e
+dois com style). Grava a **quebra de linha renderizada**, o bounds da tinta, o
+tipo da camada e o result; roda no host antigo e no novo e compara.
+
+```
+sem style   96 casos: quebras identicas 96/96, bounds identicos, result identico
+com style   48 casos: quebras identicas 48/48, bounds identicos, result identico
+
+                 antes      depois
+media/apply    18.261 ms     775 ms    23,6x
+pior caso      47.040 ms   2.666 ms    17,6x
+```
+
+O fallback foi exercitado ao vivo, não só no papel. O único caso capaz de
+derrubar a estimativa é entrelinha muito maior que o corpo (o palpite assume 3x
+corpo por linha). Forçando entrelinha = 5x corpo, 4 linhas, 6 camadas em 3
+páginas:
+
+```
+old  ink=274x433 203x238 281x334 229x206 215x254 215x193   4,5-5,3 s
+new  ink=274x433 203x238 281x334 229x206 215x254 215x193   0,56-2,2 s
+```
+
+Bounds idênticos ao pixel, texto renderizado idêntico.
+
+Guarda: `scripts/testMeasureBoxSpan.js` — levanta o estimador do fonte e roda ele
+de verdade (corpo inválido devolve null, caixa mais larga que a linha a 1
+em/glifo, linha extra não alarga mas aumenta a altura, CRLF não conta caractere a
+mais, texto vazio ainda dá caixa usável), mais guardas de fonte no
+`_setActiveLayerText` para o teto, o clamp por eixo, a checagem das duas bordas e
+o re-measure antes do fit.
+
+### 3.7 O que ficou de fora, e por quê
+
+- **`jamText.toLayerTextObject`** declara `restoreDesc` por chamada, o mesmo
+  padrão de closure. Medido: **0,3-0,4 ms, plano** em 150 chamadas, e o paste
+  content-only fica em 81 ms, plano em 60 pastes. É uma declaração de função,
+  criada uma vez por chamada e não uma por nível de recursão — 300x menos que o
+  `simplifyDesc`. Não tocado: vendor code, ganho medido zero, risco não-zero.
+- **O resto do jam** tem o mesmo padrão em vários lugares. Só os dois do caminho
+  do timer foram mexidos.
+- **A lista re-ordena quando o balão chega** — isso é o bubble-aware funcionando,
+  não bug.
+- **Calibração em camada de parágrafo**: `inlineCalibration` usa o `textKey`
+  armazenado, que não reflete a quebra automática do Photoshop. Continua em
+  aberto; não foi a causa de nenhuma das queixas desta rodada (o erro observado
+  era grande demais para vir dela), e o host já sabe distinguir
+  (`textType: "point" | "paragraph"` em `getActiveLayerText`).
+
+### Reproduzir
+
+Tudo por COM, no padrão de `runLive.ps1`:
+
+```powershell
+$ps = New-Object -ComObject Photoshop.Application
+$ps.DoJavaScript('$.evalFile(new File("<repo>/app/host.jsx")); $.evalFile(new File("<repo>/scripts/lab/diagShaperDrift.jsx")); LAB_RESULT;')
+```
+
+- `scripts/lab/diagShaperDrift.jsx` — modos `pages` (deriva entre documentos),
+  `session` (deriva contra profundidade de histórico) e `read` (qual sub-chamada
+  de `getActiveLayerText` deriva). Globais em `LAB`.
+- `scripts/lab/diagMeasureBox.jsx` + `scripts/lab/compareMeasureBox.js` — corpus
+  da caixa de medição e o diff que decide se o fix pode subir.
+
+Duas armadilhas desta rodada:
+
+1. **O engine do ExtendScript acumula entre medições.** Como todo closure fica
+   para sempre, uma bancada que já rodou 200 chamadas mede o engine degradado, e
+   o segundo braço parece pior do que é. Reiniciar o Photoshop entre braços, ou
+   comparar só o slope.
+2. **O host devolve `textProps` no topo do JSON, não dentro de `style`.** Quem
+   monta `{ textProps, stroke }` é o painel, em `getActiveTextLayerSource`. Medir
+   `setActiveLayerText` com `snapshot.style` passa `undefined` e mede outro
+   caminho — aconteceu aqui e custou uma bancada inteira.

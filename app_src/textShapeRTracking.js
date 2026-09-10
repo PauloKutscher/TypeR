@@ -4,10 +4,14 @@ const roundedDimension = (value) => Math.round(Number(value) || 0);
 // layer does not change the bubble silhouette, and users can explicitly
 // refresh after moving text to another bubble. Resizing still invalidates the
 // cache because it changes TextShapeR's pixel calibration.
-const getBubbleCacheKey = (layerId, bounds, fallbackKey) => {
-  if (layerId == null) return `bubble:${fallbackKey}`;
-  if (!bounds) return `bubble:${layerId}`;
-  return `bubble:${layerId}:${roundedDimension(bounds.width)},${roundedDimension(bounds.height)}`;
+// O identificador do documento entra na chave porque os IDs de camada
+// recomeçam a cada página: sem ele, a camada 5 da página aberta agora lê o
+// balão que a camada 5 da página anterior deixou no cache.
+const getBubbleCacheKey = (documentId, layerId, bounds, fallbackKey) => {
+  const document = documentId == null ? "?" : documentId;
+  if (layerId == null) return `bubble:${document}:${fallbackKey}`;
+  if (!bounds) return `bubble:${document}:${layerId}`;
+  return `bubble:${document}:${layerId}:${roundedDimension(bounds.width)},${roundedDimension(bounds.height)}`;
 };
 
 const haveSameLayerSize = (first, second) =>
@@ -65,10 +69,11 @@ const profileContainsPoint = (profile, x, y) => {
  * contorno até 0,15 mais estreito, o que naquele balão são 142 px. Por isso o
  * reuso exige corpo igual: economizar um scan não vale entregar outra forma.
  */
-const findEnclosingBubbleShape = (cache, bounds, textSize) => {
+const findEnclosingBubbleShape = (cache, bounds, textSize, documentId) => {
   if (!cache || !bounds) return null;
   if (!(bounds.width > 0) || !(bounds.height > 0)) return null;
   if (!(Number(textSize) > 0)) return null;
+  if (documentId == null) return null;
   const corners = [
     [bounds.left, bounds.top],
     [bounds.right, bounds.top],
@@ -79,6 +84,11 @@ const findEnclosingBubbleShape = (cache, bounds, textSize) => {
     // Só um balão detectado serve: uma falha em cache (null) ou uma forma vinda
     // de seleção manual não diz nada sobre onde esta camada está
     if (!shape || shape.source !== "bubble" || !shape.profile) continue;
+    // O teste dos quatro cantos é em coordenadas absolutas da página. Duas
+    // páginas do mesmo volume põem balões em coordenadas parecidas e usam o
+    // mesmo corpo de fonte, então sem esta linha uma camada da página aberta
+    // agora cabe dentro de um balão traçado noutra e recebe o contorno errado.
+    if (shape.documentId !== documentId) continue;
     if (Number(shape.textSize) !== Number(textSize)) continue;
     let inside = true;
     for (let index = 0; index < corners.length; index += 1) {

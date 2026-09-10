@@ -761,6 +761,35 @@ function _convertPixelToPointExact(value) {
 // oversized box makes Photoshop pop its "Processing text" progress dialog
 // on every relayout — so derive the span from the document size and cap it
 // in pixels instead of using a huge fixed point value.
+/*
+ * Span the measuring box really needs for this text, in the same unit as the
+ * body size.
+ *
+ * The box above is 2x the page's longest side on each side, and the type engine
+ * charges for its area: 7680 x 7680 px on a 2700 x 3840 page, measured at 4 s to
+ * 45 s per apply against 389 ms for the same apply on a point layer, which skips
+ * the pass. Nothing needs that much room. The box only has to be wider than the
+ * longest line the text can render as, and taller than the block: no glyph is
+ * wider than its em, so the longest authored line bounds the width, and the line
+ * count bounds the height. Both are multiplied out generously — the point is to
+ * leave the page-sized box behind, not to fit tightly — and the caller checks
+ * that the text stayed clear of both edges before trusting what it measured.
+ */
+function _getMeasureBoxSpanForText(text, textSize) {
+  var size = Number(textSize);
+  if (!(size > 0)) return null;
+  var lines = String(text == null ? "" : text).replace(/\r\n?/g, "\n").split("\n");
+  var widest = 0;
+  for (var index = 0; index < lines.length; index++) {
+    if (lines[index].length > widest) widest = lines[index].length;
+  }
+  if (!widest) widest = 1;
+  return {
+    width: widest * size * 1.5 + size * 4,
+    height: lines.length * size * 3 + size * 4
+  };
+}
+
 function _getMeasureBoxSpanPoints() {
   var spanPx = 20000;
   try {
@@ -1272,13 +1301,6 @@ function _wandAt(x, y, tolerance) {
   desc.putBoolean(stringIDToTypeID("merged"), true);
   desc.putBoolean(stringIDToTypeID("antiAlias"), true);
   executeAction(charID.Set, desc, DialogModes.NO);
-}
-
-function _createMagicWandSelection(tolerance) {
-  try {
-    var bounds = _getCurrentTextLayerBounds();
-    _wandAt(Math.max(bounds.left - 5, 0), Math.max(bounds.yMid, 0), tolerance);
-  } catch (e) {}
 }
 
 /*
@@ -2124,18 +2146,40 @@ function _setActiveLayerText() {
     // the stale retained bounds in between. Only needed when the text itself
     // changes — a style-only apply keeps the same line breaks, and skipping
     // the measure pass there keeps it as fast as the legacy path.
+    // Read before the measuring box below needs it, and again by the fit pass
+    var textSize = 12;
+    var styleSize = dataStyle && dataStyle.textProps.layerText.textStyleRange[0].textStyle.size;
+    if (styleSize != null) {
+      textSize = styleSize;
+    } else if (oldTextParams.layerText.textStyleRange && oldTextParams.layerText.textStyleRange[0] && oldTextParams.layerText.textStyleRange[0].textStyle.size != null) {
+      textSize = oldTextParams.layerText.textStyleRange[0].textStyle.size;
+    }
+
     var boxShapeRef = newTextParams.layerText.textShape && newTextParams.layerText.textShape[0];
     var measureBoxBounds = null;
+    var measureEstimate = null;
     if (!isPoint && boxShapeRef && boxShapeRef.bounds && dataText) {
-      var measureSpan = _getMeasureBoxSpanPoints();
+      var pageSpan = _getMeasureBoxSpanPoints();
+      var estimate = _getMeasureBoxSpanForText(dataText, textSize);
+      // Never larger than the page-sized box: that one is already known to hold
+      // anything, and past it the estimate only buys relayout cost
+      if (estimate) {
+        if (estimate.width >= pageSpan && estimate.height >= pageSpan) estimate = null;
+        else {
+          if (estimate.width > pageSpan) estimate.width = pageSpan;
+          if (estimate.height > pageSpan) estimate.height = pageSpan;
+        }
+      }
       measureBoxBounds = {
         top: boxShapeRef.bounds.top || 0,
         left: boxShapeRef.bounds.left || 0,
         right: boxShapeRef.bounds.right,
         bottom: boxShapeRef.bounds.bottom,
+        pageSpan: pageSpan,
       };
-      boxShapeRef.bounds.right = measureBoxBounds.left + measureSpan;
-      boxShapeRef.bounds.bottom = measureBoxBounds.top + measureSpan;
+      measureEstimate = estimate;
+      boxShapeRef.bounds.right = measureBoxBounds.left + (estimate ? estimate.width : pageSpan);
+      boxShapeRef.bounds.bottom = measureBoxBounds.top + (estimate ? estimate.height : pageSpan);
     }
 
     try {
@@ -2159,13 +2203,6 @@ function _setActiveLayerText() {
     if (targetPoint) {
       _changeToPointText();
     } else {
-      var textSize = 12;
-      var styleSize = dataStyle && dataStyle.textProps.layerText.textStyleRange[0].textStyle.size;
-      if (styleSize != null) {
-        textSize = styleSize;
-      } else if (oldTextParams.layerText.textStyleRange && oldTextParams.layerText.textStyleRange[0] && oldTextParams.layerText.textStyleRange[0].textStyle.size != null) {
-        textSize = oldTextParams.layerText.textStyleRange[0].textStyle.size;
-      }
       var boxShape = newTextParams.layerText.textShape && newTextParams.layerText.textShape[0];
       var boxFitted = false;
       if (boxShape && boxShape.bounds && measureBoxBounds) {
@@ -2175,6 +2212,20 @@ function _setActiveLayerText() {
         // set call: read the real text extent and shrink the box around it.
         try {
           var textExtent = _getCurrentTextLayerBounds();
+          // The estimated box is only worth reading while the text stayed clear
+          // of its edges. A line that reached the right edge may have been soft
+          // wrapped, and text past the bottom edge is not rendered at all, so
+          // either way the extent would describe the box and not the text. Fall
+          // back to the page-sized box, which is what this always used.
+          if (measureEstimate && textExtent.width > 0 && textExtent.height > 0 &&
+              (_convertPixelToPointExact(textExtent.width) >= measureEstimate.width - textSize ||
+               _convertPixelToPointExact(textExtent.height) >= measureEstimate.height - textSize)) {
+            boxShape.bounds.right = measureBoxBounds.left + measureBoxBounds.pageSpan;
+            boxShape.bounds.bottom = measureBoxBounds.top + measureBoxBounds.pageSpan;
+            jamText.setLayerText({ layerText: { textShape: [boxShape] } });
+            measureEstimate = null;
+            textExtent = _getCurrentTextLayerBounds();
+          }
           if (textExtent.width > 0 && textExtent.height > 0) {
             var widthPadding = Math.max(2, textSize * 0.4);
             boxShape.bounds.right = measureBoxBounds.left + _convertPixelToPointExact(textExtent.width) + widthPadding;
@@ -3149,8 +3200,16 @@ function getActiveLayerText() {
   try {
     stroke = _getLayerStroke();
   } catch (strokeError) {}
+  // Layer IDs restart per document, so the panel cannot tell layer 5 of this
+  // page from layer 5 of the last one without this. Its bubble cache and its
+  // "nothing changed" signature are both keyed on the layer.
+  var documentId = null;
+  try {
+    documentId = _getCurrentDocumentId();
+  } catch (documentError) {}
   return jamJSON.stringify({
     layerId: layerId,
+    documentId: documentId,
     bounds: bounds,
     textType: _textLayerIsPointText() ? "point" : "paragraph",
     textProps: jamText.getLayerText(),
@@ -4856,7 +4915,13 @@ function _scanActiveLayerBubble(tolerance, sampleCount) {
     var scanResult = null;
     try {
       var textBounds = _getCurrentTextLayerBounds();
-      _createMagicWandSelection(tolerance);
+      // Same probe Align uses. The old scan wanded five pixels to the left of
+      // the ink box: whenever the text nearly filled the balloon that point
+      // landed outside it and the fill grabbed the panel, so TextShapeR shaped
+      // the dialogue to a wide strip of page instead of to the balloon — one
+      // long line where the balloon wanted six. The probe also hides this
+      // layer's glyphs, so the region no longer has to be repaired afterwards.
+      _createBalloonWandSelection(tolerance);
       var bounds = _getCurrentSelectionBounds();
       if (!bounds || bounds.width * bounds.height < 200) {
         _deselect();
@@ -4992,13 +5057,20 @@ function getActiveLayerTextIfChanged(data) {
   }
   var layerId = null;
   var historyIndex = null;
+  var documentId = null;
   try {
     layerId = _getActiveLayerId();
   } catch (layerError) {}
   try {
     historyIndex = _getActiveHistoryIndex();
   } catch (historyError) {}
-  var signature = String(layerId) + ":" + String(historyIndex);
+  // Both halves restart per document: page 12 selected on layer 2 at history
+  // state 5 answered "unchanged" for page 11's layer 2 at its own state 5, and
+  // the panel kept showing the other page's text.
+  try {
+    documentId = _getCurrentDocumentId();
+  } catch (documentError) {}
+  var signature = String(documentId) + ":" + String(layerId) + ":" + String(historyIndex);
   if (layerId !== null && historyIndex !== null && data && data.signature === signature) {
     return jamJSON.stringify({ unchanged: true, signature: signature });
   }
@@ -5020,6 +5092,7 @@ function getActiveTextLayerGeometry() {
   }
   var layerId = null;
   var historyIndex = null;
+  var documentId = null;
   var bounds = null;
   try {
     layerId = _getActiveLayerId();
@@ -5027,6 +5100,12 @@ function getActiveTextLayerGeometry() {
   try {
     historyIndex = _getActiveHistoryIndex();
   } catch (historyError) {}
+  // The panel hands this signature straight back to getActiveLayerTextIfChanged,
+  // so the two must be built the same way or the "nothing changed" guard there
+  // never matches again and every arrow nudge pays for a full layer read.
+  try {
+    documentId = _getCurrentDocumentId();
+  } catch (documentError) {}
   try {
     bounds = _getCurrentTextLayerBounds();
   } catch (boundsError) {}
@@ -5035,8 +5114,9 @@ function getActiveTextLayerGeometry() {
   }
   return jamJSON.stringify({
     layerId: layerId,
+    documentId: documentId,
     bounds: bounds,
-    signature: String(layerId) + ":" + String(historyIndex),
+    signature: String(documentId) + ":" + String(layerId) + ":" + String(historyIndex),
   });
 }
 
