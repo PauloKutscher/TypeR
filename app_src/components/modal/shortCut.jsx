@@ -4,7 +4,7 @@ import { FiX } from "react-icons/fi";
 import { locale, getHotkeyPressed } from "../../utils";
 
 const MODIFIERS = ["WIN", "CTRL", "ALT", "SHIFT"];
-const SPECIAL_KEYS = { "+": "PLUS", "-": "MINUS", "=": "EQUAL", "/": "DIVIDE", "*": "MULTIPLY" };
+const SPECIAL_KEYS = { "+": "PLUS", "-": "MINUS", "=": "EQUAL", "/": "DIVIDE", "*": "MULTIPLY", " ": "SPACE" };
 const IGNORED_KEYS = ["Meta", "Control", "Alt", "Shift", "AltGraph", "CapsLock", "Dead", "Process", "Unidentified"];
 const hasMainKey = (keys) => (keys || []).some((key) => !MODIFIERS.includes(String(key).toUpperCase()));
 

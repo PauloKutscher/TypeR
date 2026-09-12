@@ -6,6 +6,7 @@ import "./lib/CSInterface";
 import { parseMarkdownRuns, convertHtmlToMarkdown } from "./markdownConvert";
 import { resolveStylePointText } from "./textLayerPayload";
 import { findNewerReleases, pickUpdateDownloadUrl } from "./updateLogic";
+import { withWatcherKey } from "./hotkeyState";
 import { installUpdateInPlace } from "./updateInstaller";
 import { UPDATE_TEST_CONFIG_FILE, parseUpdateTestConfig } from "./updateTestMode";
 import {
@@ -815,6 +816,7 @@ const toggleCleaningLayers = (callback = () => {}) => {
 // reads them globally, so binding them needs no setup from the user.
 const foregroundWatcher = {
   name: "",
+  key: "",
   time: 0,
   started: false,
   restartTimer: null,
@@ -900,6 +902,12 @@ const handleWatcherLine = (rawLine) => {
     emitMouseShortcut(parts[1], parts[2], parts.slice(3).join("|"));
     return;
   }
+  // The non-modifier key currently held, or empty on release. Sampled, not an
+  // edge: the hotkey poll reads it whenever it asks the host for the modifiers
+  if (line.indexOf("KD|") === 0) {
+    foregroundWatcher.key = line.slice(3).trim();
+    return;
+  }
   foregroundWatcher.name = line.indexOf("FG|") === 0 ? line.slice(3).trim() : line;
   foregroundWatcher.time = Date.now();
 };
@@ -937,6 +945,15 @@ const startForegroundWatcher = () => {
     // one of them rotated the canvas on every centring.
     "function Send-NoOpKey { [FW]::keybd_event(0xFF, 0, 0, [UIntPtr]::Zero); [FW]::keybd_event(0xFF, 0, 2, [UIntPtr]::Zero) }",
     "$lastH = [IntPtr]::Zero; $n = ''; $tick = 0; $altFixed = $false;",
+    // Photoshop 27.9.1 no longer reports the pressed key through ScriptUI's
+    // keyboardState (only the modifiers), so the held key is read here. Names
+    // follow what the settings recorder stores from the browser event (F2,
+    // ENTER, ARROWUP, PLUS) so a binding recorded before this matches as-is.
+    // ponytail: US/ABNT layouts only — OEM keys beyond +/- map to nothing;
+    // extend $kn when a user binds one.
+    "$kn = @{13='ENTER';9='TAB';27='ESCAPE';32='SPACE';8='BACKSPACE';46='DELETE';45='INSERT';36='HOME';35='END';33='PAGEUP';34='PAGEDOWN';37='ARROWLEFT';38='ARROWUP';39='ARROWRIGHT';40='ARROWDOWN';107='PLUS';187='PLUS';109='MINUS';189='MINUS';106='MULTIPLY';111='DIVIDE'};",
+    "foreach ($i in 48..57) { $kn[$i] = [string][char]$i }; foreach ($i in 65..90) { $kn[$i] = [string][char]$i }; foreach ($i in 96..105) { $kn[$i] = [string]($i - 96) }; foreach ($i in 112..135) { $kn[$i] = 'F' + ($i - 111) };",
+    "$vks = @($kn.Keys); $lastKey = '';",
     "while ($true) {",
     "$h = [FW]::GetForegroundWindow();",
     // Re-resolve on focus change, and keep retrying while the name is empty so
@@ -959,6 +976,10 @@ const startForegroundWatcher = () => {
     // A side button held with ALT is the same lone ALT release, without WIN
     "if ($m -match 'A' -and -not $altFixed -and $n -match 'photoshop') { $altFixed = $true; Send-NoOpKey }",
     "[Console]::Out.WriteLine('MB|' + $b + '|' + $m + '|' + $n) } }",
+    // Held state (0x8000), not the edge bit: the panel polls this like it
+    // polled keyName, and a release must clear it so the binding can re-fire
+    "$key = ''; foreach ($v in $vks) { if (([FW]::GetAsyncKeyState($v) -band 0x8000) -ne 0) { $key = $kn[$v]; break } }",
+    "if ($key -ne $lastKey) { $lastKey = $key; [Console]::Out.WriteLine('KD|' + $key) }",
     "$tick++;",
     "if ($tick -ge 5) { $tick = 0; [Console]::Out.WriteLine('FG|' + $n) }",
     "[Console]::Out.Flush();",
@@ -987,6 +1008,7 @@ const startForegroundWatcher = () => {
       foregroundWatcher.child = null;
       foregroundWatcher.started = false;
       foregroundWatcher.time = 0;
+      foregroundWatcher.key = "";
       if (foregroundWatcher.restartTimer) return;
       foregroundWatcher.restartTimer = setTimeout(() => {
         foregroundWatcher.restartTimer = null;
@@ -1013,7 +1035,7 @@ const getHotkeyPressed = (callback) => {
     callback("a");
     return;
   }
-  csInterface.evalScript("getHotkeyPressed()", callback);
+  csInterface.evalScript("getHotkeyPressed()", (state) => callback(withWatcherKey(state, foregroundWatcher.key)));
 };
 
 let resizeTextAreaFrame = null;
