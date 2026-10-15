@@ -15,46 +15,10 @@ import { isShortcutActiveForEvent, pasteInSelection, withShortcutHint } from "..
 import { createFontPreviewRegistry, getFontPreviewFamily } from "../../fontPreview";
 import { notePerfRender } from "../../perfDebug";
 import TextShapeRFitPreview from "../textShapeRFitPreview";
+import { createPanelSnapshotQueue } from "./panelSnapshot";
 
 let textShapeREnginePromise = null;
-let panelSnapshotPending = false;
-let panelSnapshotTimer = null;
-let panelSnapshotSignature = "";
-let panelSnapshotNeedsLayer = false;
-let panelSnapshotCallbacks = [];
-const schedulePanelSnapshot = () => {
-  if (panelSnapshotPending || panelSnapshotTimer) return;
-  panelSnapshotTimer = setTimeout(() => {
-    panelSnapshotTimer = null;
-    panelSnapshotPending = true;
-    const requestedSignature = panelSnapshotSignature;
-    const requestedCallbacks = panelSnapshotCallbacks;
-    const requestedLayer = panelSnapshotNeedsLayer;
-    panelSnapshotSignature = "";
-    panelSnapshotNeedsLayer = false;
-    panelSnapshotCallbacks = [];
-    csInterface.evalScript(`getTypeRPanelSnapshot(${JSON.stringify({ signature: requestedSignature, layer: requestedLayer })})`, (result) => {
-      panelSnapshotPending = false;
-      let snapshot = { activeLayer: null, selection: null, layers: [] };
-      try {
-        snapshot = JSON.parse(result || "{}") || snapshot;
-      } catch (error) {}
-      requestedCallbacks.forEach((snapshotCallback) => snapshotCallback(snapshot));
-      // Requests arriving while ExtendScript was busy belong to the next
-      // Photoshop state; do not satisfy them with the now-stale response.
-      if (panelSnapshotCallbacks.length) schedulePanelSnapshot();
-    });
-  }, 0);
-};
-// Reading the active layer's text dominates the snapshot (~95 ms on a page),
-// so callers say whether they need it. A coalesced batch asks for it as soon as
-// any one of them does.
-const requestPanelSnapshot = (signature, callback, needsLayer = true) => {
-  panelSnapshotCallbacks.push(callback);
-  if (needsLayer) panelSnapshotNeedsLayer = true;
-  if (signature) panelSnapshotSignature = signature;
-  schedulePanelSnapshot();
-};
+const requestPanelSnapshot = createPanelSnapshotQueue((script, callback) => csInterface.evalScript(script, callback));
 const loadTextShapeREngine = () => {
   if (!textShapeREnginePromise) {
     textShapeREnginePromise = import(/* webpackChunkName: "text-shaper-engine" */ "../../textShapeR");
@@ -1115,18 +1079,17 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       }
       if (selectionCheckInterval.current) {
         clearInterval(selectionCheckInterval.current);
-      }
-      if (shiftTipTimeout.current) {
-        clearTimeout(shiftTipTimeout.current);
-      }
-      if (clearAllTipTimeout.current) {
-        clearTimeout(clearAllTipTimeout.current);
-      }
-      if (clearButtonTimeout.current) {
-        clearTimeout(clearButtonTimeout.current);
+        selectionCheckInterval.current = null;
       }
     };
   }, [context.state.multiBubbleMode, context.state.modalType]);
+  // Tip and long-press timers only need clearing on unmount. Clearing them on
+  // every mode or modal change left the shift tip stuck on screen.
+  React.useEffect(() => () => {
+    if (shiftTipTimeout.current) clearTimeout(shiftTipTimeout.current);
+    if (clearAllTipTimeout.current) clearTimeout(clearAllTipTimeout.current);
+    if (clearButtonTimeout.current) clearTimeout(clearButtonTimeout.current);
+  }, []);
   React.useEffect(() => {
     if (!context.state.multiBubbleMode && shiftSelectionWarning) {
       setShiftSelectionWarning(false);

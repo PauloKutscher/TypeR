@@ -113,7 +113,7 @@ assert.ok(
   "A marquee must still re-detect the shape"
 );
 assert.ok(
-  /const requestPanelSnapshot = \(signature, callback, needsLayer = true\)/.test(previewSource),
+  /createPanelSnapshotQueue\(/.test(previewSource) && /callback, nextNeedsLayer = true/.test(fs.readFileSync(path.join(rootDir, "app_src/components/previewBlock/panelSnapshot.js"), "utf8")),
   "Snapshot callers must be able to skip the layer read"
 );
 assert.strictEqual(
