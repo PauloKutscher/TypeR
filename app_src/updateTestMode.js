@@ -30,6 +30,13 @@ const parseUpdateTestConfig = (raw) => {
     releasesUrl: data.releasesUrl,
     currentVersion,
     autoInstall: data.autoInstall === true,
+    // Opens the switch to TypeR UXP whatever the Photoshop version or the
+    // installed plugins; the package comes from the local release list
+    forceUxpMigration: data.forceUxpMigration === true,
+    // Installs the plugin as if Creative Cloud's plugin installer were absent
+    forceManualPluginInstall: data.forceManualPluginInstall === true,
+    // Runs the swap to the Windows package on any system, from this address
+    platformPackageUrl: isLoopbackHttpUrl(data.platformPackageUrl) ? data.platformPackageUrl : null,
   };
 };
 

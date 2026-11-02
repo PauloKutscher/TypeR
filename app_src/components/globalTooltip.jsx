@@ -1,7 +1,7 @@
 import React from "react";
 
 const OFFSET = 8;
-const SHOW_DELAY = 550;
+const SHOW_DELAY = 300;
 
 const getTooltipTarget = (node) => {
   if (!node || node === document || node === window) return null;
@@ -125,6 +125,7 @@ const GlobalTooltip = React.memo(function GlobalTooltip() {
     document.addEventListener("mouseout", handleMouseOut, true);
     document.addEventListener("focusin", handleFocus, true);
     document.addEventListener("focusout", hide, true);
+    document.addEventListener("dragstart", hide, true);
     window.addEventListener("blur", hide);
     window.addEventListener("scroll", hide, true);
     window.addEventListener("resize", hide);
@@ -136,6 +137,7 @@ const GlobalTooltip = React.memo(function GlobalTooltip() {
       document.removeEventListener("mouseout", handleMouseOut, true);
       document.removeEventListener("focusin", handleFocus, true);
       document.removeEventListener("focusout", hide, true);
+      document.removeEventListener("dragstart", hide, true);
       window.removeEventListener("blur", hide);
       window.removeEventListener("scroll", hide, true);
       window.removeEventListener("resize", hide);

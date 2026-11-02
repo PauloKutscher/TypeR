@@ -25,7 +25,7 @@ const sourceDir = path.join(root, "app_src");
 // declaring. ExtendScript (app_src/host.js) is not a module and is checked by
 // its own suites, so it stays out.
 const KNOWN_GLOBALS = new Set([
-  "window", "document", "console", "navigator", "location", "localStorage", "sessionStorage",
+  "window", "self", "global", "document", "console", "navigator", "location", "localStorage", "sessionStorage",
   "setTimeout", "clearTimeout", "setInterval", "clearInterval", "requestAnimationFrame",
   "cancelAnimationFrame", "queueMicrotask", "fetch", "alert", "confirm", "prompt", "getComputedStyle",
   "matchMedia", "performance", "requestIdleCallback", "structuredClone",

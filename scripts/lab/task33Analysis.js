@@ -9,7 +9,7 @@ const { classify, topology } = require("./caseClass");
 const acorn = require("acorn");
 const { execFileSync } = require("child_process");
 const root = path.resolve(__dirname, "../..");
-const source = fs.readFileSync(path.join(root, "app_src/host.js"), "utf8");
+const source = fs.readFileSync(path.join(root, "app_src/bubbleGeometry.jsxinc"), "utf8") + "\n" + fs.readFileSync(path.join(root, "app_src/host.js"), "utf8");
 const defaultHost = liftFrom(instrument(source));
 const read = file => JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, ""));
 const distance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);

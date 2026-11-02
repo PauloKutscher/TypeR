@@ -28,6 +28,8 @@ const expectedNewCommands = [
   "toggleTextShapeR",
   "previousTab",
   "nextTab",
+  "centerDouble",
+  "cycleAutoCenter",
 ];
 
 assert(commandIds.length > 0, "No shortcut commands found");
@@ -50,8 +52,8 @@ assert(
 const insertTextBlock = commandBlockById.get("insertText");
 assert(insertTextBlock, "Missing shortcut command: insertText");
 assert(
-  /defaultKeys:\s*\["WIN",\s*"SHIFT",\s*"V"\]/.test(insertTextBlock),
-  "insertText must use the safer default Cmd/Ctrl+Shift+V shortcut"
+  /defaultKeys:\s*\["CTRL",\s*"ALT",\s*"L"\]/.test(insertTextBlock),
+  "insertText must not share its default with Photoshop's Paste in Place (Cmd+Shift+V)"
 );
 const keepTextSizeBlock = commandBlockById.get("keepTextSize");
 assert(keepTextSizeBlock, "Missing shortcut modifier: keepTextSize");
@@ -117,6 +119,7 @@ assert(
 );
 
 const utilityCalls = [];
+let windowTooShortForTextShapeR = false;
 let selectionSnapshot = { selection: null, layers: [{ id: 10 }, { id: 20 }] };
 const transformedCommands = babel.transformSync(commandSource, {
   presets: [["@babel/preset-env", { modules: "commonjs" }]],
@@ -126,6 +129,7 @@ const mockRequire = (request) => {
   if (request === "./utils") {
     return {
       alignTextLayerToSelection: (...args) => utilityCalls.push(["align", ...args]),
+      alignTextLayersToDoubleBubble: (...args) => utilityCalls.push(["alignDouble", ...args]),
       changeActiveLayerTextSize: (...args) => utilityCalls.push(["resize", ...args]),
       createTextLayerInSelection: (...args) => utilityCalls.push(["create", ...args]),
       createTextLayersInStoredSelections: (...args) => utilityCalls.push(["createMany", ...args]),
@@ -164,6 +168,19 @@ const mockRequire = (request) => {
       getScaledStyle: (style) => style,
     };
   }
+  if (request === "./uiLayout") {
+    return { isWindowTooShortForTextShapeR: () => windowTooShortForTextShapeR };
+  }
+  if (request === "./styleStroke") {
+    return { isStyleStrokeOn: (style) => !!(style && style.stroke && style.stroke.enabled) };
+  }
+  if (request === "./smartPasteClient") {
+    return {
+      smartPasteInSelection: (...args) => utilityCalls.push(["smartPaste", ...args]),
+      smartPasteStoredSelections: (...args) => utilityCalls.push(["smartPasteStored", ...args]),
+      canSmartPasteStoredSelections: () => false,
+    };
+  }
   throw new Error(`Unexpected shortcutCommands dependency: ${request}`);
 };
 new Function("require", "module", "exports", transformedCommands)(
@@ -173,7 +190,7 @@ new Function("require", "module", "exports", transformedCommands)(
 );
 const runtimeCommands = commandModule.exports.shortcutCommands;
 const getCommand = (id) => runtimeCommands.find((command) => command.id === id);
-assert.deepStrictEqual(commandModule.exports.getDefaultShortcuts().insertText, ["WIN", "SHIFT", "V"]);
+assert.deepStrictEqual(commandModule.exports.getDefaultShortcuts().insertText, ["CTRL", "ALT", "L"]);
 assert.deepStrictEqual(commandModule.exports.getDefaultShortcuts().keepTextSize, ["ALT"]);
 assert.strictEqual(
   commandModule.exports.isShortcutActiveForEvent({ altKey: true }, ["ALT"]),
@@ -190,8 +207,27 @@ const migratedShortcuts = commandModule.exports.migrateShortcutDefaults(
   commandModule.exports.getDefaultShortcuts()
 );
 assert.strictEqual(migratedShortcuts.migrated, true, "The old insertText default must be migrated");
-assert.deepStrictEqual(migratedShortcuts.shortcuts.insertText, ["WIN", "SHIFT", "V"]);
+assert.deepStrictEqual(migratedShortcuts.shortcuts.insertText, ["CTRL", "ALT", "L"]);
+assert.deepStrictEqual(
+  commandModule.exports.migrateShortcutDefaults({ insertText: ["WIN", "SHIFT", "V"] }).shortcuts.insertText,
+  ["CTRL", "ALT", "L"],
+  "Every earlier insertText default must be migrated"
+);
 assert.deepStrictEqual(migratedShortcuts.shortcuts.nextPage, ["ALT", "P"], "Custom shortcuts must be preserved");
+
+// The stroke shortcut acts on the selected style, and tells which way it went
+const strokeDispatches = [];
+const strokeContext = (stroke) => ({
+  state: { currentStyle: { id: "style-1", stroke } },
+  dispatch: (action) => strokeDispatches.push(action),
+});
+getCommand("toggleStyleStroke").handler(strokeContext({ enabled: true, size: 3 }));
+assert.deepStrictEqual(strokeDispatches[0], { type: "toggleStyleStroke", id: "style-1" });
+assert.strictEqual(strokeDispatches[1].type, "showNotice");
+strokeDispatches.length = 0;
+getCommand("toggleStyleStroke").handler({ state: { currentStyle: null }, dispatch: (action) => strokeDispatches.push(action) });
+assert.strictEqual(strokeDispatches.length, 0, "Without a style the shortcut does nothing");
+assert.deepStrictEqual(commandModule.exports.getDefaultShortcuts().toggleStyleStroke, [], "The stroke shortcut has no default key");
 
 const dispatches = [];
 const baseContext = {
@@ -206,7 +242,6 @@ const baseContext = {
     storedSelections: [{ id: "selection-1" }, { id: "selection-2" }],
     tabs: [{ id: "tab-1" }, { id: "tab-2" }, { id: "tab-3" }],
     currentTabId: "tab-2",
-    multiTabEnabled: true,
   },
   dispatch: (action) => dispatches.push(action),
 };
@@ -248,7 +283,28 @@ assert.deepStrictEqual(preservedApplyCall[5], { preserveActiveTextSize: true });
 selectionSnapshot = { selection: { width: 100, height: 80 }, layers: [{ id: 10 }, { id: 20 }] };
 getCommand("add").handler(pasteContext);
 assert.deepStrictEqual(utilityCalls.shift(), ["getTypeRSelectionSnapshot"]);
-assert.strictEqual(utilityCalls.shift()[0], "create", "Paste with an active selection must create a text layer");
+const createCall = utilityCalls.shift();
+assert.strictEqual(createCall[0], "create", "Paste with an active selection must create a text layer");
+assert.deepStrictEqual(createCall[7], { autoCenter: "off", resizeTextBox: false }, "Auto-centre is off unless chosen");
+getCommand("add").handler({
+  ...pasteContext,
+  state: { ...pasteContext.state, autoCenterMode: "multi", resizeTextBoxOnCenter: true },
+}, { preserveActiveTextSize: true });
+utilityCalls.shift();
+assert.deepStrictEqual(utilityCalls.shift()[7], { preserveActiveTextSize: true, autoCenter: "multi", resizeTextBox: true },
+  "The paste carries the auto-centre mode and Center's frame fitting");
+getCommand("add").handler({ ...baseContext, state: { ...baseContext.state, autoCenterMode: "single" } });
+const batchCall = utilityCalls.shift();
+assert.strictEqual(batchCall[0], "createMany");
+assert.deepStrictEqual(batchCall[8], { autoCenter: "single", resizeTextBox: false }, "A multi-bubble batch is auto-centred too");
+getCommand("centerDouble").handler({ ...baseContext, state: { ...baseContext.state, resizeTextBoxOnCenter: true, internalPadding: 6 } });
+assert.deepStrictEqual(utilityCalls.shift(), ["alignDouble", true, 6]);
+["off", "single", "multi"].forEach((mode, index, modes) => {
+  getCommand("cycleAutoCenter").handler({ ...baseContext, state: { ...baseContext.state, autoCenterMode: mode } });
+  assert.deepStrictEqual(dispatches.shift(), { type: "setAutoCenterMode", value: modes[(index + 1) % modes.length] });
+  assert.strictEqual(dispatches.shift().type, "showNotice", "The key tells the new mode: only Settings shows it");
+});
+assert.strictEqual(commandModule.exports.nextAutoCenterMode(undefined), "off", "An unknown mode restarts the cycle");
 getCommand("applyMultiple").handler(baseContext);
 assert.deepStrictEqual(utilityCalls.shift(), ["getSelectedTextLayers"]);
 assert.deepStrictEqual(utilityCalls.shift(), [
@@ -276,6 +332,21 @@ assert.deepStrictEqual(dispatches.shift(), { type: "clearSelections" });
 assert.deepStrictEqual(utilityCalls.shift(), ["deselect"]);
 getCommand("toggleTextShapeR").handler(baseContext);
 assert.deepStrictEqual(dispatches.shift(), { type: "setInlineTextShapeR", value: true });
+windowTooShortForTextShapeR = true;
+getCommand("toggleTextShapeR").handler(baseContext);
+windowTooShortForTextShapeR = false;
+{
+  const notice = dispatches.shift();
+  assert.strictEqual(notice.type, "showNotice", "A too short window must explain why TextShapeR stays off");
+  assert.strictEqual(notice.kind, "warning");
+  assert.strictEqual(dispatches.length, 0, "A too short window must not change the saved TextShapeR choice");
+}
+assert(
+  /@media \(max-height: 450px\) \{\s*\.preview-bottom \{\s*display: none;/.test(
+    fs.readFileSync(path.join(rootDir, "app_src", "components", "previewBlock", "previewBlock.scss"), "utf8")
+  ) && fs.readFileSync(path.join(rootDir, "app_src", "uiLayout.js"), "utf8").includes('matchMedia("(max-height: 450px)")'),
+  "The TextShapeR height check must use the media query that hides the preview bottom"
+);
 getCommand("toggleCleaningLayers").handler(baseContext);
 assert.deepStrictEqual(utilityCalls.shift(), ["toggleCleaningLayers"]);
 getCommand("previousTab").handler(baseContext);
@@ -323,5 +394,312 @@ localeFiles.forEach((file) => {
     assert(!/\(Win\s*\+/.test(line[1]), `${key} still hard-codes a shortcut in ${path.relative(rootDir, file)}`);
   });
 });
+
+// --- runtime dispatch gate -------------------------------------------------
+
+const gateStart = hotkeySource.indexOf("const createShortcutGate");
+const gateEnd = hotkeySource.indexOf("const HotkeysListner");
+assert(gateStart !== -1 && gateEnd > gateStart, "Could not extract the shortcut gate");
+const { createShortcutGate } = new Function(`${hotkeySource.slice(gateStart, gateEnd)}\nreturn { createShortcutGate };`)();
+
+const makeGate = () => {
+  const clock = { t: 1000, timers: [] };
+  const gate = createShortcutGate({
+    now: () => clock.t,
+    schedule: (fn, wait) => {
+      const timer = { fn, at: clock.t + wait };
+      clock.timers.push(timer);
+      return timer;
+    },
+    cancel: (timer) => {
+      clock.timers = clock.timers.filter((item) => item !== timer);
+    },
+  });
+  clock.advance = (ms) => {
+    const end = clock.t + ms;
+    for (;;) {
+      const timer = clock.timers.filter((item) => item.at <= end).sort((x, y) => x.at - y.at)[0];
+      if (!timer) break;
+      clock.timers = clock.timers.filter((item) => item !== timer);
+      clock.t = timer.at;
+      timer.fn();
+    }
+    clock.t = end;
+  };
+  return { gate, clock };
+};
+const slowCommand = { id: "next", repeatDelay: 300 };
+const fastCommand = { id: "add", repeatDelay: 0 };
+
+{
+  // A held chord fires once, and again only after a release
+  const { gate, clock } = makeGate();
+  const runs = [];
+  gate.press(fastCommand, () => runs.push("add"));
+  clock.advance(40);
+  gate.press(fastCommand, () => runs.push("add"));
+  assert.deepStrictEqual(runs, ["add"], "A held shortcut must not repeat from key state");
+  gate.release();
+  gate.press(fastCommand, () => runs.push("add"));
+  assert.deepStrictEqual(runs, ["add", "add"], "A new press after a release must fire");
+}
+
+{
+  // A quick second tap inside repeatDelay is deferred, not lost
+  const { gate, clock } = makeGate();
+  const runs = [];
+  gate.press(slowCommand, () => runs.push(clock.t));
+  clock.advance(120);
+  gate.release();
+  clock.advance(30);
+  assert.strictEqual(gate.press(slowCommand, () => runs.push(clock.t)), true);
+  assert.deepStrictEqual(runs, [1000], "The deferred press must wait for the delay");
+  // A third tap while one waits is dropped: the delay still throttles
+  gate.release();
+  assert.strictEqual(gate.press(slowCommand, () => runs.push(clock.t)), false);
+  clock.advance(200);
+  assert.deepStrictEqual(runs, [1000, 1300], "The second tap must run once the delay ends");
+  // The delay counts from the deferred run
+  gate.release();
+  clock.advance(100);
+  gate.press(slowCommand, () => runs.push(clock.t));
+  clock.advance(300);
+  assert.deepStrictEqual(runs, [1000, 1300, 1600]);
+}
+
+{
+  // Disposing the gate cancels a waiting press
+  const { gate, clock } = makeGate();
+  const runs = [];
+  gate.press(slowCommand, () => runs.push(1));
+  gate.release();
+  gate.press(slowCommand, () => runs.push(2));
+  gate.dispose();
+  clock.advance(1000);
+  assert.deepStrictEqual(runs, [1], "A disposed gate must not run a deferred press");
+}
+
+{
+  // Mouse presses are edges: no release needed, still throttled
+  const { gate, clock } = makeGate();
+  const runs = [];
+  gate.press(fastCommand, () => runs.push(1), true);
+  gate.press(fastCommand, () => runs.push(2), true);
+  assert.deepStrictEqual(runs, [1, 2], "Each side-button press must fire");
+  clock.advance(1000);
+  gate.press(slowCommand, () => runs.push(3), true);
+  gate.press(slowCommand, () => runs.push(4), true);
+  assert.deepStrictEqual(runs, [1, 2, 3]);
+  clock.advance(300);
+  assert.deepStrictEqual(runs, [1, 2, 3, 4], "A side-button press inside repeatDelay must wait, not be lost");
+}
+
+assert(!/keyUpRef|lastActionRef/.test(hotkeySource), "Key state and mouse buttons must share the gate");
+assert(
+  /if \(!command\) \{\s*gateRef\.current\.release\(\);/.test(hotkeySource) && /if \(canFire\) gateRef\.current\.press/.test(hotkeySource),
+  "Releases must be tracked even when no shortcut may fire"
+);
+assert(
+  /window\.typerUXP && window\.typerUXP\.onKeys/.test(hotkeySource) && /subscribeToKeys \? null : setInterval/.test(hotkeySource),
+  "UXP must match the pushed keyboard state, and only CEP poll it"
+);
+assert(
+  /checkState\(state, !isBlockingModal\(context\.getState\(\)\.modalType\) && !isHostActionPending\(\) && !isFormFieldActive\(\) && !document\.hidden\)/.test(hotkeySource),
+  "Pushed key state must not fire in a modal, during a host action, while typing in the panel or while the panel is hidden"
+);
+assert(
+  /if \(isBlockingModal\(state\.modalType\) \|\| isHostActionPending\(\)\) return;/.test(hotkeySource),
+  "A press the gate deferred must not run while a paste still runs: the same line would be pasted twice"
+);
+
+// The guided tours (basics walkthrough, What's new) float over the panel and
+// let shortcuts run (they teach them); every other window blocks them
+{
+  const sessionSource = fs.readFileSync(path.join(__dirname, "..", "app_src", "whatsNewSession.js"), "utf8");
+  const match = sessionSource.match(/export const WHATS_NEW_MODAL = "(\w+)";\s*export const WALKTHROUGH_MODAL = "(\w+)";[\s\S]*?export const isTourModal = (\(modalType\) => [^;]+);[\s\S]*?export const isBlockingModal = (\(modalType\) => [^;]+);/);
+  assert(match, "isBlockingModal not found in whatsNewSession.js");
+  const isBlockingModal = new Function("WHATS_NEW_MODAL", "WALKTHROUGH_MODAL", "const isTourModal = " + match[3] + "; return " + match[4])(match[1], match[2]);
+  assert.strictEqual(isBlockingModal(null), false);
+  assert.strictEqual(isBlockingModal("whatsNew"), false, "Shortcuts must work during the What's new tour");
+  assert.strictEqual(isBlockingModal("walkthrough"), false, "Shortcuts must work during the basics walkthrough");
+  ["settings", "editStyle", "help"].forEach((modal) => assert.strictEqual(isBlockingModal(modal), true, modal + " must block shortcuts"));
+  assert.strictEqual((hotkeySource.match(/isBlockingModal\(/g) || []).length, 5, "Every shortcut path must use isBlockingModal");
+}
+
+// --- typing in the panel ---------------------------------------------------
+
+{
+  const focusStart = hotkeySource.indexOf("const isFormFieldActive");
+  const isFormFieldActive = new Function("document", `${hotkeySource.slice(focusStart, gateStart)}\nreturn isFormFieldActive;`);
+  const textarea = { tagName: "TEXTAREA", isContentEditable: false };
+  const button = { tagName: "BUTTON", isContentEditable: false };
+  assert.strictEqual(isFormFieldActive({ activeElement: textarea, hasFocus: () => true })(), true, "Typing in the panel blocks shortcuts");
+  assert.strictEqual(isFormFieldActive({ activeElement: button, hasFocus: () => true })(), false);
+  assert.strictEqual(
+    isFormFieldActive({ activeElement: textarea, hasFocus: () => false })(),
+    false,
+    "A textarea left focused while Photoshop has the keyboard must not block shortcuts"
+  );
+  assert.strictEqual(isFormFieldActive({ activeElement: textarea })(), true, "Without hasFocus the field alone decides");
+}
+
+// --- modifier-only chords ----------------------------------------------------
+
+const matchingStart = hotkeySource.indexOf("const MODIFIER_KEYS");
+const matchingEnd = hotkeySource.indexOf("const getCommandOptions");
+const chordStart = hotkeySource.indexOf("const createModifierChordTracker");
+const chordEnd = hotkeySource.indexOf("const HotkeysListner");
+assert(matchingStart !== -1 && matchingEnd > matchingStart && chordStart !== -1 && chordEnd > chordStart, "Could not extract the chord tracker");
+const {
+  checkShortcut: checkKeys,
+  matchBinding: matchKeys,
+  createModifierChordTracker,
+} = new Function(
+  "shortcutCommands",
+  `${hotkeySource.slice(matchingStart, matchingEnd)}\n${hotkeySource.slice(chordStart, chordEnd)}\nreturn { checkShortcut, matchBinding, createModifierChordTracker };`
+)(runtimeCommands);
+
+const defaultShortcuts = commandModule.exports.getDefaultShortcuts();
+const permutations = (keys) => (keys.length < 2
+  ? [keys]
+  : keys.flatMap((key, index) => permutations(keys.filter((_, other) => other !== index)).map((rest) => [key].concat(rest))));
+
+// Presses the keys one by one, then releases them in the same order, through
+// both matchers as hotkeys.jsx does; answers the commands that ran
+const playChord = (order, { hold = 100, shortcut = defaultShortcuts } = {}) => {
+  let time = 1000;
+  const tracker = createModifierChordTracker({ now: () => time });
+  const ran = [];
+  const held = [];
+  let mainFired = false;
+  const step = () => {
+    const chord = tracker.update(held.slice());
+    if (chord) {
+      const command = matchKeys(chord, shortcut, true);
+      if (command) ran.push(command.id + (checkKeys(chord, shortcut.keepTextSize) ? "+keep" : ""));
+    }
+    const command = matchKeys(held, shortcut, false);
+    if (!command) {
+      mainFired = false;
+      return;
+    }
+    tracker.cancel();
+    if (!mainFired) ran.push(command.id);
+    mainFired = true;
+  };
+  order.forEach((key, index) => {
+    if (index) time += 40;
+    held.push(key);
+    step();
+  });
+  time += hold;
+  order.forEach((key) => {
+    held.splice(held.indexOf(key), 1);
+    step();
+    time += 40;
+  });
+  return ran;
+};
+
+[
+  [["WIN", "CTRL"], "add"],
+  [["WIN", "SHIFT"], "apply"],
+  [["WIN", "ALT"], "center+keep"],
+  [["WIN", "CTRL", "ALT"], "add+keep"],
+  [["WIN", "SHIFT", "ALT"], "apply+keep"],
+].forEach(([keys, expected]) => permutations(keys).forEach((order) => {
+  assert.deepStrictEqual(playChord(order), [expected], `${order.join(" > ")} must run ${expected} once, in any press order`);
+}));
+["S", "Z", "N", "I", "E"].forEach((key) => {
+  assert.deepStrictEqual(playChord(["WIN", "SHIFT", key]), [], `Cmd+Shift+${key} belongs to Photoshop`);
+  assert.deepStrictEqual(playChord(["WIN", "ALT", key]), [], `Cmd+Opt+${key} belongs to Photoshop`);
+  assert.deepStrictEqual(playChord(["WIN", "CTRL", key]), [], `Cmd+Ctrl+${key} belongs to Photoshop or the system`);
+  assert.deepStrictEqual(playChord(["WIN", "ALT", "SHIFT", key]), [], "Three modifiers and a key must not run anything");
+});
+{
+  const shortcut = { ...defaultShortcuts, insertText: ["WIN", "SHIFT", "V"] };
+  permutations(["WIN", "SHIFT", "V"]).forEach((order) => {
+    assert.deepStrictEqual(playChord(order, { shortcut }), ["insertText"], `${order.join(" > ")} must run the longer shortcut and nothing else`);
+  });
+}
+{
+  const shortcut = { ...defaultShortcuts, centerDouble: ["WIN", "SHIFT", "B"] };
+  assert.deepStrictEqual(playChord(["WIN", "SHIFT", "B"], { shortcut }), ["centerDouble"], "A chord may extend a modifier-only shortcut");
+}
+assert.deepStrictEqual(playChord(["WIN", "CTRL"], { hold: 2000 }), [], "Modifiers held for long are not a tap");
+assert.deepStrictEqual(playChord(["ALT"]), [], "The keep-size modifier alone runs nothing");
+
+{
+  let time = 0;
+  const tracker = createModifierChordTracker({ now: () => time });
+  const feed = (...keys) => {
+    time += 50;
+    return tracker.update(keys);
+  };
+  // Cmd held, Ctrl tapped: each tap runs
+  feed("WIN");
+  feed("WIN", "CTRL");
+  assert.deepStrictEqual(feed("WIN"), ["WIN", "CTRL"]);
+  feed("WIN", "CTRL");
+  assert.deepStrictEqual(feed("WIN"), ["WIN", "CTRL"], "A chord can be tapped again while a modifier stays held");
+  assert.strictEqual(feed(), null, "Releasing the rest of a chord that ran must not run it again");
+  // A key cancels until every modifier is up
+  feed("WIN");
+  feed("WIN", "SHIFT");
+  feed("WIN", "SHIFT", "Z");
+  assert.strictEqual(feed("WIN", "SHIFT"), null);
+  feed("WIN");
+  feed("WIN", "SHIFT");
+  assert.strictEqual(feed("WIN"), null, "A chord stays cancelled until every modifier is up");
+  feed();
+  feed("WIN");
+  feed("WIN", "SHIFT");
+  assert.deepStrictEqual(feed("WIN"), ["WIN", "SHIFT"], "A new chord runs after a full release");
+  feed();
+  // A stale ScriptUI keyName is there from the first modifier on
+  feed("APOSTROPHE");
+  feed("WIN", "APOSTROPHE");
+  feed("WIN", "CTRL", "APOSTROPHE");
+  assert.deepStrictEqual(feed("WIN", "APOSTROPHE"), ["WIN", "CTRL"], "A stale key name must not cancel a chord");
+  feed();
+  // A side button or another shortcut takes the modifiers
+  feed("WIN");
+  feed("WIN", "CTRL");
+  tracker.cancel();
+  assert.strictEqual(feed("WIN"), null);
+  feed();
+}
+
+// The key is "=" or "+" depending on the layout and the reader
+["EQUAL", "PLUS"].forEach((key) => {
+  assert.strictEqual(checkKeys(["CTRL", "ALT", key], ["CTRL", "ALT", "EQUAL"]), true);
+  assert.strictEqual(checkKeys(["CTRL", "ALT", key], ["CTRL", "ALT", "PLUS"]), true);
+});
+assert.strictEqual(checkKeys(["CTRL", "ALT", "MINUS"], ["CTRL", "ALT", "EQUAL"]), false);
+
+// New defaults, and the migration away from the ones Photoshop also reacts to
+assert.deepStrictEqual(defaultShortcuts.previous, ["CTRL", "SHIFT", "ENTER"]);
+assert.deepStrictEqual(defaultShortcuts.nextPage, ["CTRL", "ALT", "ENTER"]);
+assert.deepStrictEqual(defaultShortcuts.increase, ["CTRL", "ALT", "U"]);
+assert.deepStrictEqual(defaultShortcuts.decrease, ["CTRL", "ALT", "D"]);
+{
+  const { shortcuts, migrated } = commandModule.exports.migrateShortcutDefaults({
+    previous: ["CTRL", "TAB"],
+    nextPage: ["SHIFT", "X"],
+    increase: ["CTRL", "SHIFT", "PLUS"],
+    decrease: ["F5"],
+  });
+  assert.strictEqual(migrated, true);
+  assert.deepStrictEqual(shortcuts.previous, defaultShortcuts.previous);
+  assert.deepStrictEqual(shortcuts.nextPage, defaultShortcuts.nextPage);
+  assert.deepStrictEqual(shortcuts.increase, defaultShortcuts.increase);
+  assert.deepStrictEqual(shortcuts.decrease, ["F5"], "A customized shortcut must be kept");
+  const taken = commandModule.exports.migrateShortcutDefaults({
+    previous: ["CTRL", "TAB"],
+    nextStyle: ["CTRL", "SHIFT", "ENTER"],
+  });
+  assert.deepStrictEqual(taken.shortcuts.previous, ["CTRL", "TAB"], "The old default stays when the new one is taken");
+  assert.strictEqual(taken.migrated, false);
+}
 
 console.log("shortcut registry tests passed");

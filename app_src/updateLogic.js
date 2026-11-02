@@ -33,25 +33,44 @@ const compareVersions = (left, right) => {
   return 0;
 };
 
+// The UXP plugin's release assets. Clients up to 3.0.0 install the first asset
+// that ends in .ccx with "typer" in its name, on any system, and their Legacy
+// panel and standalone updaters ask for TypeR-UXP.ccx by name. So TypeR-UXP.ccx
+// stays a package every system can run (no addon, it replaces itself on Windows:
+// uxpPlatformPackage.js), and the name of the Windows package must not contain
+// "typer": those clients then skip it, in whatever order GitHub lists the assets.
+const UXP_PACKAGE = "TypeR-UXP.ccx";
+const UXP_WINDOWS_PACKAGE = "UXP-Windows.ccx";
+
+// The Windows package of a release, whose tag is its version
+const windowsPackageUrl = (version) => "https://github.com/PauloKutscher/TypeR/releases/download/" + version + "/" + UXP_WINDOWS_PACKAGE;
+
 // Only a built release asset is installable. The GitHub "source code" zipball
 // has no compiled app/ folder (webpack output), so installing it would leave a
 // broken extension — no fallback on purpose.
-const pickUpdateDownloadUrl = (release) => {
+// The UXP plugin installs its .ccx asset instead of the CEP .zip.
+const pickUpdateDownloadUrl = (release, extension = ".zip", platform) => {
   const assets = release && Array.isArray(release.assets) ? release.assets : [];
+  if (extension === ".ccx" && platform) {
+    const mac = platform === "darwin" || platform === "mac";
+    const named = (name) => assets.find(asset => asset && asset.name === name);
+    const target = (!mac && named(UXP_WINDOWS_PACKAGE)) || named(UXP_PACKAGE);
+    return target && target.browser_download_url || null;
+  }
   const zipAsset = assets.find(
     (asset) =>
       asset &&
       typeof asset.name === "string" &&
-      asset.name.toLowerCase().endsWith(".zip") &&
+      asset.name.toLowerCase().endsWith(extension) &&
       asset.name.toLowerCase().indexOf("typer") !== -1
   );
   return zipAsset && zipAsset.browser_download_url ? zipAsset.browser_download_url : null;
 };
 
-const findNewerReleases = (releases, currentVersion) => {
+const findNewerReleases = (releases, currentVersion, extension = ".zip", platform) => {
   const list = Array.isArray(releases) ? releases : [];
   const newer = list.filter(
-    (release) => release && !release.draft && !release.prerelease && versionParts(release.tag_name) && !versionParts(release.tag_name).pre.length && pickUpdateDownloadUrl(release) && compareVersions(release.tag_name, currentVersion) > 0
+    (release) => release && !release.draft && !release.prerelease && versionParts(release.tag_name) && !versionParts(release.tag_name).pre.length && pickUpdateDownloadUrl(release, extension, platform) && compareVersions(release.tag_name, currentVersion) > 0
   );
   newer.sort((a, b) => compareVersions(b.tag_name, a.tag_name));
   return newer;
@@ -92,6 +111,17 @@ const mapZipEntryToTargetPath = (entryPath, rootPrefix) => {
   return null;
 };
 
+// Whether an update needs Photoshop to restart: it reads the manifest at its
+// start. The version and the Legacy panel's name change without that mattering.
+const manifestForComparison = (text) => String(text)
+  .replace(/\r\n/g, "\n")
+  .replace(/ExtensionBundleVersion="[^"]*"/, "")
+  .replace(/(<Extension\s+Id="typer"\s+Version=")[^"]*"/, "$1")
+  .replace(/<Menu>[^<]*<\/Menu>/, "");
+const manifestNeedsRestart = (installed, updated) => (
+  typeof installed !== "string" || manifestForComparison(installed) !== manifestForComparison(updated)
+);
+
 const shouldRunUpdateCheck = (lastCheckAt, now, interval = UPDATE_CHECK_INTERVAL) => {
   const last = Number(lastCheckAt) || 0;
   if (last <= 0) return true;
@@ -103,6 +133,9 @@ const shouldRunUpdateCheck = (lastCheckAt, now, interval = UPDATE_CHECK_INTERVAL
 
 export {
   UPDATE_CHECK_INTERVAL,
+  UXP_PACKAGE,
+  UXP_WINDOWS_PACKAGE,
+  windowsPackageUrl,
   INSTALL_FOLDERS,
   parseVersion,
   compareVersions,
@@ -110,5 +143,6 @@ export {
   findNewerReleases,
   findZipRootPrefix,
   mapZipEntryToTargetPath,
+  manifestNeedsRestart,
   shouldRunUpdateCheck,
 };

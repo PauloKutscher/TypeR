@@ -11,7 +11,7 @@ const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 
-const hostSource = fs.readFileSync(path.join(__dirname, "..", "app_src", "host.js"), "utf8");
+const hostSource = fs.readFileSync(path.join(__dirname, "..", "app_src", "bubbleGeometry.jsxinc"), "utf8") + "\n" + fs.readFileSync(path.join(__dirname, "..", "app_src", "host.js"), "utf8");
 
 function lift(signature, args) {
   const escaped = signature.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -189,7 +189,7 @@ const openRadius = lift("_getAdaptiveSelectionOpenRadius(bounds)", [
 assert.strictEqual(openRadius(box(0, 0, 850, 850)), 85, "a reference-sized region keeps its measured radius");
 assert.strictEqual(openRadius(box(0, 0, 6294, 8716)), 96, "a page-sized region must not open with a 629 px radius");
 
-const openBounds = lift("_getAdaptiveOpenedSelectionBounds(bounds)", [
+const openBounds = lift("_getAdaptiveOpenedSelectionBounds(bounds, holes)", [
   "app",
   "_getAdaptiveSelectionOpenRadius",
   "_createTempSelectionChannel",
@@ -199,6 +199,7 @@ const openBounds = lift("_getAdaptiveOpenedSelectionBounds(bounds)", [
   "_centroidRetryWorthIt",
   "_regionCoversTooMuchPage",
   "_hostState",
+  "_fillSelectionHoles = () => {}",
 ]);
 
 const retryWorthIt = lift("_centroidRetryWorthIt(skip)", [])();

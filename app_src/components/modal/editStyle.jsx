@@ -4,13 +4,13 @@ import "./editStyle.scss";
 import React from "react";
 import deepClone from "../../deepClone";
 import PropTypes from "prop-types";
-import { FiCopy, FiX, FiMinus, FiPlus } from "react-icons/fi";
+import { FiChevronDown, FiChevronUp, FiCopy, FiX, FiMinus, FiPlus } from "react-icons/fi";
 import { TiSortAlphabetically } from "react-icons/ti";
 import { GiVerticalFlip, GiHorizontalFlip } from "react-icons/gi";
 import { TbAlphabetArabic } from "react-icons/tb";
 import { MdDelete, MdCancel, MdSave, MdFormatColorText } from "react-icons/md";
 import { GrSubscript, GrSuperscript, GrBlockQuote, GrMonospace } from "react-icons/gr";
-import { BsTypeBold, BsTypeItalic, BsFonts, BsType, BsTypeUnderline, BsTypeStrikethrough } from "react-icons/bs";
+import { BsTypeBold, BsTypeItalic, BsFonts, BsType, BsTypeUnderline, BsTypeStrikethrough, BsTextParagraph } from "react-icons/bs";
 import { AiOutlineLineHeight, AiOutlineFontSize, AiOutlineColumnHeight, AiOutlineToTop, AiOutlineAlignCenter, AiOutlineAlignLeft, AiOutlineAlignRight } from "react-icons/ai";
 
 import { SketchPicker } from "react-color";
@@ -25,16 +25,23 @@ import {
   normalizeStyleSizePresets,
   normalizeStyleSizePresetWidthConfig,
   parseStyleSize,
+  sanitizeStyleSizeInput,
+  stepStyleSize,
 } from "../../styleSizePresets";
 import FontScanPromo from "./fontScanPromo";
+import FontPicker from "./fontPicker";
+import { pickFamilyPreviewFont } from "../../fontPreview";
 import UnsavedChangesDialog from "./unsavedChangesDialog";
+
+const BUBBLE_TYPES = ["shout", "narration"];
+const PUNCTUATION_ONLY_SCALES = [2, 3];
 
 const EditStyleModal = React.memo(function EditStyleModal() {
   const context = useContext((state) => ({
     modalData: state.modalData,
     folders: state.folders,
     styleSizeStep: state.styleSizeStep,
-    middleEast: state.middleEast,
+    direction: state.direction,
   }));
   const currentData = context.state.modalData;
   const [name, setName] = React.useState(currentData.name || "");
@@ -43,6 +50,10 @@ const EditStyleModal = React.memo(function EditStyleModal() {
     ["point", "paragraph"].includes(currentData.textType) ? currentData.textType : "inherit"
   );
   const [textProps, setTextProps] = React.useState(currentData.textProps || getDefaultStyle());
+  // Smart paste switches to this style for shout or narration bubbles
+  const [bubbleType, setBubbleType] = React.useState(
+    BUBBLE_TYPES.includes(currentData.bubbleType) ? currentData.bubbleType : ""
+  );
   const [sizePresets, setSizePresets] = React.useState(() => normalizeStyleSizePresets({
     ...currentData,
     textProps: currentData.textProps || getDefaultStyle(),
@@ -51,6 +62,9 @@ const EditStyleModal = React.memo(function EditStyleModal() {
   const [autoSizeByPageWidth, setAutoSizeByPageWidth] = React.useState(initialWidthConfig.autoSizeByPageWidth);
   const [sizePresetDefaultIndex, setSizePresetDefaultIndex] = React.useState(initialWidthConfig.sizePresetDefaultIndex);
   const [sizePresetMinWidths, setSizePresetMinWidths] = React.useState(initialWidthConfig.sizePresetMinWidths);
+  const [punctuationOnlyScale, setPunctuationOnlyScale] = React.useState(
+    PUNCTUATION_ONLY_SCALES.includes(currentData.punctuationOnlyScale) ? currentData.punctuationOnlyScale : 1
+  );
   const [prefixes, setPrefixes] = React.useState(currentData.prefixes?.join("\n") || "");
   const [prefixColor, setPrefixColor] = React.useState(currentData.prefixColor || config.defaultPrefixColor);
   const [colorPickerOpen, setColorPickerOpen] = React.useState(false);
@@ -63,14 +77,6 @@ const EditStyleModal = React.memo(function EditStyleModal() {
   const folderOptions = React.useMemo(() => flattenFolderTree(folderTree), [folderTree]);
 
   const closeModal = () => {
-    if (currentData.walkthroughReturn) {
-      context.dispatch({
-        type: "setModal",
-        modal: "walkthrough",
-        data: currentData.walkthroughState || { initialStep: 1 },
-      });
-      return;
-    }
     context.dispatch({ type: "setModal" });
   };
 
@@ -100,6 +106,11 @@ const EditStyleModal = React.memo(function EditStyleModal() {
 
   const changeTextType = (e) => {
     setTextType(e.target.value);
+    setEdited(true);
+  };
+
+  const changeBubbleType = (e) => {
+    setBubbleType(BUBBLE_TYPES.includes(e.target.value) ? e.target.value : "");
     setEdited(true);
   };
 
@@ -176,7 +187,8 @@ const EditStyleModal = React.memo(function EditStyleModal() {
     }
     const fixedStroke = {
       ...stroke,
-      enabled: stroke.size > 0 ? true : false,
+      // A stroke switched off with the shortcut stays off until its size or color changes
+      enabled: stroke.size > 0 && stroke.enabled !== false,
     };
     const normalizedSizePresets = normalizeStyleSizePresets({ sizePresets, textProps });
     const data = {
@@ -188,9 +200,11 @@ const EditStyleModal = React.memo(function EditStyleModal() {
       autoSizeByPageWidth,
       sizePresetDefaultIndex,
       sizePresetMinWidths,
+      punctuationOnlyScale,
       prefixes,
       prefixColor,
       stroke: fixedStroke,
+      bubbleType,
     };
     if (currentData.create) {
       data.id = Math.random().toString(36).substr(2, 8);
@@ -200,19 +214,13 @@ const EditStyleModal = React.memo(function EditStyleModal() {
     data.edited = Date.now();
     context.dispatch({ type: "saveStyle", data });
     context.dispatch({ type: "setCurrentStyleId", id: data.id });
-    if (currentData.walkthroughReturn) {
-      context.dispatch({
-        type: "setModal",
-        modal: "walkthrough",
-        data: {
-          ...(currentData.walkthroughState || {}),
-          initialStep: 1,
-          createdStyleId: data.id,
-        },
-      });
-      return;
-    }
     closeModal();
+    // Tips wait for the modal to close, so they come after it
+    if (String(prefixes || "").trim()) {
+      context.dispatch({ type: "showFeatureTip", id: "styleContinuation" });
+    } else if (currentData.create) {
+      context.dispatch({ type: "showFeatureTip", id: "styleContextMenu" });
+    }
   };
 
   const deleteStyle = (e) => {
@@ -276,6 +284,22 @@ const EditStyleModal = React.memo(function EditStyleModal() {
               </div>
               <div className="field-descr">{locale.editStyleTextTypeDescr}</div>
             </div>
+            <div className="field hostBrdTopContrast" data-tour="bubble-type">
+              <div className="field-label">{locale.bubbleTypeLabel || "Bubble type"}</div>
+              <div className="field-input">
+                <select
+                  value={bubbleType}
+                  onChange={changeBubbleType}
+                  className="topcoat-textarea"
+                  aria-label={locale.bubbleTypeLabel || "Bubble type"}
+                >
+                  <option value="">{locale.bubbleTypeNone || "Normal"}</option>
+                  <option value="shout">{locale.bubbleTypeShout || "Shout"}</option>
+                  <option value="narration">{locale.bubbleTypeNarration || "Narration"}</option>
+                </select>
+              </div>
+              <div className="field-descr">{locale.bubbleTypeHelp}</div>
+            </div>
             <div className="field hostBrdTopContrast">
               <div className="field-label">{locale.editStyleCopyLabel}</div>
               <button type="button" className="style-edit-copy-btn topcoat-button--large" onClick={copyLayerStyle}>
@@ -305,11 +329,16 @@ const EditStyleModal = React.memo(function EditStyleModal() {
                   setSizePresetMinWidths(widths);
                   setEdited(true);
                 }}
+                punctuationOnlyScale={punctuationOnlyScale}
+                setPunctuationOnlyScale={(scale) => {
+                  setPunctuationOnlyScale(scale);
+                  setEdited(true);
+                }}
                 styleSizeStep={context.state.styleSizeStep}
-                middleEast={context.state.middleEast}
+                rtl={context.state.direction === "rtl"}
               />
             </div>
-            <div className="field hostBrdTopContrast">
+            <div className="field hostBrdTopContrast" data-tour="style-prefixes">
               <div className="field-label">{locale.editStylePrefixesLabel}</div>
               <div className="field-input">
                 <textarea rows={2} value={prefixes} onChange={changePrefixes} className="topcoat-textarea" />
@@ -400,14 +429,36 @@ const StyleDetails = React.memo(function StyleDetails(props) {
   const [family, setFamily] = React.useState(currentFont.family || "");
   const [colorPickerOpen, setColorPickerOpen] = React.useState(false);
 
-  const families = React.useMemo(
-    () => Array.from(new Set(fonts.map((font) => font.family))),
-    [fonts]
-  );
-  const familyFonts = React.useMemo(
-    () => fonts.filter((font) => font.family === family),
-    [family, fonts]
-  );
+  const fontsByFamily = React.useMemo(() => {
+    const groups = new Map();
+    fonts.forEach((font) => {
+      if (!groups.has(font.family)) groups.set(font.family, []);
+      groups.get(font.family).push(font);
+    });
+    return groups;
+  }, [fonts]);
+  const familyFonts = fontsByFamily.get(family) || [];
+  const familyOptions = React.useMemo(() => {
+    const options = Array.from(fontsByFamily, ([familyName, members]) => ({
+      value: familyName,
+      label: familyName,
+      font: pickFamilyPreviewFont(members),
+      meta: members.length > 1 ? String(members.length) : "",
+    }));
+    if (currentFont.notFound) options.unshift({ value: currentFont.family, label: currentFont.family });
+    return options;
+  }, [fontsByFamily, currentFont.notFound, currentFont.family]);
+  const styleOptions = React.useMemo(() => {
+    const seen = new Set();
+    const options = [];
+    if (currentFont.notFound) options.push({ value: currentFont.style, label: currentFont.style });
+    familyFonts.forEach((font) => {
+      if (seen.has(font.style)) return;
+      seen.add(font.style);
+      options.push({ value: font.style, label: font.style, font });
+    });
+    return options;
+  }, [familyFonts, currentFont.notFound, currentFont.style]);
   const unit = props.textProps.typeUnit.substr(0, 3);
 
   React.useEffect(() => setFamily(currentFont.family), [currentFont.family]);
@@ -467,6 +518,27 @@ const StyleDetails = React.memo(function StyleDetails(props) {
     props.setSizePresets(next);
     const size = parseStyleSize(value);
     if (size !== null && previousSize === activeSize) changeProp("size", size);
+  };
+
+  const stepSizePreset = (index, direction) => {
+    changeSizePreset(index, stepStyleSize(props.sizePresets[index], direction, sizeStep));
+  };
+
+  const keyDownSizePreset = (index) => (e) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    stepSizePreset(index, e.key === "ArrowUp" ? 1 : -1);
+  };
+
+  // Keeps the focus in the field, so leaving it commits the presets as typing does
+  const focusSizePreset = (e) => {
+    e.preventDefault();
+    e.currentTarget.closest(".style-edit-size-preset").querySelector("input").focus();
+  };
+
+  const clickSizeStepper = (index, direction) => (e) => {
+    e.stopPropagation();
+    stepSizePreset(index, direction);
   };
 
   const commitPresetStructure = (nextPresets) => {
@@ -572,30 +644,21 @@ const StyleDetails = React.memo(function StyleDetails(props) {
   return (
     <div className="style-edit-props">
       <div className="style-edit-props-row">
-        <select value={family} onChange={(e) => changeFamily(e.target.value)} className="topcoat-textarea">
-          {currentFont.notFound && (
-            <option key={currentFont.family} value={currentFont.family}>
-              {currentFont.family}
-            </option>
-          )}
-          {families.map((familyName) => (
-            <option key={familyName} value={familyName}>
-              {familyName}
-            </option>
-          ))}
-        </select>
-        <select value={textStyle.fontStyleName} onChange={(e) => changeFontStyle(e.target.value)} className="topcoat-textarea style-edit-font-style">
-          {currentFont.notFound && (
-            <option key={currentFont.style} value={currentFont.style}>
-              {currentFont.style}
-            </option>
-          )}
-          {familyFonts.map((font) => (
-            <option key={font.style} value={font.style}>
-              {font.style}
-            </option>
-          ))}
-        </select>
+        <FontPicker
+          className="style-edit-font-family"
+          options={familyOptions}
+          value={family}
+          onChange={changeFamily}
+          minPopoverWidth={300}
+          searchable
+        />
+        <FontPicker
+          className="style-edit-font-style"
+          options={styleOptions}
+          value={textStyle.fontStyleName}
+          onChange={changeFontStyle}
+          minPopoverWidth={180}
+        />
       </div>
       <div className="style-edit-size-section">
         <div className="style-edit-size-heading">
@@ -617,15 +680,23 @@ const StyleDetails = React.memo(function StyleDetails(props) {
                 title={locale.editStyleActivateSizePreset || "Use this size preset"}
               >
                 <input
-                  type="number"
-                  min={1}
-                  step={sizeStep}
+                  type="text"
+                  inputMode="decimal"
                   value={value}
-                  onChange={(e) => changeSizePreset(index, e.target.value)}
+                  onChange={(e) => changeSizePreset(index, sanitizeStyleSizeInput(e.target.value))}
+                  onKeyDown={keyDownSizePreset(index)}
                   onBlur={commitSizePresets}
                   aria-label={`${locale.editStyleFontSize} ${index + 1}`}
                   className="topcoat-text-input--large"
                 />
+                <div className="style-edit-size-stepper" onMouseDown={focusSizePreset}>
+                  <button type="button" tabIndex={-1} onClick={clickSizeStepper(index, 1)}>
+                    <FiChevronUp size={9} />
+                  </button>
+                  <button type="button" tabIndex={-1} onClick={clickSizeStepper(index, -1)}>
+                    <FiChevronDown size={9} />
+                  </button>
+                </div>
                 <span className="style-edit-size-unit">{unit}</span>
                 <button
                   type="button"
@@ -693,6 +764,23 @@ const StyleDetails = React.memo(function StyleDetails(props) {
               </div>
             </div>
           )}
+        </div>
+        <div className="style-edit-auto-size style-edit-punctuation-scale hostBrdTopContrast">
+          <label className="style-edit-auto-size-default">
+            <span>{locale.editStylePunctuationOnlyLabel || "Punctuation only"}</span>
+            <select
+              value={props.punctuationOnlyScale}
+              onChange={(e) => props.setPunctuationOnlyScale(parseInt(e.target.value, 10))}
+              className="topcoat-textarea"
+            >
+              <option value={1}>{locale.editStylePunctuationOnlyNormal || "Normal size"}</option>
+              <option value={2}>×2</option>
+              <option value={3}>×3</option>
+            </select>
+          </label>
+          <div className="style-edit-auto-size-descr">
+            {locale.editStylePunctuationOnlyDescr || "Makes the text bigger when the line contains nothing but punctuation, like ?! or !!."}
+          </div>
         </div>
       </div>
       <div className="style-edit-props-row">
@@ -781,7 +869,7 @@ const StyleDetails = React.memo(function StyleDetails(props) {
           </div>
         </div>
       </div>
-      {props.middleEast && (
+      {props.rtl && (
         <div className="style-edit-props-row">
           <div className="style-edit-props-col">
             <div className="style-edit-props-icon double" title={locale.editStyleDiacXOffset}>
@@ -861,6 +949,15 @@ const StyleDetails = React.memo(function StyleDetails(props) {
               <span className="style-edit-ligature-icon">fi</span>
             </button>
           )}
+          {textStyle.contextualLigatures ? (
+            <button className="topcoat-icon-button--large" title={locale.editStyleContextualAlternates} onClick={(e) => changeProp("contextualLigatures", false, e)}>
+              <span className="style-edit-ligature-icon m-upright">I</span>
+            </button>
+          ) : (
+            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleContextualAlternates} onClick={(e) => changeProp("contextualLigatures", true, e)}>
+              <span className="style-edit-ligature-icon m-upright">I</span>
+            </button>
+          )}
         </div>
       </div>
       <div className="style-edit-props-row">
@@ -908,6 +1005,15 @@ const StyleDetails = React.memo(function StyleDetails(props) {
           ) : (
             <button className="topcoat-icon-button--large--quiet" title={locale.editStyleHanging} onClick={(e) => changeParagraph("hangingRoman", true, e)}>
               <GrBlockQuote size={18} />
+            </button>
+          )}
+          {paragStyle.textEveryLineComposer ? (
+            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleSingleLineComposer} onClick={(e) => changeParagraph("textEveryLineComposer", false, e)}>
+              <BsTextParagraph size={18} />
+            </button>
+          ) : (
+            <button className="topcoat-icon-button--large" title={locale.editStyleSingleLineComposer} onClick={(e) => changeParagraph("textEveryLineComposer", true, e)}>
+              <BsTextParagraph size={18} />
             </button>
           )}
         </div>
@@ -964,8 +1070,10 @@ StyleDetails.propTypes = {
   setSizePresetDefaultIndex: PropTypes.func.isRequired,
   sizePresetMinWidths: PropTypes.array.isRequired,
   setSizePresetMinWidths: PropTypes.func.isRequired,
+  punctuationOnlyScale: PropTypes.number.isRequired,
+  setPunctuationOnlyScale: PropTypes.func.isRequired,
   styleSizeStep: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
-  middleEast: PropTypes.bool,
+  rtl: PropTypes.bool,
 };
 
 export default EditStyleModal;

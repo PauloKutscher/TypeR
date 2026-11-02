@@ -1,4 +1,5 @@
-const MergeIntoSingleFilePlugin = require('webpack-merge-and-include-globally');
+const fs = require('fs');
+const path = require('path');
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const postcssPresetEnv = require('postcss-preset-env');
@@ -16,8 +17,27 @@ const hostFiles = [
     __dirname + '/app_src/lib/jam/jamStyles.jsxinc',
     __dirname + '/app_src/lib/jam/jamUtils.jsxinc',
     __dirname + '/app_src/fontVariantResolver.jsxinc',
+    __dirname + '/app_src/bubbleGeometry.jsxinc',
     __dirname + '/app_src/host.js'
-];
+].map(file => path.normalize(file));
+
+class HostScriptPlugin {
+    constructor(production = false) { this.production = production; }
+    apply(compiler) {
+        compiler.hooks.thisCompilation.tap('TypeRHost', compilation => {
+            hostFiles.forEach(file => compilation.fileDependencies.add(file));
+            compilation.hooks.processAssets.tap({ name: 'TypeRHost', stage: compiler.webpack.Compilation.PROCESS_ASSETS_STAGE_ADDITIONAL }, () => {
+                let code = hostFiles.map(file => fs.readFileSync(file, 'utf8')).join('\n');
+                if (this.production) {
+                    const result = UglifyJS.minify(code, { compress: false, output: { beautify: true, indent_level: 0, quote_keys: true } });
+                    if (result.error) throw result.error;
+                    code = result.code.replace(/([{};:,])\s*\n+\s*/gi, '$1').replace(/\s*\n+\s*([})\];:,])/gi, '$1');
+                }
+                compilation.emitAsset('host.jsx', new compiler.webpack.sources.RawSource(code));
+            });
+        });
+    }
+}
 
 
 const defaultConfig = {
@@ -94,11 +114,7 @@ const devConfig = {
             filename: 'index.html'
         }),
         new MiniCssExtractPlugin({ chunkFilename: "[name].[contenthash:12].css" }),
-        new MergeIntoSingleFilePlugin({
-            files: {
-                'host.jsx': hostFiles
-            }
-        })
+        new HostScriptPlugin()
     ]
 };
 
@@ -163,17 +179,7 @@ const prodConfig = {
             }
         }),
         new MiniCssExtractPlugin({ chunkFilename: "[name].[contenthash:12].css" }),
-        new MergeIntoSingleFilePlugin({
-            files: {
-                'host.jsx': hostFiles
-            },
-            transform: {
-                'host.jsx': code => {
-                    const res = UglifyJS.minify(code, {compress: false, output: {beautify: true, indent_level: 0, quote_keys: true}});
-                    return res.code.replace(/([{};:,])\s*\n+\s*/gi, '$1').replace(/\s*\n+\s*([})\];:,])/gi, '$1');
-                }
-            }
-        })
+        new HostScriptPlugin(true)
     ]
 };
 
@@ -198,7 +204,7 @@ function clientConfig(env, argv, legacy) {
             } }
         };
     });
-    const plugins = source.plugins.filter(plugin => !(plugin instanceof HtmlWebpackPlugin) && !(plugin instanceof MiniCssExtractPlugin) && !(legacy && plugin instanceof MergeIntoSingleFilePlugin));
+    const plugins = source.plugins.filter(plugin => !(plugin instanceof HtmlWebpackPlugin) && !(plugin instanceof MiniCssExtractPlugin) && !(legacy && plugin instanceof HostScriptPlugin));
     plugins.push(new HtmlWebpackPlugin({ template: './app_src/index.html', filename: flavor + '.html' }));
     plugins.push(new MiniCssExtractPlugin({ filename: flavor + '.css', chunkFilename: flavor + '.[name].[contenthash:12].css' }));
     return Object.assign({}, defaultConfig, source, {

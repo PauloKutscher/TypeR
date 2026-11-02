@@ -1,6 +1,6 @@
 {
   "name": "typertools",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "author": "Sakushi, SeanR",
   "main": "app/index.js",
   "browserslist": [
@@ -13,9 +13,27 @@
     "test": "node scripts/runTests.js",
     "test:update:prepare": "node scripts/prepareUpdateTest.js",
     "test:update:server": "node scripts/updateTestServer.js",
+    "test:uxp-migration": "node scripts/uxpMigrationTestServer.js",
+    "test:uxp-update": "node scripts/uxpUpdateTestServer.js",
     "test:build": "node scripts/testBuildArtifacts.js && node scripts/testTask33.js",
     "verify": "npm test && npm run build && npm run test:build",
-    "release": "npm run verify && node scripts/buildRelease.js"
+    "release": "npm run verify && npm run package:uxp && node scripts/buildRelease.js --with-uxp",
+    "build:uxp": "webpack --config webpack.uxp.config.js --mode=production && node scripts/buildUxp.js",
+    "build:uxp:dev": "webpack --config webpack.uxp.config.js --mode=development --env dev && node scripts/buildUxp.js --dev --package",
+    "build:uxp:mac": "webpack --config webpack.uxp.config.js --mode=production --env mac && node scripts/buildUxp.js --mac",
+    "build:uxp:mac:dev": "webpack --config webpack.uxp.config.js --mode=development --env mac --env dev && node scripts/buildUxp.js --mac --dev --package",
+    "package:uxp:win": "npm run build:uxp && node scripts/buildUxp.js --package && node scripts/verifyKeysAddonPackage.js --release",
+    "package:uxp:mac": "npm run build:uxp:mac && node scripts/buildUxp.js --mac --package",
+    "package:uxp": "npm run package:uxp:win && npm run package:uxp:mac && node scripts/verifyUxpPackages.js",
+    "build:keys-addon": "node scripts/buildKeysAddon.js",
+    "test:keys-addon:native": "node scripts/testNativeKeysAddon.js --compile",
+    "package:uxp:addon": "npm run build:keys-addon && webpack --config webpack.uxp.config.js --mode=production --env addon && node scripts/buildUxp.js --addon --package && node scripts/verifyKeysAddonPackage.js",
+    "package:uxp:addon:installer": "npm run package:uxp:addon && node scripts/packageAddonInstaller.js",
+    "test:uxp:addon:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/testAddonInstaller.ps1",
+    "package:uxp:trace": "webpack --config webpack.uxp.config.js --mode=production --env trace && node scripts/buildUxp.js --package --trace",
+    "package:uxp:trace-kit": "npm run package:uxp:trace && node scripts/buildDebugKit.js",
+    "package:uxp:debug": "webpack --config webpack.uxp.config.js --mode=production --env diagnostic && node scripts/buildUxp.js --package --diagnostic && node scripts/packageUxpDebug.js",
+    "test:uxp": "node scripts/testUxpHost.js && node scripts/testUxpPanelShim.js"
   },
   "dependencies": {
     "@babel/runtime": "^7.15.4",
@@ -32,9 +50,6 @@
   },
   "devDependencies": {
     "@babel/core": "^7.15.5",
-    "@babel/plugin-proposal-class-properties": "^7.14.5",
-    "@babel/plugin-proposal-optional-chaining": "^7.14.5",
-    "@babel/plugin-syntax-dynamic-import": "^7.8.3",
     "@babel/plugin-transform-runtime": "^7.15.0",
     "@babel/preset-env": "^7.15.6",
     "@babel/preset-react": "^7.14.5",
@@ -44,7 +59,6 @@
     "base64-inline-loader": "^2.0.1",
     "css-loader": "^6.3.0",
     "cssnano": "^7.1.9",
-    "cz-conventional-changelog": "^3.3.0",
     "file-loader": "^6.2.0",
     "html-webpack-plugin": "^5.3.2",
     "mini-css-extract-plugin": "^2.3.0",
@@ -54,13 +68,7 @@
     "sass-loader": "^16.0.8",
     "uglify-js": "^3.14.2",
     "webpack": "^5.54.0",
-    "webpack-cli": "^6.0.1",
-    "webpack-merge-and-include-globally": "^2.3.4"
-  },
-  "config": {
-    "commitizen": {
-      "path": "./node_modules/cz-conventional-changelog"
-    }
+    "webpack-cli": "^6.0.1"
   },
   "engines": {
     "node": ">=22.12"

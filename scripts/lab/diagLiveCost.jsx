@@ -74,7 +74,7 @@ LAB_RESULT = "";
     } else {
       // Stage by stage, on a copy of the user's marquee. Everything is one
       // history state and the marquee comes back from the channel at the end.
-      _withSuspendedHistory("TypeR Live Cost Probe", function () {
+      _withTemporaryHistory("TypeR Live Cost Probe", function () {
         var tempChannel = stage("create temp channel (stores the marquee)", function () {
           return _createTempSelectionChannel(doc);
         });

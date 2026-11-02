@@ -31,6 +31,7 @@ const requests = [];
 const logged = [];
 const committed = [];
 const lessons = [];
+const retrains = [];
 const context = {
   state: { textShapeRTuning: { samples: 4 } },
   dispatch(action) { committed.push(action); context.state.textShapeRTuning = action.value; },
@@ -41,9 +42,15 @@ const load = require("./helpers/loadAppModule")({
   "./textShapeRTraining.scss": {},
   "../../utils": { locale, logTextShapeRTraining: (text) => logged.push(text), scanTextShapeRTraining: (file, callback) => requests.push({ file, callback }) },
   "../../context": { useContext: () => context },
+  "../../textShapeREngineLoader": { loadTextShapeREngine: () => Promise.resolve() },
   "../../textShapeR": {
     setTextShapeRTuning(value) { liveTuning = value; },
-    recordTextShapeRFeedback(text, options, tuning) { lessons.push(text); return { tuning: { samples: tuning.samples + 1 } }; },
+    recordTextShapeRFeedback(text, options, tuning) {
+      assert.strictEqual(options.deferRanker, true, "Batch lessons defer the ranker to one retrain");
+      lessons.push(text);
+      return { tuning: { samples: tuning.samples + 1 } };
+    },
+    retrainTextShapeRRanker(tuning) { retrains.push(tuning.samples); return { ...tuning, retrained: true }; },
   },
 });
 const Component = load("app_src/components/modal/textShapeRTraining.jsx").default;
@@ -72,6 +79,10 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   } } } };
   try {
     let tree = render();
+    const autoToggle = () => nodes(tree).find((node) => node.type === "label" && text(node).includes(locale.textShapeRTrainAuto));
+    assert.strictEqual(nodes(autoToggle()).find((node) => node.type === "input").props.checked, false,
+      "Training right after import is opt-in");
+    assert(text(tree).includes("15"), "The chapter hint names the optimal page count");
     const pick = button(tree, locale.textShapeRTrainPick);
     assert.strictEqual(pick.props.disabled, false);
     pick.props.onClick();
@@ -99,6 +110,8 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     assert.deepStrictEqual(lessons, ["Second\ntext", "Third\ntext"]);
     assert.strictEqual(committed.length, 1);
     assert.strictEqual(liveTuning.samples, 6);
+    assert.deepStrictEqual(retrains, [6], "The ranker is fitted once, after the whole selection");
+    assert.strictEqual(liveTuning.retrained, true);
     assert.strictEqual(button(tree, locale.textShapeRTrainValidate).props.disabled, true, "Completed selection must not be accidentally trained twice");
     assert(text(tree).includes("Learned from 2 text layers."));
 
@@ -131,6 +144,25 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
     request.callback({ entries: [] });
     await flush();
     assert.strictEqual(requests.length, count, "Closing settings stops before the next PSD");
+
+    // Opted in: the picked pages train straight after the scan, through one
+    // retrain. The dialog answers asynchronously here, as in the UXP panel
+    slots.length = 0; effects.length = 0; requests.length = 0; lessons.length = 0; committed.length = 0; retrains.length = 0;
+    global.window = { cep: { fs: { showOpenDialogEx: async () => ({ err: 0, data: ["/ch/02.psd", "/ch/01.psd", "/ch/cover.png"] }) } } };
+    tree = render();
+    nodes(autoToggle()).find((node) => node.type === "input").props.onChange();
+    tree = render();
+    assert.strictEqual(nodes(autoToggle()).find((node) => node.type === "input").props.checked, true);
+    button(tree, locale.textShapeRTrainPick).props.onClick();
+    await flush();
+    assert.deepStrictEqual(requests.map((item) => item.file), ["/ch/01.psd"], "Pages scan in order, non-PSD dropped");
+    requests[0].callback({ entries: [{ name: "A", text: "Page\none", visible: true }] });
+    await flush();
+    requests[1].callback({ entries: [{ name: "B", text: "Page\ntwo", visible: true }, { name: "C", text: "Hidden", visible: false }] });
+    for (let index = 0; index < 6; index++) await flush();
+    assert.deepStrictEqual(lessons, ["Page\none", "Page\ntwo"], "Import trains visible layers right away");
+    assert.strictEqual(committed.length, 1);
+    assert.strictEqual(retrains.length, 1);
   } finally {
     global.window = previousWindow;
   }

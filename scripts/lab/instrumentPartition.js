@@ -41,7 +41,7 @@ function prepare(root, output) {
   output = path.resolve(output);
   assert(output.startsWith(lab + path.sep), "bundles must stay inside .centering-lab");
   assert(!fs.existsSync(output), "use a new bundle directory");
-  const source = fs.readFileSync(path.join(root, "app_src/host.js"), "utf8");
+  const source = fs.readFileSync(path.join(root, "app_src/bubbleGeometry.jsxinc"), "utf8") + "\n" + fs.readFileSync(path.join(root, "app_src/host.js"), "utf8");
   const bundle = fs.readFileSync(path.join(root, "app/host.jsx"), "utf8");
   const observedSource = instrument(source);
   const srcNode = functionRange(observedSource, "_splitOutlineAtCusps");

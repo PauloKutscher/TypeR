@@ -1,20 +1,27 @@
-import { validateImportData, repairFolderHierarchy } from "./librarySerialization";
+import { validateImportData, repairFolderHierarchy, mergeImportedStyles } from "./librarySerialization";
 import { parsePageMarker } from "./pageMarker";
 import React from "react";
 import PropTypes from "prop-types";
 import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, getUpdateTestConfig, clearUpdateTestConfig, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, nativeAlert } from "./utils";
 import { shouldRunUpdateCheck } from "./updateLogic";
+import { getNode, readUxpMigrationState, syncLegacyPanelName } from "./uxpMigration";
 import config from "./config";
 import { getNextLineNumberState } from "./lineNumbering";
 import { isPageMarker } from "./pageMarker";
-import { CUSTOM_IMAGE_THEME_ID, normalizeCustomThemes, normalizeEditorTheme, normalizePageLineColor, setCustomEditorThemes } from "./themePresets";
+import { CUSTOM_IMAGE_THEME_ID, normalizeCustomThemes, normalizeEditorTheme, setCustomEditorThemes } from "./themePresets";
 import { normalizeBackgroundImage } from "./backgroundImage";
+import { toggleStyleStroke } from "./styleStroke";
 import { applyThemeState } from "./lib/themeManager";
 import { getDefaultShortcuts, migrateShortcutDefaults } from "./shortcutCommands";
 import { getStoredSelectionLineIndex } from "./multiBubbleHistory";
 import { collectDescendantIds, getAutomaticTagStyles } from "./folderUtils";
 import { perfMeasure } from "./perfDebug";
-import { TAB_FIELDS, createTab, migrateTabStorage } from "./tabStorage";
+import { useKeyboardAccessPrompt } from "./keyboardAccess";
+import { useUxpPlatformPackage } from "./uxpPlatformPackage";
+import { TAB_FIELDS, createTab, migrateTabStorage, moveTab } from "./tabStorage";
+import { applyAutoTabNames, getNextDefaultTabName } from "./tabNames";
+import { getInterfaceLanguage } from "./interfaceLanguage";
+import { loadTextShapeREngine } from "./textShapeREngineLoader";
 import {
   cycleStyleSizePreset,
   normalizeStyleSizePresets,
@@ -27,15 +34,44 @@ import {
   normalizeStyleSizeTipCount,
   recordStyleSizeChange,
 } from "./styleSizeTip";
+import { normalizeSeenFeatureTips, showFeatureTip } from "./featureTips";
+import { normalizeRefontRules } from "./oneClick/refont";
+import { defaultUiLayout, normalizeUiLayout } from "./uiLayout";
 const storage = readStorage();
 // A successful application is the clearest signal that someone is relying on
 // TextShapeR. Five applied suggestions are enough to introduce the learning
 // control without interrupting a first-time user.
 const TEXT_SHAPER_LEARN_TIP_THRESHOLD = 5;
+// Centring right after a paste: off, each text in its bubble, or the same
+// with double bubbles shared between their texts. Stored and imported values
+// are untrusted, so unknown modes fall back to off.
+const AUTO_CENTER_MODES = ["off", "single", "multi"];
+const normalizeAutoCenterMode = (value) => (AUTO_CENTER_MODES.indexOf(value) !== -1 ? value : "off");
+// Smart paste: the style size is a ceiling the fit may shrink down to this
+// fraction of it. Stored and imported values are untrusted, so anything that
+// is not a finite number falls back to the default.
+const SMART_PASTE_MIN_SCALE_DEFAULT = 0.75;
+const normalizeSmartPasteMinScale = (value) => {
+  const num = typeof value === "number"
+    ? value
+    : typeof value === "string" && value.trim() !== "" ? Number(value) : NaN;
+  if (!Number.isFinite(num)) return SMART_PASTE_MIN_SCALE_DEFAULT;
+  return Math.round(Math.min(1, Math.max(0.5, num)) * 100) / 100;
+};
+const SMART_PASTE_HYPHENATION_MODES = ["auto", "fr", "en", "off"];
+const normalizeSmartPasteHyphenation = (value) => (
+  SMART_PASTE_HYPHENATION_MODES.indexOf(value) !== -1 ? value : "auto"
+);
+// Transient toast shown above the footer (smart paste fallbacks, toggles)
+const NOTICE_KINDS = ["info", "warning"];
+let lastNoticeId = 0;
 const hasTextShapeRLearning = (value) => Number(value?.samples) > 0;
+// Quiet time after the last tuning change before the line-break model refit
+const TEXT_SHAPER_LINE_MODEL_IDLE_MS = 1500;
 
 const storeFields = [
   "notFirstTime",
+  "whatsNewSeen",
   "text",
   "styles",
   "folders",
@@ -51,18 +87,24 @@ const storeFields = [
   "autoClosePSD",
   "checkUpdates",
   "autoUpdate",
-  "autoScrollStyle",
   "currentFolderTagPriority",
   "resizeTextBoxOnCenter",
   "images",
   "shortcut",
   "language",
   "direction",
-  "middleEast",
   "lastOpenedImagePath",
   "multiBubbleMode",
+  "autoCenterMode",
+  "smartPaste",
+  "pasteOnClick",
+  "smartPasteAutoClean",
+  "smartPasteDistribute",
+  "smartPasteMinScale",
+  "smartPasteHyphenation",
+  "refontRules",
   "showTips",
-  "exportFolderFontTipDismissed",
+  "seenFeatureTips",
   "showQuickStyleSize",
   "inlineTextShapeR",
   "textShapeRPerformanceTipShown",
@@ -81,11 +123,9 @@ const storeFields = [
   "resetLineCounterOnPage",
   "tabs",
   "currentTabId",
-  "multiTabEnabled",
   "uiLayout",
   "editorTheme",
   "customThemes",
-  "pageLineColor",
   "backgroundImage",
 ];
 
@@ -96,101 +136,27 @@ const tabFields = TAB_FIELDS;
 // remain readable for migration, but new writes persist only the tab schema.
 const persistedFields = storeFields.filter((field) => !tabFields.includes(field));
 
+// The textarea always reads "\r" as a line break while the rows split on "\n"
+// only: a stray one would put them a row apart for the rest of the script.
+const normalizeLineBreaks = (text) => String(text).replace(/\r\n?/g, "\n");
+
+const getTabNameOptions = (state) => ({
+  label: locale.tabDefaultName || "Tab",
+  ignorePrefixes: state.ignoreLinePrefixes || [],
+  stylePrefixes: (state.styles || []).reduce((prefixes, style) => (
+    style.prefixesDisabled ? prefixes : prefixes.concat(style.prefixes || [])
+  ), []),
+});
+
 const loadTabIntoState = (state, tab) => {
   state.currentTabId = tab.id;
-  state.text = tab.text || "";
+  state.text = normalizeLineBreaks(tab.text || "");
   state.images = tab.images || [];
   state.currentLineIndex = tab.currentLineIndex || 0;
   state.lastOpenedImagePath = tab.lastOpenedImagePath || null;
   state.usedLineStyles = tab.usedLineStyles || {};
   // Stored selections are bound to the previously opened PSD
   state.storedSelections = [];
-};
-
-const defaultUiLayout = {
-  order: ["preview", "text", "styles"],
-  visible: {
-    preview: true,
-    text: true,
-    styles: true,
-    tabBar: true,
-    previewCreateButton: true,
-    previewAlignButton: true,
-    previewSizeControls: true,
-    previewNav: true,
-    previewWidget: true,
-    footerHelp: true,
-    footerSettings: true,
-    footerRepo: true,
-    footerTextShapeR: true,
-    footerMultiBubble: true,
-  },
-  sizes: {
-    previewHeight: 130,
-    uiScale: 100,
-    footer: {
-      help: 12,
-      settings: 12,
-      repo: 12,
-      textShapeR: 12,
-      multiBubble: 12,
-    },
-  },
-};
-
-const clampNumber = (value, min, max, fallback) => {
-  const num = parseInt(value, 10);
-  if (!Number.isFinite(num)) return fallback;
-  return Math.min(max, Math.max(min, num));
-};
-
-// Merge a stored/partial layout with the defaults so missing or invalid
-// fields (older storage versions, bad imports) never break the UI
-const normalizeFooterSizes = (raw) => {
-  const sizes = { ...defaultUiLayout.sizes.footer };
-  if (raw && typeof raw === "object") {
-    for (const key in defaultUiLayout.sizes.footer) {
-      sizes[key] = clampNumber(raw[key], 8, 20, defaultUiLayout.sizes.footer[key]);
-    }
-  }
-  return sizes;
-};
-
-const normalizeUiLayout = (raw) => {
-  const layout = raw && typeof raw === "object" ? raw : {};
-  const visible = { ...defaultUiLayout.visible };
-  if (layout.visible && typeof layout.visible === "object") {
-    for (const key in visible) {
-      if (typeof layout.visible[key] === "boolean") visible[key] = layout.visible[key];
-    }
-  }
-  // Older versions stored a single "footerModeToggles" flag covering both
-  // mode indicators; map it onto the individual toggles only when the new
-  // keys have never been persisted, so fresh settings always win
-  const legacyFooterModeToggles =
-    layout.visible && typeof layout.visible.footerModeToggles === "boolean"
-      ? layout.visible.footerModeToggles
-      : null;
-  const hasIndividualModeToggles =
-    layout.visible &&
-    (typeof layout.visible.footerTextShapeR === "boolean" ||
-      typeof layout.visible.footerMultiBubble === "boolean");
-  if (legacyFooterModeToggles !== null && !hasIndividualModeToggles) {
-    visible.footerTextShapeR = legacyFooterModeToggles;
-    visible.footerMultiBubble = legacyFooterModeToggles;
-  }
-  let order = Array.isArray(layout.order)
-    ? layout.order.filter((id) => defaultUiLayout.order.includes(id))
-    : [];
-  order = order.concat(defaultUiLayout.order.filter((id) => !order.includes(id)));
-  // The panel must never end up fully empty
-  if (!visible.preview && !visible.text && !visible.styles) visible.text = true;
-  const sizes = {
-    previewHeight: clampNumber(layout.sizes?.previewHeight, 80, 300, defaultUiLayout.sizes.previewHeight),
-    uiScale: clampNumber(layout.sizes?.uiScale, 70, 150, defaultUiLayout.sizes.uiScale),
-    footer: normalizeFooterSizes(layout.sizes?.footer),
-  };
-  return { order, visible, sizes };
 };
 
 const shouldShowTextShapeRLearnTip = (state) => (
@@ -279,6 +245,8 @@ const findPrefixMatch = (index, text) => {
 
 const initialState = {
   notFirstTime: false,
+  // Version of the last "What's new" tour seen (config.whatsNewVersion)
+  whatsNewSeen: null,
   initiated: false,
   text: "",
   lines: [],
@@ -299,12 +267,9 @@ const initialState = {
   autoClosePSD: false,
   checkUpdates: config.checkUpdates,
   autoUpdate: storage.data?.autoUpdate === true,
-  autoScrollStyle: storage.data?.autoScrollStyle !== false,
   currentFolderTagPriority: storage.data?.currentFolderTagPriority !== false,
   resizeTextBoxOnCenter: false,
   showTips: storage.data?.showTips !== false,
-  exportFolderFontTipDismissed: storage.data?.exportFolderFontTipDismissed === true,
-  exportFolderFontTipVisible: false,
   showQuickStyleSize: storage.data?.showQuickStyleSize !== false,
   inlineTextShapeR: storage.data?.inlineTextShapeR !== false,
   textShapeRPerformanceTipShown: storage.data?.textShapeRPerformanceTipShown === true,
@@ -317,7 +282,6 @@ const initialState = {
   images: [],
   language: "auto",
   direction: "ltr",
-  middleEast: false,
   lastOpenedImagePath: null,
   storedSelections: [],
   multiBubbleMode: false,
@@ -325,7 +289,6 @@ const initialState = {
   interpretMarkdown: storage.data?.interpretMarkdown !== false,
   styleSizeStep: 1,
   resetLineCounterOnPage: storage.data?.resetLineCounterOnPage !== false,
-  multiTabEnabled: storage.data?.multiTabEnabled !== false,
   ...storage.data,
   textShapeRUsageCount: Math.min(
     TEXT_SHAPER_LEARN_TIP_THRESHOLD,
@@ -338,15 +301,32 @@ const initialState = {
   styleSizeTipLastChangeAt: Math.max(0, Number(storage.data?.styleSizeTipLastChangeAt) || 0),
   styleSizeTipShown: storage.data?.styleSizeTipShown === true,
   styleSizeTipVisible: false,
+  seenFeatureTips: normalizeSeenFeatureTips(storage.data?.seenFeatureTips),
+  activeFeatureTip: null,
+  // Per-session action counts behind tips that wait for a repeated action
+  featureTipCounts: {},
   shortcut: shortcutMigration.shortcuts,
   // Live keyboard state (is the keep-size modifier held right now); never
   // persisted, and placed after the storage spread so it always starts false
   keepSizeHeld: false,
+  // Stroke mode: for the pages that need it, so it starts off in each session
   uiLayout: normalizeUiLayout(storage.data?.uiLayout),
+  autoCenterMode: normalizeAutoCenterMode(storage.data?.autoCenterMode),
+  // Smart paste settings sit after the storage spread so stored values are
+  // always normalized. Smart paste and line distribution are on by default.
+  smartPaste: storage.data?.smartPaste !== false,
+  // Exclusive with multi-bubble: a stored pair where both are on keeps multi-bubble
+  pasteOnClick: storage.data?.pasteOnClick === true && storage.data?.multiBubbleMode !== true,
+  smartPasteAutoClean: storage.data?.smartPasteAutoClean === true,
+  smartPasteDistribute: storage.data?.smartPasteDistribute !== false,
+  smartPasteMinScale: normalizeSmartPasteMinScale(storage.data?.smartPasteMinScale),
+  smartPasteHyphenation: normalizeSmartPasteHyphenation(storage.data?.smartPasteHyphenation),
+  refontRules: normalizeRefontRules(storage.data?.refontRules),
+  // Never persisted: a toast only belongs to the current session
+  notice: null,
   // The theme registry is filled by the theme manager at import time, so the
   // stored id can already point at a custom theme here
   customThemes: normalizeCustomThemes(storage.data?.customThemes),
-  pageLineColor: normalizePageLineColor(storage.data?.pageLineColor),
   backgroundImage: normalizeBackgroundImage(storage.data?.backgroundImage),
   editorTheme: normalizeEditorTheme(storage.data?.editorTheme),
   stylePrefixRefreshVersion: 0,
@@ -359,7 +339,7 @@ const tabStorage = migrateTabStorage(
   storage.data,
   (locale.tabDefaultName || "Tab") + " 1"
 );
-initialState.tabs = tabStorage.tabs;
+initialState.tabs = applyAutoTabNames(tabStorage.tabs, getTabNameOptions(initialState));
 initialState.currentTabId = tabStorage.currentTabId;
 const activeTab = initialState.tabs.find((tab) => tab.id === initialState.currentTabId) || initialState.tabs[0];
 loadTabIntoState(initialState, activeTab);
@@ -368,6 +348,20 @@ initialState.storedSelections = storage.data?.storedSelections || [];
 
 if (shortcutMigration.migrated) {
   writeToStorage({ shortcut: initialState.shortcut });
+}
+
+// Settings removed in 3.0. The multi-tab switch turned off now means a hidden
+// tab bar, which keeps the same panel.
+const removedFields = ["multiTabEnabled", "middleEast", "autoScrollStyle", "pageLineColor"];
+if (storage.data && removedFields.some((field) => field in storage.data)) {
+  if (storage.data.multiTabEnabled === false) {
+    initialState.uiLayout = { ...initialState.uiLayout, visible: { ...initialState.uiLayout.visible, tabBar: false } };
+  }
+  const cleanedData = { uiLayout: initialState.uiLayout };
+  removedFields.forEach((field) => {
+    cleanedData[field] = undefined;
+  });
+  writeToStorage(cleanedData);
 }
 
 if (tabStorage.migrated) {
@@ -386,7 +380,13 @@ if (tabStorage.migrated) {
 const baseReducer = (state, action) => {
   if (action.type === "import" || action.type === "importStyleLibrary" || action.type === "importStyleFolder") {
     try {
-      const data = action.type === "import" ? action.data : { folders: action.folders || (action.folder ? [action.folder] : []), styles: action.styles || [] };
+      // importStyleFolder (FontScanR) sends a new folder and styles without ids:
+      // the reducer assigns them, so only their shape is validated here.
+      const data = action.type === "import"
+        ? action.data
+        : action.type === "importStyleFolder"
+          ? { folders: [{ ...action.folder, id: action.folder?.id || "importStyleFolder" }], exportedStyles: action.styles || [] }
+          : { folders: action.folders || [], styles: action.styles || [] };
       validateImportData(data);
     } catch (error) { nativeAlert(locale.errorImportStyles, locale.errorTitle, true); return state; }
   }
@@ -395,14 +395,10 @@ const baseReducer = (state, action) => {
   let forceStylePrefixRefresh = false;
   const newState = Object.assign({}, state);
   switch (action.type) {
-    case "removeFirstTime": {
-      newState.notFirstTime = true;
-      newState.modalType = "help";
-      break;
-    }
-
     case "showFirstRunWalkthrough": {
       newState.notFirstTime = true;
+      // A new user starts with the basics, not with what changed since 2.5
+      newState.whatsNewSeen = config.whatsNewVersion;
       if (!state.modalType) {
         newState.modalType = "walkthrough";
         newState.modalData = {};
@@ -412,6 +408,25 @@ const baseReducer = (state, action) => {
 
     case "completeWalkthrough": {
       newState.notFirstTime = true;
+      // The full walkthrough covers What's new. Closed before its end (a
+      // known user replaying it from Help), it does not.
+      if (action.finished) newState.whatsNewSeen = config.whatsNewVersion;
+      newState.modalType = null;
+      newState.modalData = {};
+      break;
+    }
+
+    // Shown once to users updating from an older version
+    case "showWhatsNew": {
+      if (!state.modalType) {
+        newState.modalType = "whatsNew";
+        newState.modalData = {};
+      }
+      break;
+    }
+
+    case "completeWhatsNew": {
+      newState.whatsNewSeen = config.whatsNewVersion;
       newState.modalType = null;
       newState.modalData = {};
       break;
@@ -422,42 +437,66 @@ const baseReducer = (state, action) => {
         if (!Object.prototype.hasOwnProperty.call(action.data, field)) continue;
         if (!storeFields.includes(field)) continue;
         if (field === "styles" && state.styles) {
-          const styles = [];
-          let asked = false;
-          let keep = false;
-          for (const style of state.styles) {
-            const inImport = action.data.styles.find((s) => s.id === style.id);
-            if (!inImport || (style.edited && !inImport.edited) || (style.edited && inImport.edited && style.edited > inImport.edited)) {
-              if (!asked) {
-                keep = confirm(locale.settingsImportReplace);
-                asked = true;
-              }
-              if (keep) styles.push(style);
-            }
-          }
-          for (const style of action.data.styles) {
-            if (!keep) {
-              styles.push(style);
-            } else {
-              const oldStyle = state.styles.find((s) => s.id === style.id);
-              if (!oldStyle?.edited || (style.edited && style.edited >= oldStyle.edited)) {
-                styles.push(style);
-              }
-            }
-          }
-          newState[field] = styles;
+          newState[field] = mergeImportedStyles(state.styles, action.data.styles, action.keepExistingStyles === true);
         } else {
           newState[field] = action.data[field];
         }
       }
+      // Load imported tab fields before the reducer mirrors the active state
+      // back into tabs, otherwise the current script overwrites the backup.
+      if (action.data.tabs) {
+        const importedTabs = migrateTabStorage(action.data, (locale.tabDefaultName || "Tab") + " 1");
+        newState.tabs = importedTabs.tabs;
+        loadTabIntoState(newState, importedTabs.tabs.find(tab => tab.id === importedTabs.currentTabId));
+      } else if (tabFields.some(field => Object.prototype.hasOwnProperty.call(action.data, field))) {
+        newState.storedSelections = [];
+      }
       if (action.data.uiLayout) {
         newState.uiLayout = normalizeUiLayout(action.data.uiLayout);
+      }
+      if ("autoCenterMode" in action.data) {
+        newState.autoCenterMode = normalizeAutoCenterMode(action.data.autoCenterMode);
+      }
+      if ("smartPaste" in action.data) newState.smartPaste = action.data.smartPaste !== false;
+      if ("pasteOnClick" in action.data) newState.pasteOnClick = action.data.pasteOnClick === true;
+      if (newState.multiBubbleMode && newState.pasteOnClick) newState.pasteOnClick = false;
+      if ("smartPasteAutoClean" in action.data) {
+        newState.smartPasteAutoClean = action.data.smartPasteAutoClean === true;
+      }
+      if ("smartPasteDistribute" in action.data) {
+        newState.smartPasteDistribute = action.data.smartPasteDistribute !== false;
+      }
+      if ("smartPasteMinScale" in action.data) {
+        newState.smartPasteMinScale = normalizeSmartPasteMinScale(action.data.smartPasteMinScale);
+      }
+      if ("smartPasteHyphenation" in action.data) {
+        newState.smartPasteHyphenation = normalizeSmartPasteHyphenation(action.data.smartPasteHyphenation);
+      }
+      if ("refontRules" in action.data) {
+        newState.refontRules = normalizeRefontRules(action.data.refontRules);
       }
       break;
     }
 
     case "setText": {
-      newState.text = action.text;
+      newState.text = normalizeLineBreaks(action.text ?? "");
+      // A script with page markers but no linked pages: point to the page sync
+      if (
+        !state.seenFeatureTips?.pageSync &&
+        !newState.images.length &&
+        String(action.text || "").split(/\r?\n/).some((line) => parsePageMarker(line))
+      ) {
+        Object.assign(newState, showFeatureTip(newState, "pageSync"));
+      }
+      break;
+    }
+
+    // The What's new tour starts a new run on a practice tab left by an
+    // earlier one: its lines are no longer marked as pasted
+    case "clearPastedLines": {
+      newState.usedLineStyles = {};
+      newState.currentLineIndex = 0;
+      thenScroll = true;
       break;
     }
 
@@ -741,7 +780,11 @@ const baseReducer = (state, action) => {
       const importedFolders = action.folders || [];
       const importedStyles = action.styles || [];
       const folderIds = new Set(importedFolders.map((folder) => folder.id));
-      newState.folders = normalizeFolders(state.folders.concat(importedFolders));
+      // Imported top-level folders go after the existing ones
+      const siblingCount = state.folders.filter((folder) => !(folder.parentId || null)).length;
+      newState.folders = normalizeFolders(state.folders.concat(importedFolders.map((folder) => (
+        folder.parentId ? folder : { ...folder, order: siblingCount + (folder.order || 0) }
+      ))));
       newState.styles = state.styles.concat(
         importedStyles.map((style) => ({
           ...style,
@@ -823,12 +866,6 @@ const baseReducer = (state, action) => {
       break;
     }
 
-    case "setFolders": {
-      newState.folders = normalizeFolders(action.data || []);
-      newState.openFolders = state.openFolders.filter((id) => id === "unsorted" || newState.folders.find((folder) => folder.id === id));
-      break;
-    }
-
     case "reorderFolders": {
       const parentId = action.parentId === undefined || action.parentId === null || action.parentId === "" ? null : action.parentId;
       const orderIds = action.order || [];
@@ -898,6 +935,11 @@ const baseReducer = (state, action) => {
       break;
     }
 
+    case "toggleStyleStroke": {
+      newState.styles = state.styles.map((style) => (style.id === action.id ? toggleStyleStroke(style) : style));
+      break;
+    }
+
     case "deleteStyle": {
       newState.styles = state.styles.filter((s) => s.id !== action.id);
       break;
@@ -912,17 +954,6 @@ const baseReducer = (state, action) => {
         newState.styles = state.styles.concat(newStyle);
         newState.currentStyleId = newStyleId;
       }
-      break;
-    }
-
-    case "setStyles": {
-      newState.styles = (action.data || []).map((style) => {
-        const normalizedStyle = {
-          ...style,
-          sizePresets: normalizeStyleSizePresets(style),
-        };
-        return { ...normalizedStyle, ...normalizeStyleSizePresetWidthConfig(normalizedStyle) };
-      });
       break;
     }
 
@@ -975,11 +1006,6 @@ const baseReducer = (state, action) => {
     break;
   }
 
-  case "setAutoScrollStyle": {
-    newState.autoScrollStyle = !!action.value;
-    break;
-  }
-
   case "setCurrentFolderTagPriority": {
     newState.currentFolderTagPriority = !!action.value;
     break;
@@ -1000,11 +1026,6 @@ const baseReducer = (state, action) => {
     break;
   }
 
-    case "setMiddleEast": {
-      newState.middleEast = !!action.value;
-      break;
-    }
-
     case "setKeepSizeHeld": {
       newState.keepSizeHeld = !!action.value;
       break;
@@ -1014,6 +1035,75 @@ const baseReducer = (state, action) => {
       newState.multiBubbleMode = !!action.value;
       if (!action.value) {
         newState.storedSelections = [];
+      } else {
+        // Paste on click and multi-bubble are exclusive: turning one on turns the other off
+        newState.pasteOnClick = false;
+      }
+      break;
+    }
+
+    case "setAutoCenterMode": {
+      newState.autoCenterMode = normalizeAutoCenterMode(action.value);
+      break;
+    }
+
+    case "setSmartPaste": {
+      newState.smartPaste = !!action.value;
+      break;
+    }
+
+    case "setPasteOnClick": {
+      newState.pasteOnClick = !!action.value;
+      if (newState.pasteOnClick && state.multiBubbleMode) {
+        newState.multiBubbleMode = false;
+        newState.storedSelections = [];
+      }
+      break;
+    }
+
+    case "setSmartPasteAutoClean": {
+      newState.smartPasteAutoClean = !!action.value;
+      break;
+    }
+
+    case "setSmartPasteDistribute": {
+      newState.smartPasteDistribute = !!action.value;
+      break;
+    }
+
+    case "setSmartPasteMinScale": {
+      newState.smartPasteMinScale = normalizeSmartPasteMinScale(action.value);
+      break;
+    }
+
+    case "setSmartPasteHyphenation": {
+      newState.smartPasteHyphenation = normalizeSmartPasteHyphenation(action.value);
+      break;
+    }
+
+    case "setRefontRules": {
+      newState.refontRules = normalizeRefontRules(action.rules);
+      break;
+    }
+
+    case "showNotice": {
+      const text = typeof action.text === "string" ? action.text.trim() : "";
+      if (!text) break;
+      // Unique even for two notices in the same millisecond, so a stale
+      // auto-dismiss timer can never clear the next message
+      lastNoticeId = Math.max(Date.now(), lastNoticeId + 1);
+      newState.notice = {
+        id: lastNoticeId,
+        text,
+        kind: NOTICE_KINDS.indexOf(action.kind) !== -1 ? action.kind : "info",
+      };
+      break;
+    }
+
+    case "clearNotice": {
+      if (!state.notice) break;
+      if (action.id === undefined || action.id === null || action.id === state.notice.id) {
+        newState.notice = null;
       }
       break;
     }
@@ -1031,6 +1121,7 @@ const baseReducer = (state, action) => {
         newState.textShapeRPerformanceTipVisible = false;
         newState.textShapeRLearnTipVisible = false;
         newState.styleSizeTipVisible = false;
+        newState.activeFeatureTip = null;
       } else if (
         newState.inlineTextShapeR &&
         newState.uiLayout?.visible?.preview !== false &&
@@ -1051,14 +1142,19 @@ const baseReducer = (state, action) => {
       break;
     }
 
-    case "showExportFolderFontTip": {
-      newState.exportFolderFontTipVisible = true;
+    case "showFeatureTip": {
+      Object.assign(newState, showFeatureTip(newState, action.id));
       break;
     }
 
-    case "hideExportFolderFontTip": {
-      newState.exportFolderFontTipVisible = false;
-      if (action.dismiss) newState.exportFolderFontTipDismissed = true;
+    case "hideFeatureTip": {
+      if (!action.id || newState.activeFeatureTip === action.id) newState.activeFeatureTip = null;
+      break;
+    }
+
+    case "resetFeatureTips": {
+      newState.seenFeatureTips = {};
+      newState.activeFeatureTip = null;
       break;
     }
 
@@ -1102,6 +1198,8 @@ const baseReducer = (state, action) => {
     case "recordTextShapeRUse": {
       const currentCount = Math.max(0, Math.floor(Number(newState.textShapeRUsageCount) || 0));
       newState.textShapeRUsageCount = Math.min(TEXT_SHAPER_LEARN_TIP_THRESHOLD, currentCount + 1);
+      // Not stored: the What's new tour checks its exercise with it
+      newState.textShapeRAppliedThisSession = (state.textShapeRAppliedThisSession || 0) + 1;
       showTextShapeRLearnTipIfEligible(newState);
       break;
     }
@@ -1124,8 +1222,26 @@ const baseReducer = (state, action) => {
     case "setTextShapeRTuning": {
       newState.textShapeRTuning = action.value || null;
       if (action.learned === true) newState.textShapeRLearnUsed = true;
+      // Not stored: the What's new tour checks its exercise with it
+      if (action.learned === true) newState.textShapeRLearnedThisSession = (state.textShapeRLearnedThisSession || 0) + 1;
       if (action.learned === true || hasTextShapeRLearning(action.value)) {
         newState.textShapeRLearnTipVisible = false;
+      }
+      break;
+    }
+
+    // The What's new tour gives back the learning it borrowed for its exercise
+    case "restoreTextShapeRTuning": {
+      newState.textShapeRTuning = action.value || null;
+      newState.textShapeRLearnUsed = action.learnUsed === true;
+      break;
+    }
+
+    case "setTextShapeRLineModel": {
+      // Idle refit result: it only applies to the tuning it was fitted on. A
+      // newer lesson in the meantime gets its own refit
+      if (action.base && state.textShapeRTuning === action.base) {
+        newState.textShapeRTuning = { ...action.base, ddp: action.ddp || null, ddpKey: action.ddpKey || null };
       }
       break;
     }
@@ -1136,6 +1252,10 @@ const baseReducer = (state, action) => {
     }
 
     case "setLastOpenedImagePath": {
+      // Captured bubbles belong to one page: switching page invalidates them.
+      if (action.path && action.path !== state.lastOpenedImagePath) {
+        newState.storedSelections = [];
+      }
       newState.lastOpenedImagePath = action.path || null;
       break;
     }
@@ -1158,31 +1278,6 @@ const baseReducer = (state, action) => {
 
     case "resetShortcut": {
       newState.shortcut = { ...defaultShortcut };
-      break;
-    }
-
-    case "addSelection": {
-      if (action.selection) {
-        const selectionWithStyle = {
-          ...action.selection,
-          styleId: state.currentStyleId,
-          capturedAt: Date.now(),
-        };
-        if (typeof action.lineIndex === "number") {
-          selectionWithStyle.lineIndex = action.lineIndex;
-          const line = state.lines[action.lineIndex];
-          if (line && !line.ignore && state.currentStyleId) {
-            newState.usedLineStyles = {
-              ...(newState.usedLineStyles || state.usedLineStyles || {}),
-              [action.lineIndex]: {
-                rawText: line.rawText,
-                styleId: state.currentStyleId,
-              },
-            };
-          }
-        }
-        newState.storedSelections = [...state.storedSelections, selectionWithStyle];
-      }
       break;
     }
 
@@ -1239,7 +1334,11 @@ const baseReducer = (state, action) => {
           thenSelectStyle = true;
         }
       }
-      newState.storedSelections = [];
+      // A partial smart batch only removes successful selections. Keep
+      // failures and selections captured while the batch was running.
+      newState.storedSelections = Array.isArray(action.completed)
+        ? state.storedSelections.filter(selection => !action.completed.includes(selection))
+        : [];
       break;
     }
 
@@ -1280,10 +1379,17 @@ const baseReducer = (state, action) => {
     }
 
     case "addTab": {
-      const name = action.name || (locale.tabDefaultName || "Tab") + " " + (state.tabs.length + 1);
-      const tab = createTab(name, action.data);
+      const name = action.name || getNextDefaultTabName(state.tabs, locale.tabDefaultName || "Tab");
+      // A caller that needs the new tab id right away passes its own
+      const tab = {
+        ...(action.id ? createTab(name, action.data, () => action.id) : createTab(name, action.data)),
+        autoName: !action.name,
+      };
       newState.tabs = state.tabs.concat(tab);
-      newState.multiTabEnabled = true;
+      // A new tab must be reachable, even with the tab bar hidden
+      if (state.uiLayout?.visible?.tabBar === false) {
+        newState.uiLayout = { ...state.uiLayout, visible: { ...state.uiLayout.visible, tabBar: true } };
+      }
       loadTabIntoState(newState, tab);
       break;
     }
@@ -1299,13 +1405,13 @@ const baseReducer = (state, action) => {
     case "renameTab": {
       const name = (action.name || "").trim();
       if (!name) break;
-      newState.tabs = state.tabs.map((tab) => (tab.id === action.id ? { ...tab, name } : tab));
+      // Opening the rename field and leaving it unchanged is not a choice of name
+      newState.tabs = state.tabs.map((tab) => (tab.id === action.id && tab.name !== name ? { ...tab, name, autoName: false } : tab));
       break;
     }
 
-    case "setMultiTabEnabled": {
-      const enabled = action.value !== false;
-      newState.multiTabEnabled = enabled;
+    case "moveTab": {
+      newState.tabs = moveTab(state.tabs, action.id, action.slot);
       break;
     }
 
@@ -1329,11 +1435,6 @@ const baseReducer = (state, action) => {
       } else if (!customThemes.some((theme) => theme.id === state.editorTheme)) {
         newState.editorTheme = normalizeEditorTheme(state.editorTheme);
       }
-      break;
-    }
-
-    case "setPageLineColor": {
-      newState.pageLineColor = normalizePageLineColor(action.color);
       break;
     }
 
@@ -1627,7 +1728,7 @@ const baseReducer = (state, action) => {
   if (newState.currentStyle && newState.currentStyleId !== state.currentStyleId) {
     const folder = newState.currentStyle.folder || "unsorted";
     if (!newState.openFolders.includes(folder)) newState.openFolders.push(folder);
-    if (newState.autoScrollStyle && action.type !== "setCurrentStyleId") {
+    if (action.type !== "setCurrentStyleId") {
       scrollToStyle(newState.currentStyleId);
     }
   }
@@ -1656,6 +1757,11 @@ const baseReducer = (state, action) => {
         newState.tabs = tabs;
       }
     }
+  }
+
+  // Phase 5.6: Tabs the user never renamed follow their script and pages
+  if (newState.tabs && newState.tabs !== state.tabs) {
+    newState.tabs = applyAutoTabNames(newState.tabs, getTabNameOptions(newState));
   }
 
   // Phase 6: Storage - only write if a stored field actually changed
@@ -1763,18 +1869,42 @@ const ContextProvider = React.memo(function ContextProvider(props) {
     listenersRef.current.forEach((listener) => listener());
   }, [state]);
   React.useEffect(() => dispatch({}), []);
+  // TextShapeR's line-break model is too slow to fit on a Learn click, so a
+  // click leaves it stale. Refit it once the panel has been idle for a moment,
+  // in short time slices; any newer tuning cancels the pending refit, so a
+  // burst of clicks costs a single fit.
+  React.useEffect(() => {
+    const base = state.textShapeRTuning;
+    if (!base || !Array.isArray(base.exemplars) || !base.exemplars.length) return undefined;
+    let active = true;
+    let cancelRefit = null;
+    const timer = setTimeout(() => {
+      loadTextShapeREngine().then((engine) => {
+        if (!active || !engine.isTextShapeRLineModelStale(base)) return;
+        cancelRefit = engine.scheduleTextShapeRLineModelRefit(base, (model) => {
+          if (active) dispatch({ type: "setTextShapeRLineModel", base, ddp: model.ddp, ddpKey: model.ddpKey });
+        });
+      });
+    }, TEXT_SHAPER_LINE_MODEL_IDLE_MS);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      if (cancelRefit) cancelRefit();
+    };
+  }, [state.textShapeRTuning]);
   React.useEffect(() => {
     if (!state.inlineTextShapeR) return undefined;
     let active = true;
-    import(/* webpackChunkName: "text-shaper-engine" */ "./textShapeR").then((engine) => {
+    loadTextShapeREngine().then((engine) => {
       if (!active) return;
       engine.setDehyphenationEnabled(state.dehyphenateTextShapeR === true);
+      engine.setTextShapeRInterfaceLanguage(getInterfaceLanguage(state));
       engine.setTextShapeRTuning(state.textShapeRTuning);
     });
     return () => {
       active = false;
     };
-  }, [state.inlineTextShapeR, state.dehyphenateTextShapeR, state.textShapeRTuning]);
+  }, [state.inlineTextShapeR, state.dehyphenateTextShapeR, state.textShapeRTuning, state.language]);
   React.useEffect(() => {
     const version = state.stylePrefixRefreshVersion || 0;
     if (!version) return undefined;
@@ -1794,10 +1924,9 @@ const ContextProvider = React.memo(function ContextProvider(props) {
     applyThemeState({
       editorTheme: state.editorTheme,
       customThemes: state.customThemes,
-      pageLineColor: state.pageLineColor,
       backgroundImage: state.backgroundImage,
     });
-  }, [state.editorTheme, state.customThemes, state.pageLineColor, state.backgroundImage]);
+  }, [state.editorTheme, state.customThemes, state.backgroundImage]);
   const updateCheckRan = React.useRef(false);
   React.useEffect(() => {
     if (!state.checkUpdates || updateCheckRan.current) return;
@@ -1818,17 +1947,13 @@ const ContextProvider = React.memo(function ContextProvider(props) {
         downloadAndInstallUpdate(
           data.downloadUrl,
           null,
-          (needsManualStep) => {
-            if (needsManualStep) {
-              // inPlaceOnly prevents this, but keep the modal as safety net
-              dispatch({ type: "setModal", modal: "update", data });
-              return;
-            }
+          ({ reloading }) => {
             if (data.testMode) {
               clearUpdateTestConfig();
-            } else {
+            } else if (!reloading) {
               writeToStorage({ lastInstalledUpdateVersion: data.version });
             }
+            if (reloading) return;
             nativeAlert(
               (locale.updateAutoInstalled || "TypeR {version} has been installed. Restart Photoshop to apply it.").replace("{version}", data.version),
               locale.successTitle,
@@ -1849,10 +1974,29 @@ const ContextProvider = React.memo(function ContextProvider(props) {
       dispatch({ type: "setModal", modal: "update", data });
     }).catch(error => console.warn("Automatic update check failed:", error));
   }, [state.checkUpdates, state.autoUpdate]);
+  useUxpPlatformPackage();
+  useKeyboardAccessPrompt(state.modalType);
+  // Legacy panel: called "TypeR (CEP)", or "TypeR (old)" while TypeR UXP is installed (uxpMigration.js)
+  React.useEffect(() => {
+    try {
+      if (readUxpMigrationState(getUpdateTestConfig()).eligibility !== "uxp") {
+        syncLegacyPanelName(getNode(), new window.CSInterface().getSystemPath(window.SystemPath.EXTENSION));
+      }
+    } catch (error) {
+      console.warn("TypeR: Legacy panel name", error);
+    }
+  }, []);
   return <Context.Provider value={contextValue}>{props.children}</Context.Provider>;
 });
 ContextProvider.propTypes = {
   children: PropTypes.any.isRequired,
 };
 
-export { useContext, ContextProvider, defaultUiLayout, normalizeUiLayout };
+export {
+  useContext,
+  ContextProvider,
+  defaultUiLayout,
+  normalizeUiLayout,
+  normalizeSmartPasteMinScale,
+  normalizeSmartPasteHyphenation,
+};

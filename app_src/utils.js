@@ -5,9 +5,11 @@ import { readJsonStorage, writeJsonStorage, reportStorageIssue } from "./storage
 import "./lib/CSInterface";
 import { parseMarkdownRuns, convertHtmlToMarkdown } from "./markdownConvert";
 import { resolveStylePointText } from "./textLayerPayload";
+import { planAlignment } from "./oneClick/alignPlan";
+import { noteTourEvent } from "./tourEvents";
 import { findNewerReleases, pickUpdateDownloadUrl } from "./updateLogic";
 import { withWatcherKey } from "./hotkeyState";
-import { installUpdateInPlace } from "./updateInstaller";
+import { installUpdateInPlace, uint8ToBase64 } from "./updateInstaller";
 import { UPDATE_TEST_CONFIG_FILE, parseUpdateTestConfig } from "./updateTestMode";
 import {
   PS_EVENT_SELECT,
@@ -26,8 +28,14 @@ import {
 const csInterface = new window.CSInterface();
 const path = csInterface.getSystemPath(window.SystemPath.EXTENSION);
 const storagePath = getActiveProfileStoragePath();
+// Set by the UXP plugin's panel (uxp-src/web): updates come as a .ccx
+// package and a few CEP Node features go through the plugin host instead
+const uxpHost = window.typerUXP || null;
+const UPDATE_PACKAGE_EXTENSION = uxpHost ? ".ccx" : ".zip";
 
 let locale = {};
+// English strings, whatever the interface language
+let baseLocale = {};
 
 const openUrl = window.cep.util.openURLInDefaultBrowser;
 
@@ -48,18 +56,18 @@ const checkUpdate = async (currentVersion) => {
     const testConfig = getUpdateTestConfig();
     const releasesUrl = testConfig
       ? testConfig.releasesUrl
-      : "https://api.github.com/repos/ScanR/TypeR/releases";
+      : "https://api.github.com/repos/PauloKutscher/TypeR/releases";
     const comparisonVersion = testConfig ? testConfig.currentVersion : currentVersion;
     const releases = await fetchBody(
       releasesUrl,
       { headers: { Accept: "application/vnd.github.v3.html+json" } }
     );
     if (!Array.isArray(releases)) throw new Error("invalidResponse");
-    const newerReleases = findNewerReleases(releases, comparisonVersion);
+    const newerReleases = findNewerReleases(releases, comparisonVersion, UPDATE_PACKAGE_EXTENSION, uxpHost && uxpHost.platform);
     if (newerReleases.length > 0) {
       return {
         version: newerReleases[0].tag_name,
-        downloadUrl: pickUpdateDownloadUrl(newerReleases[0]),
+        downloadUrl: pickUpdateDownloadUrl(newerReleases[0], UPDATE_PACKAGE_EXTENSION, uxpHost && uxpHost.platform),
         testMode: !!testConfig,
         releases: newerReleases.map(release => ({
           version: release.tag_name,
@@ -146,15 +154,30 @@ if (window.addEventListener) {
 // Tracks in-flight Photoshop actions so low-priority polling (hotkeys, inline
 // TextShapeR) can back off instead of contending in the ExtendScript queue
 let hostActionsPending = 0;
+let selectionActionsPending = 0;
+let lastSelectionActionAt = 0;
 const isHostActionPending = () => hostActionsPending > 0;
-const trackHostAction = (callback, timeout = 15000) => {
+// Photoshop reports the selections TypeR's own actions make (wand probes of
+// the auto-centre, the double bubble alignment...) to a CEP panel, a little
+// after the action: paste on click ignores selections for a moment after
+// an action that changes them (touchesSelection)
+const msSinceHostAction = () => (selectionActionsPending > 0 ? 0 : Date.now() - lastSelectionActionAt);
+const trackHostAction = (callback, timeout = 15000, touchesSelection = false) => {
   notePanelActivity();
   hostActionsPending++;
+  if (touchesSelection) {
+    selectionActionsPending++;
+    lastSelectionActionAt = Date.now();
+  }
   let settled = false;
   const release = () => {
     if (settled) return false;
     settled = true;
     hostActionsPending--;
+    if (touchesSelection) {
+      selectionActionsPending--;
+      lastSelectionActionAt = Date.now();
+    }
     return true;
   };
   // Safety net: never let a lost CEP callback disable polling forever
@@ -165,13 +188,41 @@ const trackHostAction = (callback, timeout = 15000) => {
   };
 };
 
+// Loads the updated host script into the running ExtendScript engine, which a
+// panel reload alone leaves as it was
+const reloadHostScript = () => new Promise((resolve) => {
+  csInterface.evalScript(
+    "try{$.evalFile(new File(" + getExtendScriptString(path + "/app/host.jsx") + "));\"ok\"}catch(e){\"error\"}",
+    (result) => resolve(result === "ok")
+  );
+});
+
 const downloadAndInstallUpdate = async (downloadUrl, onProgress, onComplete, onError, options = {}) => {
   try {
     onProgress && onProgress(locale.updateDownloading);
     const zipBytes = await fetchUpdateZip(downloadUrl);
     onProgress && onProgress(locale.updateInstalling);
-    await installUpdateInPlace(zipBytes, path, null, options.expectedVersion);
-    onComplete && onComplete(false);
+    if (uxpHost) {
+      // The plugin host checks the package and installs it. Through Creative
+      // Cloud's plugin installer, Photoshop replaces this panel with the new
+      // version and this call never returns: it returns when a restart is needed
+      const testConfig = getUpdateTestConfig();
+      // The next version starts on its own: it must not update itself again
+      if (testConfig) clearUpdateTestConfig();
+      await uxpHost.flushStorage();
+      await uxpHost.request("installUpdatePackage", uint8ToBase64(zipBytes), options.expectedVersion, {
+        forceManual: !!(testConfig && testConfig.forceManualPluginInstall),
+      });
+    } else {
+      const { manifestChanged } = await installUpdateInPlace(zipBytes, path, null, options.expectedVersion);
+      // Photoshop reads the manifest at its start; everything else can reload now
+      if (!manifestChanged && (await flushStorageForReload()) && (await reloadHostScript())) {
+        onComplete && onComplete({ reloading: true });
+        window.location.reload();
+        return;
+      }
+    }
+    onComplete && onComplete({ reloading: false });
   } catch (error) {
     console.error('Update failed:', error);
     onError && onError(error.message || locale.updateFailed);
@@ -275,6 +326,28 @@ if (window.addEventListener) {
   window.addEventListener("beforeunload", () => flushStorageWrite(true));
 }
 
+// A UXP mirror write is synchronous only in the panel. Wait for its disk
+// acknowledgement before changing profiles or replacing the WebView.
+const flushStorageForReload = async () => {
+  try {
+    if (!flushStorageWrite(true)) return false;
+    if (uxpHost) await uxpHost.flushStorage();
+    return true;
+  } catch (error) {
+    reportStorageIssue(storagePath, "write");
+    return false;
+  }
+};
+
+const reloadApp = async () => {
+  if (!(await flushStorageForReload())) {
+    nativeAlert(locale.storageWarning, locale.errorTitle, true);
+    return false;
+  }
+  window.location.reload();
+  return true;
+};
+
 const backupStorage = () => {
   if (!flushStorageWrite(true)) return false;
   const storage = loadStorageCache();
@@ -346,6 +419,7 @@ const initLocale = () => {
   };
   // Always merge default strings to ensure fallbacks for new keys
   loadLocaleFile(`${path}/locale/messages.properties`);
+  baseLocale = Object.assign({}, locale);
   locale = mergeLocaleBundle(locale, automatic);
   const lang = readStorage("language");
   if (lang && lang !== "auto") {
@@ -363,7 +437,7 @@ const nativeAlert = (text, title, isError) => {
 
 const nativeConfirm = (text, title, callback) => {
   const data = JSON.stringify({ text, title });
-  csInterface.evalScript("nativeConfirm(" + data + ")", (result) => callback(!!result));
+  csInterface.evalScript("nativeConfirm(" + data + ")", (result) => callback(result === "1"));
 };
 
 let userFonts = null;
@@ -457,6 +531,7 @@ const setActiveLayerText = (text, style, direction, callback = () => {}, options
         text: parsed.text,
         style: null,
         contentOnly: true,
+        direction,
         richTextRuns: parsed.richTextRuns,
       }
     : {
@@ -468,6 +543,8 @@ const setActiveLayerText = (text, style, direction, callback = () => {}, options
       });
   csInterface.evalScript("setActiveLayerText(" + data + ")", trackHostAction((error) => {
     if (error) nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
+    // A style applied to the layer, its text kept (style list, shortcut)
+    else if (!text && style) noteTourEvent("applyStyle");
     callback(!error);
   }));
 };
@@ -601,10 +678,10 @@ let ignoreClearedUntilSelection = false;
 const deselectDocument = (callback = () => {}) => {
   selectionResultsSuppressedUntil = Date.now() + 5000;
   ignoreClearedUntilSelection = true;
-  csInterface.evalScript("deselectDocumentSelection()", () => {
+  csInterface.evalScript("deselectDocumentSelection()", trackHostAction(() => {
     selectionResultsSuppressedUntil = Date.now();
     callback();
-  });
+  }, 15000, true));
 };
 
 const undoLastTextChange = (callback = () => {}) => {
@@ -692,6 +769,13 @@ const getSelectionChanged = (callback = () => {}) => {
   });
 };
 
+// Auto-centre after the paste ("off", "single" or "multi"); the frame is only
+// refitted to the bubble when the auto-centre runs
+const autoCenterFields = (options = {}) => {
+  const autoCenter = options.autoCenter === "single" || options.autoCenter === "multi" ? options.autoCenter : "off";
+  return { autoCenter, resizeTextBox: autoCenter !== "off" && !!options.resizeTextBox };
+};
+
 const createTextLayerInSelection = (text, style, pointText, padding, direction, callback = () => {}, options = {}) => {
   // Support legacy calls where padding/direction are omitted and callback may be 4th or 5th parameter
   if (typeof padding === "function") {
@@ -719,13 +803,14 @@ const createTextLayerInSelection = (text, style, pointText, padding, direction, 
     direction,
     richTextRuns: parsed.richTextRuns,
     preserveActiveTextSize: options.preserveActiveTextSize === true,
+    ...autoCenterFields(options),
   });
   csInterface.evalScript("createTextLayerInSelection(" + data + ", " + resolvedPointText + ")", trackHostAction((error) => {
     if (error === "smallSelection") nativeAlert(locale.errorSmallSelection, locale.errorTitle, true);
     else if (error === "sizeSource") nativeAlert(locale.errorKeepTextSizeNoLayer || locale.errorNoTextLayer, locale.errorTitle, true);
     else if (error) nativeAlert(locale.errorNoSelection, locale.errorTitle, true);
     callback(!error);
-  }));
+  }, 15000, true));
 };
 
 const createTextLayersInStoredSelections = (texts, styles, selections, pointText, padding, direction, callback = () => {}, options = {}) => {
@@ -761,6 +846,7 @@ const createTextLayersInStoredSelections = (texts, styles, selections, pointText
     padding: padding || 0,
     direction,
     preserveActiveTextSize: options.preserveActiveTextSize === true,
+    ...autoCenterFields(options),
   });
   csInterface.evalScript("createTextLayersInStoredSelections(" + data + ", " + !!pointText + ")", trackHostAction((error) => {
     if (error === "smallSelection") nativeAlert(locale.errorSmallSelection, locale.errorTitle, true);
@@ -773,21 +859,54 @@ const createTextLayersInStoredSelections = (texts, styles, selections, pointText
     else if (error && error.indexOf("scriptError:") === 0) nativeAlert(error.replace("scriptError: ", ""), locale.errorTitle, true);
     else if (error) nativeAlert("Error: " + error, locale.errorTitle, true);
     callback(!error);
-  }));
+  }, 15000, true));
 };
 
-const alignTextLayerToSelection = (resizeTextBox = false, padding = 0, callback = () => {}, phantomOffsetX = 0) => {
-  const data = JSON.stringify({
-    resizeTextBox: !!resizeTextBox,
-    padding: padding || 0,
-    phantomOffsetX: Number(phantomOffsetX) || 0,
-  });
-  csInterface.evalScript("alignTextLayerToSelection(" + data + ")", trackHostAction((error) => {
-    if (error === "smallSelection") nativeAlert(locale.errorSmallSelection, locale.errorTitle, true);
-    else if (error === "noSelection") nativeAlert(locale.errorNoSelection, locale.errorTitle, true);
+// A text in a double or triple bubble goes to its own chamber: the host reads
+// the bubble outlines (alignCapture), the smart paste's neck finder cuts them
+// (oneClick/alignPlan.js) and Align centres each text on its chamber. Any
+// failure there leaves the classic Align, centred on the whole bubble.
+const alignTextLayerToSelection = (resizeTextBox = false, padding = 0, callback = () => {}, direction = "ltr") => {
+  const align = (capture) => {
+    let placements = [];
+    try {
+      placements = capture && !capture.error ? planAlignment(capture, direction) : [];
+    } catch (planError) {
+      placements = [];
+    }
+    const data = JSON.stringify({
+      resizeTextBox: !!resizeTextBox,
+      padding: padding || 0,
+      documentId: capture && capture.documentId,
+      placements,
+    });
+    csInterface.evalScript("alignTextLayerToSelection(" + data + ")", trackHostAction((error) => {
+      if (error === "smallSelection") nativeAlert(locale.errorSmallSelection, locale.errorTitle, true);
+      else if (error === "noSelection") nativeAlert(locale.errorNoSelection, locale.errorTitle, true);
+      else if (error) nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
+      else noteTourEvent("align");
+      callback(!error);
+    }, 15000, true));
+  };
+  csInterface.evalScript("alignCapture()", trackHostAction((raw) => align(safeJsonParse(raw, null)), 30000, true));
+};
+
+// Each selected text layer is centred in its own part of a shared bubble.
+// The host answers error codes, translated here.
+const DOUBLE_BUBBLE_ERRORS = {
+  doubleBubbleLayers: "errorDoubleBubbleLayers",
+  doubleBubbleEmpty: "errorDoubleBubbleEmpty",
+  doubleBubbleNotFound: "errorDoubleBubbleNotFound",
+};
+
+const alignTextLayersToDoubleBubble = (resizeTextBox = false, padding = 0, callback = () => {}) => {
+  const data = JSON.stringify({ resizeTextBox: !!resizeTextBox, padding: padding || 0 });
+  csInterface.evalScript("alignTextLayersToDoubleBubble(" + data + ")", trackHostAction((error) => {
+    if (DOUBLE_BUBBLE_ERRORS[error]) nativeAlert(locale[DOUBLE_BUBBLE_ERRORS[error]], locale.errorTitle, true);
+    else if (error && error.indexOf("scriptError:") === 0) nativeAlert(error.replace("scriptError: ", ""), locale.errorTitle, true);
     else if (error) nativeAlert(locale.errorNoTextLayer, locale.errorTitle, true);
     callback(!error);
-  }));
+  }, 15000, true));
 };
 
 const changeActiveLayerTextSize = (val, callback = () => {}) => {
@@ -914,6 +1033,13 @@ const handleWatcherLine = (rawLine) => {
 
 const startForegroundWatcher = () => {
   if (foregroundWatcher.started || foregroundWatcher.stopped) return;
+  // UXP: the plugin's keyboard reader reports the side buttons in the same
+  // line format, and only while Photoshop is in front
+  if (uxpHost && uxpHost.onWatcherLine) {
+    foregroundWatcher.started = true;
+    uxpHost.onWatcherLine(handleWatcherLine);
+    return;
+  }
   if (!navigator.platform || navigator.platform.indexOf("Win") !== 0) return;
   const nodeRequire = (window.cep_node && window.cep_node.require) || (typeof window.require === "function" ? window.require : null);
   if (!nodeRequire) return;
@@ -1138,10 +1264,10 @@ const getDefaultStyle = () => {
             diacXOffset: 0,
             markYDistFromBaseline: 100,
             otbaseline: "normal",
-            ligature: false,
+            ligature: true,
             altligature: false,
             connectionForms: false,
-            contextualLigatures: false,
+            contextualLigatures: true,
             baselineDirection: "withStream",
             color: { red: 0, green: 0, blue: 0 },
           },
@@ -1194,4 +1320,4 @@ const scanPsdFonts = (path, callback) => {
   );
 };
 
-export { csInterface, locale, openUrl, readStorage, writeToStorage, flushStorageWrite, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, getTypeRSelectionSnapshot, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isPhotoshopSelectionOnlyEvent, isHostActionPending, notePanelActivity, isPanelIdle, notePanelInteraction, isPanelInteracting, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, getCurrentSelectionShape, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, toggleCleaningLayers, getHotkeyPressed, onMouseShortcut, startForegroundWatcher, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, getUpdateTestConfig, clearUpdateTestConfig, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns, backupStorage, scanTextShapeRTraining, logTextShapeRTraining };
+export { flushStorageForReload, reloadApp, trackHostAction, msSinceHostAction, safeJsonParse, buildRichTextPayload, alignTextLayersToDoubleBubble, backupStorage, csInterface, locale, baseLocale, openUrl, readStorage, writeToStorage, flushStorageWrite, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, getTypeRSelectionSnapshot, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isHostActionPending, notePanelActivity, isPanelIdle, notePanelInteraction, isPanelInteracting, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, getCurrentSelectionShape, isPhotoshopSelectionOnlyEvent, logTextShapeRTraining, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, scanTextShapeRTraining, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, toggleCleaningLayers, getHotkeyPressed, onMouseShortcut, startForegroundWatcher, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, getUpdateTestConfig, clearUpdateTestConfig, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };

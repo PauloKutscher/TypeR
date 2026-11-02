@@ -76,7 +76,7 @@ assert.strictEqual(foregroundWatcher.name, "Photoshop", "A bare process name mus
 
 // --- runtime matching ------------------------------------------------------
 
-const matchBlock = slice(hotkeySource, "const checkShortcut", "const isFormFieldActive", "hotkey matching");
+const matchBlock = slice(hotkeySource, "const MODIFIER_KEYS", "const isFormFieldActive", "hotkey matching");
 const commands = [
   { id: "add" },
   { id: "next" },
@@ -105,9 +105,9 @@ assert.strictEqual(matching.matchMouseBinding(["WIN", "CTRL"], shortcut), null,
   "A keyboard-only binding must never fire through the mouse path");
 
 // The keyboard poll never sees a mouse token, so mouse bindings must be inert there
-assert.strictEqual(matching.matchBinding(["CTRL"], shortcut), null,
+assert.strictEqual(matching.matchBinding(["CTRL"], shortcut, false), null,
   "A mouse binding must not be reachable from the keyboard poll");
-assert.strictEqual(matching.matchBinding(["WIN", "CTRL"], shortcut).id, "add",
+assert.strictEqual(matching.matchBinding(["WIN", "CTRL"], shortcut, true).id, "add",
   "Keyboard matching must keep working unchanged");
 
 // --- recording and labels --------------------------------------------------
@@ -115,9 +115,9 @@ assert.strictEqual(matching.matchBinding(["WIN", "CTRL"], shortcut).id, "add",
 assert(/MOUSE_BUTTON_KEYS = \{ 3: "MOUSE4", 4: "MOUSE5" \}/.test(editorSource),
   "The settings recorder must map the DOM side buttons to the stored names");
 assert(/onMouseDown=\{changeShortCutFromMouse\}/.test(editorSource),
-  "The shortcut row must capture side-button presses while recording");
-assert(/if \(!mouseKey \|\| !recording\) return;/.test(editorSource),
-  "Side buttons must only be captured while the row is recording");
+  "The shortcut row must capture side-button presses");
+assert(/if \(!mouseKey\) return;/.test(editorSource) && !/!mouseKey \|\| !recording/.test(editorSource),
+  "A side button pressed on a row must record it without a left click first");
 
 [
   ["shortcutCommands.js", commandSource],

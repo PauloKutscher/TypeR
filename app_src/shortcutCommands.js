@@ -1,5 +1,6 @@
 import {
   alignTextLayerToSelection,
+  alignTextLayersToDoubleBubble,
   changeActiveLayerTextSize,
   createTextLayerInSelection,
   createTextLayersInStoredSelections,
@@ -13,6 +14,23 @@ import {
   toggleCleaningLayers,
 } from "./utils";
 import { buildSelectedLayerPayload, buildStoredSelectionPayload, getScaledStyle } from "./textLayerPayload";
+import { canSmartPasteStoredSelections, smartPasteInSelection, smartPasteStoredSelections } from "./smartPasteClient";
+import { isStyleStrokeOn } from "./styleStroke";
+import { isWindowTooShortForTextShapeR } from "./uiLayout";
+
+// Footer toggle and shortcut. The saved choice is left alone while the window is
+// too short, so TextShapeR comes back as soon as the window is tall enough.
+export const toggleTextShapeR = (ctx) => {
+  if (isWindowTooShortForTextShapeR()) {
+    ctx.dispatch({
+      type: "showNotice",
+      text: locale.textShapeRWindowTooShort || "The window is too short to show TextShapeR. Make it taller to use it.",
+      kind: "warning",
+    });
+    return;
+  }
+  ctx.dispatch({ type: "setInlineTextShapeR", value: !ctx.state.inlineTextShapeR });
+};
 
 const applyLinesToLayers = (ctx, layers, preferredOrder = [], options = {}) => {
   const selectedIds = layers
@@ -58,10 +76,34 @@ const applyLinesToLayers = (ctx, layers, preferredOrder = [], options = {}) => {
   }, orderedIds, options);
 };
 
+// Auto-centre after a paste: off -> centre -> multi centre -> off
+const AUTO_CENTER_CYCLE = ["off", "single", "multi"];
+const nextAutoCenterMode = (mode) => {
+  const index = AUTO_CENTER_CYCLE.indexOf(mode);
+  return AUTO_CENTER_CYCLE[(index + 1) % AUTO_CENTER_CYCLE.length];
+};
+
+// The paste options a new text layer is created with: the auto-centre mode
+// and, when it is on, the same frame fitting as Center
+const withAutoCenter = (ctx, options = {}) => ({
+  ...options,
+  autoCenter: ctx.state.autoCenterMode || "off",
+  resizeTextBox: !!ctx.state.resizeTextBoxOnCenter,
+});
+
+// Components pass a slice of the state: settings come from the store
+const fullState = (ctx) => (typeof ctx.getState === "function" ? ctx.getState : () => ctx.state);
+const smartPasteOn = (ctx) => fullState(ctx)().smartPaste === true;
+
 const pasteInSelection = (ctx, preferredOrder = [], options = {}) => {
   const storedSelections = ctx.state.storedSelections || [];
 
   if (ctx.state.multiBubbleMode && storedSelections.length > 0) {
+    // Smart paste replays each stored selection (when it remembers its click)
+    if (smartPasteOn(ctx) && canSmartPasteStoredSelections(storedSelections)) {
+      smartPasteStoredSelections(fullState(ctx), ctx.dispatch, options);
+      return;
+    }
     const payload = buildStoredSelectionPayload({
       storedSelections,
       lines: ctx.state.lines,
@@ -97,7 +139,7 @@ const pasteInSelection = (ctx, preferredOrder = [], options = {}) => {
           );
         }
       },
-      options
+      withAutoCenter(ctx, options)
     );
     return;
   }
@@ -105,6 +147,13 @@ const pasteInSelection = (ctx, preferredOrder = [], options = {}) => {
   getTypeRSelectionSnapshot(({ selection, layers }) => {
     if (!selection && layers.length >= 2) {
       applyLinesToLayers(ctx, layers, preferredOrder, options);
+      return;
+    }
+
+    // Smart paste: the text fitted to the bubble's real shape (falls back
+    // to the classic paste below when it cannot)
+    if (selection && smartPasteOn(ctx)) {
+      smartPasteInSelection(fullState(ctx), ctx.dispatch, { ...options, trigger: { source: "manual" } });
       return;
     }
 
@@ -119,7 +168,7 @@ const pasteInSelection = (ctx, preferredOrder = [], options = {}) => {
       (ok) => {
         if (ok) ctx.dispatch({ type: "nextLine", add: true });
       },
-      options
+      withAutoCenter(ctx, options)
     );
   });
 };
@@ -147,7 +196,7 @@ const applyLinesToSelectedLayers = (ctx, preferredOrder = [], options = {}) => {
 
 const switchTab = (ctx, direction) => {
   const tabs = ctx.state.tabs || [];
-  if (ctx.state.multiTabEnabled === false || tabs.length < 2) return;
+  if (tabs.length < 2) return;
   const currentIndex = tabs.findIndex((tab) => tab.id === ctx.state.currentTabId);
   const baseIndex = currentIndex < 0 ? 0 : currentIndex;
   const nextIndex = (baseIndex + direction + tabs.length) % tabs.length;
@@ -190,6 +239,18 @@ const shortcutCommands = [
     repeatDelay: 0,
     handler: (ctx) => alignTextLayerToSelection(
       ctx.state.resizeTextBoxOnCenter,
+      ctx.state.internalPadding || 0,
+      undefined,
+      ctx.state.direction
+    ),
+  },
+  {
+    id: "centerDouble",
+    label: "shortcut_centerDouble",
+    defaultKeys: [],
+    repeatDelay: 0,
+    handler: (ctx) => alignTextLayersToDoubleBubble(
+      ctx.state.resizeTextBoxOnCenter,
       ctx.state.internalPadding || 0
     ),
   },
@@ -207,7 +268,8 @@ const shortcutCommands = [
   {
     id: "previous",
     label: "shortcut_previous",
-    defaultKeys: ["CTRL", "TAB"],
+    defaultKeys: ["CTRL", "SHIFT", "ENTER"],
+    legacyDefaultKeys: [["CTRL", "TAB"]],
     repeatDelay: 300,
     handler: (ctx) => ctx.dispatch({ type: "prevLine" }),
   },
@@ -228,7 +290,8 @@ const shortcutCommands = [
   {
     id: "nextPage",
     label: "shortcut_nextPage",
-    defaultKeys: ["SHIFT", "X"],
+    defaultKeys: ["CTRL", "ALT", "ENTER"],
+    legacyDefaultKeys: [["SHIFT", "X"]],
     repeatDelay: 300,
     handler: (ctx) => ctx.dispatch({ type: "nextPage" }),
   },
@@ -256,14 +319,16 @@ const shortcutCommands = [
   {
     id: "increase",
     label: "shortcut_increase",
-    defaultKeys: ["CTRL", "SHIFT", "PLUS"],
+    defaultKeys: ["CTRL", "ALT", "U"],
+    legacyDefaultKeys: [["CTRL", "SHIFT", "PLUS"]],
     repeatDelay: 300,
     handler: (ctx) => changeActiveLayerTextSize(ctx.state.textSizeIncrement || 1),
   },
   {
     id: "decrease",
     label: "shortcut_decrease",
-    defaultKeys: ["CTRL", "SHIFT", "MINUS"],
+    defaultKeys: ["CTRL", "ALT", "D"],
+    legacyDefaultKeys: [["CTRL", "SHIFT", "MINUS"]],
     repeatDelay: 300,
     handler: (ctx) => changeActiveLayerTextSize(-(ctx.state.textSizeIncrement || 1)),
   },
@@ -277,8 +342,8 @@ const shortcutCommands = [
   {
     id: "insertText",
     label: "shortcut_insertText",
-    defaultKeys: ["WIN", "SHIFT", "V"],
-    legacyDefaultKeys: ["WIN", "V"],
+    defaultKeys: ["CTRL", "ALT", "L"],
+    legacyDefaultKeys: [["WIN", "V"], ["WIN", "SHIFT", "V"]],
     repeatDelay: 0,
     handler: insertLineText,
   },
@@ -298,6 +363,19 @@ const shortcutCommands = [
       type: "setMultiBubbleMode",
       value: !ctx.state.multiBubbleMode,
     }),
+  },
+  {
+    id: "cycleAutoCenter",
+    label: "shortcut_cycleAutoCenter",
+    defaultKeys: [],
+    repeatDelay: 300,
+    // Only Settings shows the mode: the notice tells what the key changed
+    handler: (ctx) => {
+      const value = nextAutoCenterMode(ctx.state.autoCenterMode);
+      ctx.dispatch({ type: "setAutoCenterMode", value });
+      const modeLabel = { off: locale.settingsAutoCenterOff, single: locale.settingsAutoCenterSingle, multi: locale.settingsAutoCenterMulti }[value];
+      ctx.dispatch({ type: "showNotice", text: locale.settingsAutoCenterLabel + ": " + modeLabel, kind: "info" });
+    },
   },
   {
     id: "removeLastSelection",
@@ -327,14 +405,35 @@ const shortcutCommands = [
     },
   },
   {
+    id: "togglePasteOnClick",
+    label: "shortcut_togglePasteOnClick",
+    defaultKeys: [],
+    repeatDelay: 300,
+    handler: (ctx) => {
+      const value = !ctx.state.pasteOnClick;
+      ctx.dispatch({ type: "setPasteOnClick", value });
+      ctx.dispatch({ type: "showNotice", text: value ? locale.pasteOnClickEnabled : locale.pasteOnClickDisabled, kind: "info" });
+    },
+  },
+  {
+    id: "toggleStyleStroke",
+    label: "shortcut_toggleStyleStroke",
+    defaultKeys: [],
+    repeatDelay: 300,
+    handler: (ctx) => {
+      const style = ctx.state.currentStyle;
+      if (!style) return;
+      const value = !isStyleStrokeOn(style);
+      ctx.dispatch({ type: "toggleStyleStroke", id: style.id });
+      ctx.dispatch({ type: "showNotice", text: value ? locale.styleStrokeEnabled : locale.styleStrokeDisabled, kind: "info" });
+    },
+  },
+  {
     id: "toggleTextShapeR",
     label: "shortcut_toggleTextShapeR",
     defaultKeys: [],
     repeatDelay: 300,
-    handler: (ctx) => ctx.dispatch({
-      type: "setInlineTextShapeR",
-      value: !ctx.state.inlineTextShapeR,
-    }),
+    handler: toggleTextShapeR,
   },
   {
     id: "previousTab",
@@ -365,15 +464,18 @@ const sameShortcut = (left, right) => (
 );
 
 // Move users who still have an unchanged previous default onto the new one,
-// while preserving shortcuts they explicitly customized.
+// while preserving shortcuts they explicitly customized: the old default stays
+// when another action already uses the new one.
 const migrateShortcutDefaults = (storedShortcuts, defaults = getDefaultShortcuts()) => {
   const stored = storedShortcuts && typeof storedShortcuts === "object" ? storedShortcuts : {};
   const shortcuts = { ...defaults, ...stored };
   let migrated = false;
 
   shortcutCommands.forEach((command) => {
-    if (!sameShortcut(stored[command.id], command.legacyDefaultKeys)) return;
-    shortcuts[command.id] = (defaults[command.id] || []).concat([]);
+    if (!(command.legacyDefaultKeys || []).some((keys) => sameShortcut(stored[command.id], keys))) return;
+    const target = defaults[command.id] || [];
+    if (Object.keys(shortcuts).some((id) => id !== command.id && sameShortcut(shortcuts[id], target))) return;
+    shortcuts[command.id] = target.concat([]);
     migrated = true;
   });
 
@@ -425,6 +527,7 @@ const isShortcutActiveForEvent = (event, keys) => {
 };
 
 export {
+  nextAutoCenterMode,
   shortcutCommands,
   getDefaultShortcuts,
   migrateShortcutDefaults,

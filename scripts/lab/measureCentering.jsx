@@ -912,7 +912,7 @@ LAB_RESULT = "";
         try { row.region.shapeLayerBounds = _findShapeLayerBoundsBelowTextLayer(); } catch (e) { row.region.shapeLayerBounds = null; }
 
         try {
-          _createMagicWandSelection(report.options.wandTolerance);
+          _createBalloonWandSelection(report.options.wandTolerance);
           row.region.wandRaw = _getCurrentSelectionBounds() || null;
           if (row.region.wandRaw) {
             try { row.region.openRadius = _getAdaptiveSelectionOpenRadius(row.region.wandRaw); } catch (e) { row.region.openRadius = null; }

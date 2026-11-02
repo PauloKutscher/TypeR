@@ -37,12 +37,20 @@ const {
   generateManualTextShapeRVariant,
   generateTextShapeRVariants,
   getShapeProfileGeometry,
+  isTextShapeRLineModelStale,
   recordTextShapeRFeedback,
+  refitTextShapeRLineModel,
+  registerTextShapeRPatterns,
+  retrainTextShapeRRanker,
   sanitizeTextShapeRTuning,
+  scheduleTextShapeRLineModelRefit,
+  setDehyphenationEnabled,
   setTextShapeRTuning,
   visibleLength,
   visibleWidth,
 } = loadAppModule("app_src/textShapeR.js");
+
+registerTextShapeRPatterns(loadAppModule("app_src/textShapeRPatterns.js").default);
 
 const shippedDefaultTuning = require("../app_src/textShapeRDefaultTuning.json");
 assert.strictEqual(shippedDefaultTuning.samples, 178);
@@ -83,6 +91,48 @@ assert.ok(noHyphen.every((variant) => !/-\n/.test(variant.text)));
 const markdown = generateTextShapeRVariants("A **bold sentence** should keep markdown markers safe", { limit: 10 });
 assert.ok(markdown.every((variant) => !/\*\*bo\nld|sent\nence\*\*/.test(variant.text)));
 assert.ok(markdown.every((variant) => (variant.text.match(/\*\*/g) || []).length === 2));
+
+// A compound split by an earlier shape keeps its hyphen, a cesure is joined
+setDehyphenationEnabled(true);
+[["Dis... Dis- moi...", "Dis... Dis-moi..."], ["Qu'est- ce que", "Qu'est-ce que"], ["Celui- ci", "Celui-ci"],
+  ["peut- être", "peut-être"], ["B- bon", "B-bon"], ["Suis- je", "Suis-je"],
+  ["com- ment", "comment"], ["par- don", "pardon"], ["for- ce", "force"], ["bel- le", "belle"], ["en- tendre", "entendre"]]
+  .forEach(([source, expected]) => {
+    const variants = generateTextShapeRVariants(source, { limit: 12 });
+    assert.ok(variants.length && variants.every((variant) => variant.lines.join(" ").replace(/- /g, "-").replace(/\s+/g, " ").replace(/-/g, "") === expected.replace(/-/g, "")),
+      `${source} must read as ${expected}, got ${variants[0] && variants[0].text}`);
+    if (expected.includes("-")) assert.ok(variants.some((variant) => variant.lines.join(" ").includes(expected)), `${source} must keep its hyphen`);
+    else assert.ok(variants.some((variant) => variant.lines.join(" ").includes(expected)), `${source} must be joined`);
+  });
+setDehyphenationEnabled(false);
+const compoundOff = generateTextShapeRVariants("Dis... Dis-\nmoi...", { limit: 12 });
+assert.ok(compoundOff.some((variant) => variant.lines.includes("Dis-moi...")), "a compound is rejoined even with the option off");
+assert.ok(compoundOff.some((variant) => variant.lines.join("|").includes("Dis-|moi...")), "a compound can break at its own hyphen");
+assert.ok(compoundOff.length >= 3, "a two-word text still offers several shapes");
+
+// Cesures stay available without ever leading when a clean shape exists
+const cesureText = "Je ne comprends pas pourquoi tu refuses toujours de me dire la vérité.";
+const cesureList = generateTextShapeRVariants(cesureText, { limit: 12 });
+assert.strictEqual(cesureList[0].hyphenCount, 0, "a cesure must not lead while a clean shape exists");
+assert.ok(cesureList.slice(0, 6).some((variant) => variant.hyphenCount > 0), "a good cesure stays in the proposals");
+const shortCesure = generateTextShapeRVariants("Bonjour, comment vas-tu ?", { limit: 12 });
+assert.ok(shortCesure.some((variant) => /com-\nment/.test(variant.text)), "short words can be cut as letterers do");
+assert.ok(generateTextShapeRVariants("D'accord, mais alors vite.", { limit: 12 }).some((variant) => /d'ac-\ncord/i.test(variant.text)), "a word behind an elision can be cut");
+
+// Breaks follow the text's own language, whatever the interface says
+const cesuresOf = (text) => generateTextShapeRVariants(text, { limit: 12 })
+  .filter((variant) => variant.hyphenCount)
+  .map((variant) => variant.lines.find((line) => /-$/.test(line)).split(" ").pop());
+const englishCesures = cesuresOf("I remember everything that happened together in the dangerous mountains.");
+assert.ok(englishCesures.length, "English text gets cesures");
+["eve-", "happe-", "toge-", "dange-"].forEach((wrong) => assert.ok(!englishCesures.includes(wrong), `English breaks with French rules: ${wrong}`));
+assert.ok(englishCesures.some((fragment) => /^(?:re-|re-mem-|every-|hap-|to-|to-geth-|dan-|dan-ger-|moun-)$/.test(fragment)), `unexpected English cesures: ${englishCesures}`);
+assert.ok(cesuresOf("Я не понимаю, что происходит здесь, пожалуйста, объясни мне.").length, "Cyrillic text gets cesures");
+assert.ok(!cesuresOf("لا أفهم ما يحدث هنا الآن يا صديقي العزيز والجميل").length, "Arabic is never hyphenated");
+setDehyphenationEnabled(true);
+assert.ok(generateTextShapeRVariants("some- thing is well- known to- gether", { limit: 12 }).some((variant) => variant.lines.join(" ") === "something is well-known together"),
+  "English cesures are joined and English compounds kept");
+setDehyphenationEnabled(false);
 
 const short = generateTextShapeRVariants("Bonjour");
 assert.deepStrictEqual(short.map((variant) => variant.text), ["Bonjour"]);
@@ -296,7 +346,8 @@ assert.strictEqual(convergedTuning.exemplars.length, 1, "same shape must not dup
 // on the whole history, and the training accuracy is persisted as telemetry
 assert.ok(Array.isArray(convergedTuning.pairs) && convergedTuning.pairs.length > 0,
   "preference pairs should be stored for replay training");
-assert.ok(convergedTuning.pairs.every((pair) => pair.c.length === 12 && pair.r.length === 12),
+assert.ok(convergedTuning.pairs.every((pair) => pair.c.length === 16 && pair.r.length === 16
+  && Number.isInteger(pair.t)),
   "stored pairs should hold full feature vectors");
 assert.ok(convergedTuning.pairAccuracy >= 0.8,
   `replay training should rank most stored pairs correctly, got ${convergedTuning.pairAccuracy}`);
@@ -428,8 +479,26 @@ const afterGarbagePairs = recordTextShapeRFeedback(chosenShape, { limit: 12, pro
 assert.ok(afterGarbagePairs && afterGarbagePairs.tuning.pairs.length > 0,
   "feedback on top of garbage pairs should still train");
 assert.ok(afterGarbagePairs.tuning.pairAccuracy >= 0 && afterGarbagePairs.tuning.pairAccuracy <= 1);
-assert.strictEqual(afterGarbagePairs.tuning.pairSchemaVersion, 1,
+assert.strictEqual(afterGarbagePairs.tuning.pairSchemaVersion, 2,
   "persisted replay vectors should carry an explicit schema version");
+// Schema 1 buffers (12 features) migrate forward: new features padded with 0
+const migratedPairs = sanitizeTextShapeRTuning({
+  samples: 2,
+  pairs: [{ c: new Array(12).fill(0.2), r: new Array(12).fill(0.8) }],
+});
+assert.strictEqual(migratedPairs.pairs.length, 1);
+assert.strictEqual(migratedPairs.pairs[0].c.length, 16);
+assert.deepStrictEqual(migratedPairs.pairs[0].c.slice(12), [0, 0, 0, 0]);
+// Schema 2 pairs keep their feedback index and generator offset (clamped)
+const datedPairs = sanitizeTextShapeRTuning({
+  samples: 5,
+  pairSchemaVersion: 2,
+  pairs: [{ c: new Array(16).fill(0.2), r: new Array(16).fill(0.8), t: 3, o: 99 }],
+});
+assert.strictEqual(datedPairs.pairs[0].t, 3);
+assert.strictEqual(datedPairs.pairs[0].o, 4, "generator offsets are clamped");
+assert.strictEqual(sanitizeTextShapeRTuning({ pairSchemaVersion: 2, pairs: [{ c: new Array(12).fill(0.2), r: new Array(12).fill(0.8) }] }).pairs, null,
+  "schema 2 vectors must have the full feature length");
 const unknownPairSchema = sanitizeTextShapeRTuning({
   samples: 2,
   pairSchemaVersion: 99,
@@ -556,4 +625,139 @@ const restoredShippedDefaultTop = generateTextShapeRVariants(defaultProbeText, {
 assert.strictEqual(restoredShippedDefaultTop.text, shippedDefaultTop.text,
   "null tuning must restore the shipped trained default");
 
-console.log("TextShapeR tests passed");
+// Structured line-break model (differentiable DP, arXiv:1802.03676)
+const testLineModel = async () => {
+  const ddpSanitized = sanitizeTextShapeRTuning({ samples: 1, ddp: [30, 1, 2, 3, 4, 5, 6, 7, 8, 9, 999], ddpKey: "1-abc123" });
+  assert.strictEqual(ddpSanitized.ddp.length, 11);
+  assert.strictEqual(ddpSanitized.ddp[10], 400, "ddp weights are clamped");
+  assert.strictEqual(ddpSanitized.ddpKey, "1-abc123");
+  assert.strictEqual(sanitizeTextShapeRTuning({ samples: 1, ddpKey: "<script>" }).ddpKey, null, "a malformed ddp key is dropped");
+  assert.strictEqual(sanitizeTextShapeRTuning({ samples: 1, ddp: [1, 2, 3] }).ddp, null,
+    "a ddp vector of the wrong length is dropped");
+  assert.strictEqual(sanitizeTextShapeRTuning({ samples: 1, ddp: [30, 0, 0, 0, 0, 0, 0, 0, 0, 0, "x"] }).ddp, null,
+    "a non-numeric ddp vector is dropped");
+  const roundTrip = sanitizeTextShapeRTuning(JSON.parse(JSON.stringify(ddpSanitized)));
+  assert.deepStrictEqual(roundTrip.ddp, ddpSanitized.ddp, "ddp survives a save/load round-trip");
+
+  // Teach a deliberately unusual compact stack and check its rank improves
+  const ddpText = "Tu crois vraiment qu'on va s'en sortir comme ça sans rien dire à personne ?";
+  const ddpOptions = { limit: 12, profile: "balanced" };
+  setTextShapeRTuning(null);
+  const ddpBefore = generateTextShapeRVariants(ddpText, ddpOptions);
+  // A proposal the untrained engine ranks low (but not dead last)
+  const ddpTarget = ddpBefore[Math.min(4, ddpBefore.length - 1)];
+  const rankOf = (variants) => variants.findIndex((variant) => variant.text === ddpTarget.text);
+  const rankBefore = rankOf(ddpBefore);
+  assert.ok(rankBefore > 0, "the probe layout must start below the top");
+  // Learn clicks never fit the line-break model themselves: they leave it
+  // stale, and the panel refits it once idle (refitTextShapeRLineModel here)
+  let ddpTuning = null;
+  for (let pass = 0; pass < 3; pass++) {
+    ddpTuning = recordTextShapeRFeedback(ddpTarget.text, ddpOptions, ddpTuning).tuning;
+    // Re-validating the same layout leaves the lessons, and so the model, as is
+    if (pass === 0) assert.ok(isTextShapeRLineModelStale(ddpTuning), "a Learn click leaves the line-break model stale");
+    ddpTuning = refitTextShapeRLineModel(ddpTuning);
+    assert.ok(!isTextShapeRLineModelStale(ddpTuning), "a refit matches the current lessons");
+  }
+  assert.ok(Array.isArray(ddpTuning.ddp) && ddpTuning.ddp.length === 11, "the refit trains the ddp model");
+  assert.ok(ddpTuning.ddp.every(Number.isFinite), "ddp weights are finite");
+  assert.strictEqual(recordTextShapeRFeedback(ddpTarget.text, ddpOptions, ddpTuning).tuning.ddp.join(), ddpTuning.ddp.join(),
+    "a Learn click keeps the previous line-break model until the refit");
+  setTextShapeRTuning(ddpTuning);
+  const rankAfter = rankOf(generateTextShapeRVariants(ddpText, ddpOptions));
+  assert.ok(rankAfter >= 0 && (rankBefore < 0 || rankAfter <= rankBefore),
+    `the taught layout must not lose rank (before ${rankBefore}, after ${rankAfter})`);
+  assert.strictEqual(rankAfter, 0, `the taught layout should become the top proposal, got rank ${rankAfter}`);
+
+  // Older tunings: the plain density average moves to the volume curve once,
+  // and weights the previous solver left at their caps are refit on load
+  const legacyDensity = sanitizeTextShapeRTuning({ samples: 10, style: { density: 8 } }).style.density;
+  assert.ok(legacyDensity < 8, "a legacy density average is brought to the reference volume");
+  assert.strictEqual(sanitizeTextShapeRTuning(sanitizeTextShapeRTuning({ samples: 10, style: { density: 8 } })).style.density, legacyDensity,
+    "the density migration runs only once");
+  const refitSource = recordTextShapeRFeedback(ddpTarget.text, ddpOptions, null).tuning;
+  const staleWeights = { ...refitSource, rankSolver: null, weights: { stepMean: 650, meanRatio: -640 } };
+  setTextShapeRTuning(staleWeights);
+  const refitTop = generateTextShapeRVariants(ddpText, ddpOptions)[0].text;
+  setTextShapeRTuning(refitSource);
+  assert.strictEqual(refitTop, generateTextShapeRVariants(ddpText, ddpOptions)[0].text, "stale capped weights are refit on load");
+  setTextShapeRTuning(ddpTuning);
+
+  // Deterministic: same lessons, same weights
+  let replay = null;
+  for (let pass = 0; pass < 3; pass++) replay = refitTextShapeRLineModel(recordTextShapeRFeedback(ddpTarget.text, ddpOptions, replay).tuning);
+  assert.deepStrictEqual(replay.ddp, ddpTuning.ddp, "ddp training is deterministic");
+
+  // A deferred (batch) record leaves ddp untouched until the batch retrain
+  const deferred = recordTextShapeRFeedback(ddpTarget.text, { ...ddpOptions, deferRanker: true }, null).tuning;
+  assert.strictEqual(deferred.ddp, null, "deferred feedback does not fit ddp per layer");
+  assert.ok(Array.isArray(retrainTextShapeRRanker(deferred).ddp), "batch retrain fits ddp once");
+
+  // Full buffers (800 pairs, 300 exemplars) from 20-35 word bubbles
+  const words = "je crois que nous devrions vraiment partir avant que la nuit tombe sur la ville il faudra bien finir par leur dire ce qui est arrivé cette nuit-là dans la forêt personne n'avait remarqué la porte".split(" ");
+  const bubbleText = (index) => {
+    const count = 20 + (index * 7) % 16;
+    const picked = [];
+    for (let word = 0; word < count; word++) picked.push(words[(index * 13 + word * 5) % words.length]);
+    return `${picked.join(" ")} (${index}).`;
+  };
+  const contexts = [{ limit: 12, profile: "balanced" }, { limit: 12, profile: "balanced", width: 260, height: 340 }];
+  let seed = null;
+  for (let index = 0; index < 60; index++) {
+    const options = { ...contexts[index % 2], deferRanker: true };
+    setTextShapeRTuning(seed || {});
+    const proposals = generateTextShapeRVariants(bubbleText(index), options);
+    seed = recordTextShapeRFeedback(proposals[index % Math.min(3, proposals.length)].text, options, seed).tuning;
+  }
+  // Recorded lessons repeated as later feedbacks (pairs) and other bubble
+  // aspects (exemplars), which is quicker than recording 300 of them
+  const pairs = [];
+  const exemplars = [];
+  for (let round = 0; round < 5; round++) {
+    seed.pairs.forEach((pair) => pairs.push({ ...pair, t: pair.t + round * seed.samples }));
+    seed.exemplars.forEach((exemplar) => exemplars.push({ ...exemplar, aspect: 0.6 + round * 0.25 + (exemplar.aspect || 0) / 10 }));
+  }
+  let full = retrainTextShapeRRanker({ ...seed, samples: seed.samples * 5, pairs: pairs.slice(-800), exemplars: exemplars.slice(-300) });
+  assert.strictEqual(full.pairs.length, 800, "the replay buffer is full");
+  assert.strictEqual(full.exemplars.length, 300, "the exemplar memory is full");
+  assert.ok(!isTextShapeRLineModelStale(full), "the batch retrain fits the line-break model");
+
+  // Retraining is idempotent for both the ranker and the line-break model
+  const retrainedTwice = retrainTextShapeRRanker(JSON.parse(JSON.stringify(full)));
+  assert.deepStrictEqual(retrainedTwice.weights, full.weights, "ranker retrain is idempotent");
+  assert.deepStrictEqual(retrainedTwice.ddp, full.ddp, "line-break model retrain is idempotent");
+  assert.strictEqual(retrainedTwice.ddpKey, full.ddpKey);
+  assert.deepStrictEqual(refitTextShapeRLineModel({ ...full, ddp: null, ddpKey: null }).ddp, full.ddp,
+    "the idle refit and the batch retrain fit the same model");
+
+  // Learn-click budget on full buffers: the panel stays responsive because
+  // the click only retrains the ranker (~15 ms on a laptop). The bound is
+  // loose on purpose so slow CI machines do not flake
+  const timings = [];
+  for (let click = 0; click < 5; click++) {
+    const options = contexts[click % 2];
+    setTextShapeRTuning(full);
+    const proposals = generateTextShapeRVariants(bubbleText(1000 + click), options);
+    const started = process.hrtime.bigint();
+    recordTextShapeRFeedback(proposals[1 % proposals.length].text, options, full);
+    timings.push(Number(process.hrtime.bigint() - started) / 1e6);
+  }
+  timings.sort((a, b) => a - b);
+  assert.ok(timings[2] < 150, `a Learn click on full buffers took ${timings[2].toFixed(1)} ms (median)`);
+
+  // The idle refit runs in time slices and lands on the same model; a newer
+  // request cancels it
+  const stale = { ...full, ddp: null, ddpKey: null };
+  let cancelledResult = null;
+  const cancel = scheduleTextShapeRLineModelRefit(stale, (result) => { cancelledResult = result; });
+  cancel();
+  const sliced = await new Promise((resolve) => scheduleTextShapeRLineModelRefit(stale, resolve, { sliceMs: 2 }));
+  assert.deepStrictEqual(sliced, { ddp: full.ddp, ddpKey: full.ddpKey }, "the sliced refit matches the batch fit");
+  assert.strictEqual(cancelledResult, null, "a cancelled refit never reports");
+  setTextShapeRTuning(null);
+};
+
+testLineModel().then(() => console.log("TextShapeR tests passed"), (error) => {
+  console.error(error);
+  process.exit(1);
+});

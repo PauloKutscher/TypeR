@@ -12,20 +12,15 @@ import { getScaledStyle } from "../../textLayerPayload";
 import { isDuplicateSelection } from "../../multiBubbleHistory";
 import { getBubbleCacheKey, haveSameLayerSize, findEnclosingBubbleShape } from "../../textShapeRTracking";
 import { isShortcutActiveForEvent, pasteInSelection, withShortcutHint } from "../../shortcutCommands";
+import { isSmartPasteSettling, recentSelectionTrigger } from "../../smartPasteClient";
 import { createFontPreviewRegistry, getFontPreviewFamily } from "../../fontPreview";
 import { notePerfRender } from "../../perfDebug";
 import TextShapeRFitPreview from "../textShapeRFitPreview";
 import { createPanelSnapshotQueue } from "./panelSnapshot";
+import { getInterfaceLanguage } from "../../interfaceLanguage";
+import { loadTextShapeREngine } from "../../textShapeREngineLoader";
 
-let textShapeREnginePromise = null;
 const requestPanelSnapshot = createPanelSnapshotQueue((script, callback) => csInterface.evalScript(script, callback));
-const loadTextShapeREngine = () => {
-  if (!textShapeREnginePromise) {
-    textShapeREnginePromise = import(/* webpackChunkName: "text-shaper-engine" */ "../../textShapeR");
-  }
-  return textShapeREnginePromise;
-};
-
 const normalizeLayerText = (text) => String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
 
 const getNextUsableLineIndex = (lines, lineIndex) => {
@@ -140,6 +135,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     loadTextShapeREngine().then((engine) => {
       if (!active) return;
       engine.setDehyphenationEnabled(context.getState().dehyphenateTextShapeR === true);
+      engine.setTextShapeRInterfaceLanguage(getInterfaceLanguage(context.getState()));
       engine.setTextShapeRTuning(context.getState().textShapeRTuning);
       setTextShapeREngine(engine);
     });
@@ -960,12 +956,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   };
 
   const checkForSelectionChange = React.useCallback(() => {
-    // A lost CEP callback used to leave this flag raised forever, and with it
-    // multi-bubble looked switched off until the panel was remounted. Every other
-    // host call gets that safety net from `trackHostAction`; this one keeps its
-    // own flag, so it expires on the same 15 s.
     if (selectionCheckPending.current && Date.now() - selectionPollLastAt.current < 15000) return;
-    if (!context.state.multiBubbleMode || context.state.modalType || document.hidden || isHostActionPending()) return;
+    if (!context.state.multiBubbleMode || context.state.modalType || document.hidden || isHostActionPending() || isSmartPasteSettling()) return;
     // A click just happened inside the panel: let Photoshop's main thread
     // deliver it before spending a round-trip on selection polling
     if (isPanelInteracting()) return;
@@ -1003,6 +995,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           const knownSelections = (context.state.storedSelections || []).concat([]);
           let nextLineIndex = context.state.currentLineIndex;
           const entries = [];
+          // A single new selection remembers the click that made it (smart paste replays it)
+          const trigger = selection.multiSelection.length === 1 ? recentSelectionTrigger() : null;
 
           for (const multiSelection of selection.multiSelection) {
             const { shiftKey, ...cleanSelection } = multiSelection;
@@ -1011,7 +1005,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
             }
 
             knownSelections.push(cleanSelection);
-            entries.push({ selection: cleanSelection, lineIndex: nextLineIndex });
+            entries.push({ selection: trigger ? { ...cleanSelection, trigger } : cleanSelection, lineIndex: nextLineIndex });
             const nextLine = getNextUsableLineIndex(context.state.lines || [], nextLineIndex);
             nextLineIndex = nextLine.index;
             if (!nextLine.advanced) {
@@ -1035,7 +1029,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         }
         const { shiftKey, ...cleanSelection } = selection;
         if (!isDuplicateSelection(context.state.storedSelections || [], cleanSelection)) {
-          addSelectionAndAdvance(cleanSelection);
+          const trigger = recentSelectionTrigger();
+          addSelectionAndAdvance(trigger ? { ...cleanSelection, trigger } : cleanSelection);
         }
       }
     });
@@ -1108,9 +1103,14 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   }, [context.state.multiBubbleMode, context.state.storedSelections, clearAllTipShown, showClearAllTipFunc]);
 
   const createLayer = React.useCallback((event) => {
+    const keepSize = isShortcutActiveForEvent(event, context.state.shortcut.keepTextSize);
     pasteInSelection(context, batchOrderRef.current, {
-      preserveActiveTextSize: isShortcutActiveForEvent(event, context.state.shortcut.keepTextSize),
+      preserveActiveTextSize: keepSize,
     });
+    if (!keepSize && (context.state.shortcut.keepTextSize || []).length) {
+      context.dispatch({ type: "showFeatureTip", id: "keepSizePaste" });
+    }
+    context.dispatch({ type: "showFeatureTip", id: "pasteMultipleLayers" });
   }, [context]);
 
   const insertStyledText = (event) => {
@@ -1134,22 +1134,13 @@ const PreviewBlock = React.memo(function PreviewBlock() {
   }, [line.rawIndex]);
 
   const handleAlignLayer = React.useCallback(() => {
-    // Centring is what the phantom offset is for, so it resolves the bubble
-    // itself rather than centring against one the panel never looked at
-    ensureBubbleShape((shape) => {
-      const geometry = textShapeREngine && shape?.profile && textShapeREngine.getShapeProfileGeometry
-        ? textShapeREngine.getShapeProfileGeometry(shape.profile)
-        : null;
-      const phantomOffsetX = geometry
-        ? geometry.offsetX * (shape.width || 0)
-        : (shape?.phantomOffsetX || 0);
-      alignTextLayerToSelection(context.state.resizeTextBoxOnCenter, context.state.internalPadding || 0, () => {
-        if (context.state.multiBubbleMode && (context.state.storedSelections || []).length > 0) {
-          resetStoredSelections(true);
-        }
-      }, phantomOffsetX);
-    });
-  }, [context.state, ensureBubbleShape, resetStoredSelections, textShapeREngine]);
+    alignTextLayerToSelection(context.state.resizeTextBoxOnCenter, context.state.internalPadding || 0, (ok) => {
+      if (context.state.multiBubbleMode && (context.state.storedSelections || []).length > 0) {
+        resetStoredSelections(true);
+      }
+      if (ok) context.dispatch({ type: "showFeatureTip", id: "alignWithoutSelection" });
+    }, context.state.direction);
+  }, [context.state, resetStoredSelections]);
 
   const handleDecrease = React.useCallback(() => {
     changeActiveLayerTextSize(-(context.state.textSizeIncrement || 1));
@@ -1188,6 +1179,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
 
   const applyTextShapeRVariant = React.useCallback((variant, advance = false) => {
     if (!variant || applyingTextShapeRId) return;
+    if (!advance) context.dispatch({ type: "showFeatureTip", id: "textShapeRShiftApply" });
     // In batch mode, only apply once the loaded layer really is the queued
     // one — a fast click during the layer switch must not hit the wrong layer
     if (batchRunRef.current) {
@@ -1439,7 +1431,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         )}
         {showPreviewMainControls && <div className="preview-top_main-controls">
           {uiVisible.previewCreateButton !== false && (
-            <button className={"preview-top_big-btn preview-top_big-btn--small topcoat-button--large--cta" + (context.state.keepSizeHeld ? " m-keep-size" : "")} title={`${withShortcutHint(
+            <button data-tour="paste" className={"preview-top_big-btn preview-top_big-btn--small topcoat-button--large--cta" + (context.state.keepSizeHeld ? " m-keep-size" : "")} title={`${withShortcutHint(
               context.state.multiBubbleMode && context.state.storedSelections && context.state.storedSelections.length > 0
                 ? (locale.multiBubbleCreateLayersDescr || "Paste {count} text layer(s)").replace("{count}", context.state.storedSelections.length)
                 : locale.createLayerDescr,
@@ -1454,7 +1446,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
             </button>
           )}
           {uiVisible.previewAlignButton !== false && (
-            <button className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large" title={withShortcutHint(locale.alignLayerDescr, context.state.shortcut.center)} onClick={handleAlignLayer}>
+            <button data-tour="align" className="preview-top_big-btn preview-top_big-btn--small topcoat-button--large" title={withShortcutHint(locale.alignLayerDescr, context.state.shortcut.center)} onClick={handleAlignLayer}>
               <MdCenterFocusWeak size={18} /> {locale.alignLayer}
             </button>
           )}
@@ -1481,7 +1473,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           <button className="topcoat-icon-button--large" title={locale.prevLine} onClick={handlePrevLine}>
             <FiArrowUp size={18} />
           </button>
-          <button className="topcoat-icon-button--large" title={locale.nextLine} onClick={handleNextLine}>
+          <button data-tour="next-line" className="topcoat-icon-button--large" title={locale.nextLine} onClick={handleNextLine}>
             <FiArrowDown size={18} />
           </button>
         </div>

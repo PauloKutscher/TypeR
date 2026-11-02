@@ -50,6 +50,8 @@ export const validateImportData = (data) => {
       if (style.textProps !== undefined) check(isObject(style.textProps));
       if (style.prefixes !== undefined) check(Array.isArray(style.prefixes) && style.prefixes.every(value => typeof value === 'string'));
       if (style.sizePresets !== undefined) check(Array.isArray(style.sizePresets) && style.sizePresets.every(value => Number.isFinite(Number(value)) && Number(value) > 0));
+      if (style.bubbleType !== undefined) check(typeof style.bubbleType === 'string');
+      if (style.punctuationOnlyScale !== undefined) check(Number.isFinite(style.punctuationOnlyScale) && style.punctuationOnlyScale > 0);
     });
   }
   if (data.tabs) {
@@ -92,9 +94,60 @@ export const repairFolderHierarchy = (input) => {
 
 export const serializeStyle = (style) => {
   const result = {};
-  ['id', 'name', 'folder', 'edited', 'textType', 'textProps', 'prefixes', 'prefixColor', 'prefixesDisabled', 'stroke', 'sizePresets', 'autoSizeByPageWidth', 'sizePresetDefaultIndex', 'sizePresetMinWidths'].forEach(key => {
+  ['id', 'name', 'folder', 'edited', 'textType', 'textProps', 'prefixes', 'prefixColor', 'prefixesDisabled', 'stroke', 'sizePresets', 'autoSizeByPageWidth', 'sizePresetDefaultIndex', 'sizePresetMinWidths', 'punctuationOnlyScale', 'bubbleType'].forEach(key => {
     if (style[key] !== undefined) result[key] = style[key];
   });
   return result;
 };
 export const selectExportStyles = (styles, selectedFolderIds) => styles.filter(style => selectedFolderIds.includes(style.folder || null));
+
+// Build the file of a single folder export. `folder` is a buildFolderTree node.
+// Without subfolders the file keeps the flat `exportedStyles` format. With
+// subfolders it uses the library format, the one importers read a hierarchy from.
+export const buildFolderExport = (folder, stylesByFolder) => {
+  const directStyles = stylesByFolder.get(folder.id) || [];
+  if (!(folder.children || []).length) {
+    return {
+      data: {
+        name: folder.name,
+        exportedStyles: directStyles.map((style) => ({
+          ...serializeStyle(style),
+          name: style.name,
+          textType: style.textType || 'inherit',
+          textProps: style.textProps,
+          prefixes: style.prefixes || [],
+          prefixColor: style.prefixColor,
+          stroke: style.stroke,
+        })),
+      },
+      styles: directStyles,
+    };
+  }
+  const folders = [];
+  const styles = [];
+  const collect = (node, parentId) => {
+    // The exported folder drops its order: it belongs to the source library
+    folders.push({ id: node.id, name: node.name, parentId, order: parentId ? node.order : undefined });
+    styles.push(...(stylesByFolder.get(node.id) || []));
+    node.children.forEach((child) => collect(child, node.id));
+  };
+  collect(folder, null);
+  return { data: { name: folder.name, folders, styles: styles.map(serializeStyle) }, styles };
+};
+
+// Ask before replacing missing or locally newer styles. The native dialog is
+// asynchronous in UXP, so the UI obtains the decision before dispatching.
+export const hasStyleImportConflicts = (current, incoming) => current.some(style => {
+  const imported = incoming.find(candidate => candidate.id === style.id);
+  return !imported || (style.edited && (!imported.edited || style.edited > imported.edited));
+});
+
+export const mergeImportedStyles = (current, incoming, keepExisting) => {
+  if (!keepExisting) return incoming.slice();
+  const kept = current.filter(style => {
+    const imported = incoming.find(candidate => candidate.id === style.id);
+    return !imported || (style.edited && (!imported.edited || style.edited > imported.edited));
+  });
+  const keptIds = new Set(kept.map(style => style.id));
+  return kept.concat(incoming.filter(style => !keptIds.has(style.id)));
+};

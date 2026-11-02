@@ -62,13 +62,22 @@ const getLocalKeys = (e) => {
   return keys;
 };
 
-// Same "aWINaCTRLaZa" format as the hotkey poller
+// Same "aWINaCTRLaZa" format as the hotkey poller. The UXP keyboard reader
+// may follow a key with its aliases ("aLEFTaARROWLEFTa"): only the first
+// name of the key is recorded.
 const parseHostKeys = (state) => {
   if (!state || typeof state !== "string" || state.indexOf("a") !== 0) return [];
   const keys = state.split("a");
   keys.shift();
   keys.pop();
-  return keys.filter((key) => key);
+  let mainKeySeen = false;
+  return keys.filter((key) => {
+    if (!key) return false;
+    if (MODIFIERS.includes(key)) return true;
+    if (mainKeySeen) return false;
+    mainKeySeen = true;
+    return true;
+  });
 };
 
 const Shortcut = (props) => {
@@ -126,12 +135,15 @@ const Shortcut = (props) => {
   // Recording happens with the cursor over the panel, so the DOM event is
   // available here even though matching at runtime goes through the watcher.
   // The host is never queried: ScriptUI cannot see mouse buttons at all.
+  // A side button only reaches the row that is under the cursor, so pressing it
+  // there is enough: it never gives the focus that a left click does.
   const changeShortCutFromMouse = (e) => {
     const mouseKey = MOUSE_BUTTON_KEYS[e.button];
-    if (!mouseKey || !recording) return;
+    if (!mouseKey) return;
     if (props.modifierOnly) return;
     e.preventDefault();
     e.stopPropagation();
+    focusShortcut();
     hostQueryRef.current++;
     const keys = [];
     if (e.metaKey) keys.push("WIN");

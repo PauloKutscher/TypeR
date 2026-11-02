@@ -3,6 +3,7 @@ import React from "react";
 import { FiCheckSquare, FiFolder, FiType, FiX } from "react-icons/fi";
 import { MdSave } from "react-icons/md";
 
+import { noteTourEvent } from "../../tourEvents";
 import config from "../../config";
 import { locale, nativeAlert } from "../../utils";
 import { useContext } from "../../context";
@@ -21,9 +22,15 @@ const ExportModal = React.memo(function ExportModal() {
     defaultStyleId: state.defaultStyleId,
     language: state.language,
     autoClosePSD: state.autoClosePSD,
-    autoScrollStyle: state.autoScrollStyle,
     currentFolderTagPriority: state.currentFolderTagPriority,
     pastePointText: state.pastePointText,
+    smartPaste: state.smartPaste,
+    pasteOnClick: state.pasteOnClick,
+    smartPasteAutoClean: state.smartPasteAutoClean,
+    smartPasteDistribute: state.smartPasteDistribute,
+    smartPasteMinScale: state.smartPasteMinScale,
+    smartPasteHyphenation: state.smartPasteHyphenation,
+    refontRules: state.refontRules,
   }));
   const profileRegistry = React.useMemo(getProfileRegistry, []);
   const [selectedProfileId, setSelectedProfileId] = React.useState(profileRegistry.activeProfileId);
@@ -126,11 +133,11 @@ const ExportModal = React.memo(function ExportModal() {
     }
   };
 
-  const exportData = (e) => {
+  const exportData = async (e) => {
     e.preventDefault();
     if (!canExport) return;
     const ext = withFontFiles ? "zip" : "json";
-    const pathSelect = window.cep.fs.showSaveDialogEx(
+    const pathSelect = await window.cep.fs.showSaveDialogEx(
       false,
       false,
       [ext],
@@ -155,12 +162,20 @@ const ExportModal = React.memo(function ExportModal() {
       data.defaultStyleId = exportSource.defaultStyleId;
       data.language = exportSource.language;
       data.autoClosePSD = exportSource.autoClosePSD;
-      data.autoScrollStyle = exportSource.autoScrollStyle;
       data.currentFolderTagPriority = exportSource.currentFolderTagPriority;
       data.pastePointText = !!exportSource.pastePointText;
+      // Smart paste preferences; undefined values (older profiles) are
+      // dropped by JSON and keep the importer's defaults
+      data.smartPaste = exportSource.smartPaste;
+      data.pasteOnClick = exportSource.pasteOnClick;
+      data.smartPasteAutoClean = exportSource.smartPasteAutoClean;
+      data.smartPasteDistribute = exportSource.smartPasteDistribute;
+      data.smartPasteMinScale = exportSource.smartPasteMinScale;
+      data.smartPasteHyphenation = exportSource.smartPasteHyphenation;
+      data.refontRules = exportSource.refontRules;
     }
     if (withFontFiles) {
-      const result = exportZipWithFonts({
+      const result = await exportZipWithFonts({
         zipPath: pathSelect.data,
         jsonFileName: getProfileExportFileName(selectedProfile.name, "json"),
         jsonString: JSON.stringify(data),
@@ -178,11 +193,13 @@ const ExportModal = React.memo(function ExportModal() {
           true
         );
       }
+      noteTourEvent("export");
       close();
       return;
     }
-    const written = window.cep.fs.writeFile(pathSelect.data, JSON.stringify(data));
+    const written = await window.cep.fs.writeFile(pathSelect.data, JSON.stringify(data));
     if (!written || written.err) { nativeAlert(locale.saveError, locale.errorTitle, true); return; }
+    noteTourEvent("export");
     close();
   };
 
@@ -316,7 +333,7 @@ const ExportModal = React.memo(function ExportModal() {
           </label>
 
           <div className="fields hostBrdTopContrast export-actions">
-            <button type="submit" className="topcoat-button--large--cta" disabled={!canExport}>
+            <button type="submit" data-tour="export-save" className="topcoat-button--large--cta" disabled={!canExport}>
               <MdSave size={18} /> {locale.save}
             </button>
           </div>

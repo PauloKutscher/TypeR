@@ -21,6 +21,31 @@ const migrateTabStorage = (storedData, defaultName, createId) => {
   let tabs = Array.isArray(data.tabs) ? data.tabs : [];
   let currentTabId = data.currentTabId;
   let migrated = false;
+  const seen = new Set();
+  tabs = tabs.reduce((result, tab) => {
+    if (!tab || typeof tab !== "object" || Array.isArray(tab)) {
+      migrated = true;
+      return result;
+    }
+    let next = tab;
+    const repair = (field, value) => { next = { ...next, [field]: value }; migrated = true; };
+    if (!((typeof tab.id === "string" && tab.id) || (typeof tab.id === "number" && Number.isFinite(tab.id))) || seen.has(tab.id)) {
+      const generated = createTab(defaultName, {}, createId).id;
+      let id = generated;
+      let suffix = 1;
+      while (seen.has(id)) id = generated + "_" + suffix++;
+      repair("id", id);
+    }
+    seen.add(next.id);
+    if (typeof tab.name !== "string") repair("name", defaultName);
+    if (typeof tab.text !== "string") repair("text", "");
+    if (tab.images !== undefined && !Array.isArray(tab.images)) repair("images", []);
+    if (tab.currentLineIndex !== undefined && (!Number.isInteger(tab.currentLineIndex) || tab.currentLineIndex < 0)) repair("currentLineIndex", 0);
+    if (tab.usedLineStyles !== undefined && (!tab.usedLineStyles || typeof tab.usedLineStyles !== "object" || Array.isArray(tab.usedLineStyles))) repair("usedLineStyles", {});
+    result.push(next);
+    return result;
+  }, []);
+  if (!migrated && Array.isArray(data.tabs)) tabs = data.tabs;
 
   if (!tabs.length) {
     const firstTab = createTab(defaultName, data, createId);
@@ -52,4 +77,16 @@ const migrateTabStorage = (storedData, defaultName, createId) => {
   return { tabs, currentTabId, migrated };
 };
 
-export { TAB_FIELDS, createTab, migrateTabStorage };
+// Slots count the gaps of the current list: 0 is before the first tab,
+// tabs.length after the last. Returns the same array when nothing moves.
+const moveTab = (tabs, id, slot) => {
+  const from = tabs.findIndex((tab) => tab.id === id);
+  if (from < 0) return tabs;
+  const to = slot > from ? slot - 1 : slot;
+  if (to === from) return tabs;
+  const moved = tabs.filter((tab) => tab.id !== id);
+  moved.splice(to, 0, tabs[from]);
+  return moved;
+};
+
+export { TAB_FIELDS, createTab, migrateTabStorage, moveTab };

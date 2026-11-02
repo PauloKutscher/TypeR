@@ -49,10 +49,12 @@ function replayResample(real) {
 
 function hostSource(ref) {
   if (!ref || ref === "." || ref === "worktree") {
-    return fs.readFileSync(path.join(ROOT, "app_src", "host.js"), "utf8");
+    return fs.readFileSync(path.join(ROOT, "app_src", "bubbleGeometry.jsxinc"), "utf8") + "\n" + fs.readFileSync(path.join(ROOT, "app_src", "host.js"), "utf8");
   }
   if (fs.existsSync(ref)) return fs.readFileSync(ref, "utf8");
-  return execFileSync("git", ["show", ref + ":app_src/host.js"], { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const source = execFileSync("git", ["show", ref + ":app_src/host.js"], { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+  if (source.includes("function _splitOutlineAtCusps(")) return source;
+  return execFileSync("git", ["show", ref + ":app_src/bubbleGeometry.jsxinc"], { cwd: ROOT, encoding: "utf8", windowsHide: true }) + "\n" + source;
 }
 
 /* Every aligned layer of a run, flattened, with the geometry the solver saw. */

@@ -42,7 +42,7 @@
 .topcoat-button--large,
 .topcoat-button--large--cta,
 .topcoat-button--large--quiet {
-  & > SVG {
+  & > svg {
     margin-right: 4px;
   }
 }
@@ -445,14 +445,6 @@ body[data-editor-theme]:not([data-editor-theme="system"]) {
   ::-webkit-scrollbar-track,
   ::-webkit-scrollbar-corner {
     background: transparent;
-  }
-}
-
-// Page line background chosen in the settings. Applied to every theme, hence
-// outside of the themed block, and last so it wins over the palette value.
-BODY.m-page-line-custom {
-  .text-line.m-page .text-line-text {
-    background: var(--typer-page-line-color) !important;
   }
 }
 

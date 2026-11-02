@@ -1,75 +1,88 @@
 <p align="center">
-  <img src="./readme-assets/typer-logo.png" width="140" height="140" alt="TypeR logo">
-</p>
-
-<h1 align="center">TypeR</h1>
-
-<p align="center">
-  <strong>A faster script-to-bubble workflow for manga and comics typesetting in Adobe Photoshop.</strong>
+  <img src="./readme-assets/banner.jpg" width="100%" alt="TypeR 3.0">
 </p>
 
 <p align="center">
-  Paste a script, route lines to the right styles, create and fit text layers, move through pages,
-  and share a consistent setup with your team, all without leaving Photoshop.
+  <strong>Typeset manga and comics in one click, in Adobe Photoshop or in your browser.</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/ScanR/TypeR/releases/latest/download/TypeR.zip"><strong>Download the stable release</strong></a>
+  Paste a script, click a bubble: the line lands in it with the right style, shaped to the bubble's real outline.<br>
+  Then the next line is ready. Free, open source, and everything runs on your computer.
+</p>
+
+<p align="center">
+  <a href="#quick-install"><strong>Install the new TypeR</strong></a>
   ·
-  <a href="https://github.com/ScanR/TypeR/releases">Release notes</a>
+  <a href="https://typer.hayasaku.fr/web">Web version</a>
   ·
-  <a href="https://discord.com/invite/Pdmfmqk">Support</a>
+  <a href="https://github.com/PauloKutscher/TypeR/releases">Release notes</a>
+  ·
+  <a href="https://discord.com/invite/Pdmfmqk">Discord</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/ScanR/TypeR/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/ScanR/TypeR?style=flat-square&color=4c8bf5"></a>
-  <a href="https://github.com/ScanR/TypeR/releases"><img alt="GitHub downloads" src="https://img.shields.io/github/downloads/ScanR/TypeR/total?style=flat-square&color=54b689"></a>
-  <img alt="Adobe Photoshop CC 2015+" src="https://img.shields.io/badge/Photoshop-CC%202015%2B-31A8FF?style=flat-square&logo=adobephotoshop&logoColor=white">
+  <a href="https://github.com/PauloKutscher/TypeR/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/PauloKutscher/TypeR?style=flat-square&color=4c8bf5"></a>
+  <a href="https://github.com/PauloKutscher/TypeR/releases"><img alt="GitHub downloads" src="https://img.shields.io/github/downloads/PauloKutscher/TypeR/total?style=flat-square&color=54b689"></a>
+  <img alt="Adobe Photoshop 2025+, Legacy CC 2015+" src="https://img.shields.io/badge/Photoshop-2025%2B%20%7C%20Legacy%20CC%202015%2B-31A8FF?style=flat-square&logo=adobephotoshop&logoColor=white">
   <img alt="Windows and macOS" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-6f7785?style=flat-square">
   <a href="./LICENSE.md"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-f0b429?style=flat-square"></a>
 </p>
 
 ---
 
-TypeR is a free, open-source Photoshop panel built for typesetters working on translated manga and comics. It keeps the script, page navigation, bubble selection, text placement, and typography styles in one compact workspace.
+TypeR is a panel built for typesetters working on translated manga and comics. It keeps the script, the pages, the bubble selection, the text placement and your typography styles in one compact workspace, so the work comes down to one loop:
 
-Instead of repeatedly switching between a script editor and Photoshop, the core loop becomes:
+> **Click a bubble → the line is pasted, styled and fitted → the next line is ready.**
 
-> **Select a bubble → create the styled text layer → fit or center it → advance to the next line.**
+<table>
+  <tr>
+    <td width="50%"><img src="./readme-assets/smart-paste.jpg" alt="Smart paste: the lines follow the real shape of the bubble"></td>
+    <td width="50%"><img src="./readme-assets/paste-on-click.jpg" alt="Paste on click: one click, one line"></td>
+  </tr>
+  <tr>
+    <td><img src="./readme-assets/black-bubble.jpg" alt="Black bubbles get white text without a stroke"></td>
+    <td><img src="./readme-assets/auto-clean.jpg" alt="Auto clean hides the original lettering under a clean layer"></td>
+  </tr>
+  <tr>
+    <td><img src="./readme-assets/font-finder.jpg" alt="Font FindeR: search, preview with your own line, install in one click"></td>
+    <td><img src="./readme-assets/make-it-yours.jpg" alt="Themes, colors, background and interface layout settings"></td>
+  </tr>
+</table>
 
-TypeR is based on [TyperTools](https://swirt.github.io/typertools/) by Swirt and extends it with modern typesetting workflows, stability fixes, and team-oriented style management.
+## Contents
 
-## Why typesetters use TypeR
+- [What it does](#what-it-does)
+- [Install](#install)
+- [Your first page](#your-first-page)
+- [Default shortcuts](#default-shortcuts)
+- [Troubleshooting](#troubleshooting)
+- [Build from source](#build-from-source)
+- [Credits and license](#credits-and-license)
 
-| Need | What TypeR provides |
-| --- | --- |
-| Work through a translated script quickly | Line-by-line navigation, ignored notes and empty lines, page markers, automatic page switching, and configurable hotkeys |
-| Keep typography consistent | Separate project profiles with their own settings, scripts and style libraries, plus prefix matching and current-folder isolation |
-| Place dialogue with fewer repetitive actions | Create or update a text layer from the active script line, auto-advance, internal bubble padding, and selection-based centering |
-| Handle several bubbles at once | Multi-bubble capture and batch creation of consecutive text layers |
-| Fit dialogue more naturally | TextShapeR suggestions shaped from a selection or an automatically detected bubble |
-| Rebuild a project style kit | FontScanR turns typography found in existing PSD files into ready-to-use TypeR styles |
-| Share a setup with a team | Export selected style folders and selected settings as JSON, optionally bundled with matching font files in a ZIP |
-| Typeset in different languages | LTR and RTL text direction, Middle Eastern text options, Arabic UI support, and ten interface languages |
+## What it does
 
-```mermaid
-flowchart LR
-    A["Current script line"] --> B["Matched or active style"]
-    C["Photoshop bubble selection"] --> D["Paste"]
-    B --> D
-    D --> E["Styled text layer"]
-    E --> F["Align or TextShapeR"]
-    F --> G["Advance to the next line or page"]
-    G --> A
-```
+### Smart paste
 
-## Core workflow
+Paste reads the outline of the selected bubble instead of its bounding rectangle.
 
-### Script-first typesetting
+- The lines follow the bubble's silhouette and the ink is centered inside the outline, without the tail.
+- The style's size is kept when the text fits. Otherwise it shrinks as little as possible, down to a minimum you set (75% by default), and one French or English hyphen is allowed as a last resort.
+- Black bubbles get white text without a stroke.
+- Double and triple bubbles receive the next script lines in their other chambers, in one history state.
+- A style can be marked as the *Shout* or *Narration* style of its folder: spiky bubbles and narration boxes selected with the Magic Wand then use it. A script prefix always wins.
+- **Auto clean** (optional) paints the bubble under the text on a `TypeR Clean` layer, on solid white or black only.
+- **Conditional refont** gives the text between two markers another style's font.
 
-Paste your translated script directly into TypeR. Each usable line becomes a step in the typesetting queue, while empty lines and configured translator-note prefixes can be skipped automatically.
+When the text cannot be placed, the classic paste runs and a short notice explains why.
 
-Use `Page 1`, `Page 2`, `Page 12 :`, `Page 12 : title`, `Page 12 - title`, `[Page 12]` or `## Page 12` headings to connect the script to imported page files. TypeR can open the matching page as you advance, and can optionally save and close the previous PSD to keep long chapters manageable.
+### Paste on click
+
+Turn it on from the footer: a Magic Wand click, a rectangle or a lasso pastes the current line at once. Clicking again in a bubble that just got one line splits it, for the double bubbles TypeR did not detect. Undoing a TypeR paste in Photoshop puts the script line back.
+
+### Your script, line by line
+
+Paste your translated script into TypeR. Each usable line becomes a step of the queue. Empty lines and translator notes are skipped, and page headings connect the script to your files:
 
 ```text
 Page 1
@@ -78,216 +91,242 @@ SFX: BOOM!
 ## Translator note: keep the sign in the background.
 ```
 
-Page imports accept `.psd`, `.png`, `.jpg`, and `.jpeg` files. TypeR sorts the selected files naturally before matching them to page markers.
+`Page 12`, `Page 12 :`, `Page 12 : title`, `Page 12 - title`, `[Page 12]` and `## Page 12` are all recognized. Import `.psd`, `.png`, `.jpg` or `.jpeg` pages and TypeR opens the matching one as you advance. It can also save and close the previous PSD to keep long chapters manageable.
 
-### Prefix-driven styles
+Work tabs keep separate series in one panel, name themselves after their PSD folder or chapter until you rename them, and can be reordered by dragging them. Saved work states restore a script, its pages, the current line and the active style. Bold and italic Markdown or rich text carry over to Photoshop.
 
-Assign prefixes such as `REG:`, `THOUGHT:`, `SFX:`, or any convention used by your team to a style. When a script line matches, TypeR selects the corresponding style automatically and removes the prefix from the text placed in Photoshop.
+### Styles that follow your script
 
-Styles can be created manually or copied from an existing Photoshop text layer. They support the properties typesetters regularly need, including:
+Assign a prefix such as `REG:`, `THOUGHT:` or `SFX:` to a style. When a line matches, TypeR selects that style and removes the prefix from the text.
 
-- font family and face, size, leading, kerning, tracking, and horizontal or vertical scale;
-- alignment, baseline shift, anti-aliasing, synthetic bold and italic, underline, and strikethrough;
-- text color and outline/stroke settings;
-- Arabic and Middle Eastern typography offsets.
+Create styles by hand or copy them from a Photoshop text layer. They cover the font and its face, size, leading, kerning, tracking, scale, alignment, baseline shift, anti-aliasing, synthetic bold and italic, underline, strikethrough, ligatures and contextual alternates, text color, stroke, and Arabic and Middle Eastern offsets. A style can also set lines made only of punctuation, like `?!`, at twice or three times the size.
 
-Styles can be grouped into nested folders, duplicated, and reordered. By default, automatic prefix matching only uses styles from the exact folder containing the active style, so script tags cannot switch to another folder. This isolation can be disabled in **Settings → Behavior**, and automatic prefix matching can also be disabled per style.
+Styles live in nested folders. Automatic matching stays in the folder of the active style, so a tag cannot jump to another project; you can change this in **Settings → Styles**, and turn matching off per style.
 
-### Placement, centering, and batch insertion
+### Placement tools
 
-Draw a Photoshop selection around a bubble with your preferred selection tool. TypeR can then:
-
-- create a styled text layer from the active script line and advance automatically;
-- replace the text and style of one or more selected text layers;
-- distribute consecutive script lines across selected text layers in selection order;
-- insert only the text while preserving the layer's current style;
-- center one or more selected text layers in the selection and optionally resize their text boxes;
-- keep configurable internal padding between the text and the bubble edge;
-- capture multiple bubbles and create consecutive text layers in one action;
-- create either point text or paragraph text layers, globally or with a per-style override.
-
-Font size controls can update the active layer without opening Photoshop's Character panel. If no selection exists during alignment, TypeR can also try to detect the surrounding bubble with a contiguous Magic Wand selection.
-
-## Advanced tools
+- Replace the text and style of the selected text layers, or insert the text alone and keep the layer's style.
+- Distribute consecutive lines across selected text layers, in selection order.
+- Center selected layers in the selection, with configurable padding. Without a selection, TypeR can detect the bubble around the text. **Align** centers each text in its own chamber of a double or triple bubble.
+- Capture several bubbles with multi-bubble mode, then create consecutive text layers in one action.
+- Create point or paragraph text, globally or per style.
+- Change the size of the active layer with the size buttons and your own increments.
 
 ### TextShapeR
 
-TextShapeR generates alternative line-break shapes for the current dialogue so it can sit more naturally inside a bubble. It can work from:
+TextShapeR proposes every good way to break the current line, ranked for the bubble from the active selection or the detected outline. The first proposal follows how letterers actually break lines, learned from about 3,000 hand-lettered bubbles. It detects the language and hyphenates by its rules. Preview, apply, apply and advance, undo, or chain it across several text layers. The inline panel is optional.
 
-- the active Photoshop selection;
-- the outline of a bubble detected around the selected text layer.
+### FontScanR and Font FindeR
 
-Preview several fitted suggestions, apply one, apply and advance, undo the last result, or chain the process across multiple selected text layers.
+**FontScanR** scans finished `.psd` files and lists the font, usual size, color, stroke and anti-aliasing of their text layers, then turns the ones you pick into TypeR styles. It helps when joining an existing project or recovering a style guide.
 
-The inline TextShapeR panel is optional and can be disabled when maximum panel performance is preferred.
+Already have Photoshop type tool presets? **Settings > Import styles or settings** also takes `.tpl` files: each file becomes a style folder, with one style per text preset. A `.tpl` holds no layer effects, so add any stroke to the styles afterwards.
 
-### FontScanR
+**Font FindeR** searches a font catalogue, previews results with your own line and installs them in one click. FontScanR results and imported styles look up the fonts you are missing there.
 
-FontScanR scans one or more `.psd` files and inventories the typography used by their text layers. It detects the font, commonly used size, text color, stroke, and anti-aliasing, then lets you choose which results should become TypeR styles.
+### Share with your team
 
-This is especially useful when joining an existing project, recovering a style guide from finished pages, or standardizing a team's legacy PSD files.
+Export the folders, styles and fonts you choose, with an optional part of your settings, as JSON. A folder's export includes its subfolders. A `.zip` can also carry the matching `.ttf`, `.otf`, `.ttc` or `.otc` files, when the font licenses allow it. Fonts that cannot be found are reported instead of silently left out.
 
-### Team handoff and backups
+Project profiles keep styles, folders, settings, tabs, saved work and backgrounds separate. Manage them in **Settings → Data**.
 
-The export panel lets you choose which folders, styles, and fonts to include, with an optional subset of application settings.
+### Make it yours
 
-Project profiles keep styles, folders, settings, tabs, saved work, and custom backgrounds isolated. For backward compatibility, the initial **Default** profile remains in the original `storage` file and cannot be deleted, though it can be renamed. Additional profiles use separate storage files and can be created, switched, renamed, or deleted from **Settings → Profiles**. The export panel can export any profile without switching the active workspace first.
+Themes, custom colors and background images, interface scale, a panel layout you can edit element by element, and a footer that adapts to narrow panels. The interface comes in English, French, German, Spanish, Brazilian Portuguese, Russian, Turkish, Ukrainian, Vietnamese and Arabic, with left-to-right and right-to-left text.
 
-- Use JSON for a lightweight style/settings backup.
-- Export only selected folders when sharing a project-specific kit.
-- Include matching installed `.ttf`, `.otf`, `.ttc`, or `.otc` files in a ZIP when the font license permits redistribution.
-
-The optional settings payload covers selected workflow preferences; it is not a complete clone of every shortcut, theme, tab, or layout setting.
-
-When an installed font cannot be found, TypeR reports it instead of silently omitting it. The Windows and macOS installers also preserve TypeR's local storage during an update.
-
-## Supported formats
-
-| Workflow | Supported input or output |
-| --- | --- |
-| Script | Plain text typed or pasted into the panel, with optional rich-text/Markdown conversion |
-| Synchronized pages | `.psd`, `.png`, `.jpg`, `.jpeg` |
-| FontScanR | `.psd` |
-| Style folders and selected settings | `.json` |
-| Style kit with font files | `.zip` containing JSON and locally found `.ttf`, `.otf`, `.ttc`, or `.otc` files |
-| Distributed installer | `.zip` |
+New here? A hands-on walkthrough and a What's new tour open from **Help** and **Settings → General**.
 
 ## Install
 
-### Requirements
+| | [Web version](https://typer.hayasaku.fr/web) | **New TypeR** (recommended) | Legacy |
+| --- | --- | --- | --- |
+| **You need** | A browser (Chrome or Edge work best) | Photoshop 2025 (26.0) or later | Photoshop CC 2015 (16.0) or later |
+| **Built on** | TypeR's panel and paste engine in a Photoshop-like workspace | Adobe's UXP plugin framework | Adobe's older CEP extensions |
+| **Apple Silicon** | Yes | Native | Through a Rosetta launcher on Photoshop 2026 |
+| **Open it from** | [typer.hayasaku.fr/web](https://typer.hayasaku.fr/web) | **Plugins → TypeR → TypeR** | **Window → Extensions → TypeR (CEP)** |
 
-| | Declared compatibility |
-| --- | --- |
-| Adobe Photoshop | CC 2015 / version 16.0 or newer |
-| Operating system | Windows or macOS |
-| Photoshop build | Standard desktop installation with CEP extension support |
+The new TypeR and Legacy are the same application: the new one is faster and runs natively on Apple Silicon. The [web version](https://typer.hayasaku.fr/web) opens and saves PSD files with nothing to install, and has no filters.
 
-Photoshop 16.0+ and CEP 6+ are declared by the extension manifest. TypeR 3.0 contains two builds of the same application: Photoshop 2020+ with Chromium 74+ loads the modern build; older or unknown runtimes load the compatibility build automatically. The project does not yet maintain a verified OS/version matrix, so compatibility is not guaranteed for every Photoshop and operating-system combination. Portable or heavily modified Photoshop builds may not load CEP panels correctly.
+### Quick install
 
-TypeR is distributed as an unsigned CEP extension. Both installers place it in the user-level Adobe CEP extensions folder and configure the required CSXS debug setting.
+Close Photoshop before installing. This fork provides the verified offline installer on Windows.
 
-### Windows
+On Windows:
 
-1. [Download the latest `TypeR.zip`](https://github.com/ScanR/TypeR/releases/latest/download/TypeR.zip).
-2. Extract the archive completely.
-3. Close Photoshop.
-4. Double-click `install_win.cmd` and follow the terminal prompts.
-5. Reopen Photoshop and select **Window → Extensions → TypeR**.
+1. [Download `TypeR.zip`](https://github.com/PauloKutscher/TypeR/releases/latest/download/TypeR.zip) and extract the entire archive.
+2. Close Photoshop.
+3. Double-click `install_win.cmd`, choose **UXP**, and press Enter. Start Photoshop and open **Plugins → TypeR → TypeR**.
 
-### macOS
-
-1. [Download the latest `TypeR.zip`](https://github.com/ScanR/TypeR/releases/latest/download/TypeR.zip).
-2. Extract the archive and open Terminal in the extracted folder.
-3. Close Photoshop, then run:
+On macOS, in **Terminal**:
 
 ```sh
-chmod +x install_mac.sh
-./install_mac.sh
+curl -fsSL https://raw.githubusercontent.com/PauloKutscher/TypeR/develop/get.sh | bash
 ```
 
-4. Reopen Photoshop and select **Window → Extensions → TypeR**.
+The installer finds your Photoshop and marks the version made for it as recommended. Choose with the arrow keys and press Enter. Creative Cloud is optional: without it, the plugin is installed directly and appears the next time Photoshop starts. With Creative Cloud, double-click the package for your system: [`UXP-Windows.ccx`](https://github.com/PauloKutscher/TypeR/releases/latest/download/UXP-Windows.ccx) on Windows or [`TypeR-UXP.ccx`](https://github.com/PauloKutscher/TypeR/releases/latest/download/TypeR-UXP.ccx) on macOS. Windows shortcuts now use a native UXP addon instead of TypeR Shortcuts.exe. Users upgrading from UXP 3.0.0 should use the offline installer or the correct platform CCX for this first upgrade; its old updater does not distinguish platform packages.
 
-On Apple Silicon, some Photoshop/CEP combinations may require Photoshop to be launched using Rosetta. If the panel is missing or disabled, check the [troubleshooting section](#troubleshooting).
+### Coming from Legacy
 
-### Update without opening TypeR
+Your styles, profiles and settings come with you: the new TypeR copies them on its first start and leaves the Legacy files untouched. An updated Legacy panel also offers the switch by itself when Photoshop can run the new TypeR, then shows up as **TypeR (old)**.
 
-Keep the standalone updater from the downloaded archive and run it whenever you want to check for a stable update:
+Both versions can stay installed, but do not open both panels at the same time: each shortcut would run twice.
 
-- On Windows, double-click `update_typer_win.cmd`.
-- On macOS, run `chmod +x update_typer_mac.sh` once, then `./update_typer_mac.sh`.
+### macOS: allow the shortcuts
 
-The updater downloads the latest `TypeR.zip` release directly from GitHub. It validates the complete package before replacing files, preserves all `storage*` user data, and rolls back application files if installation fails. Reinstalling the same version can repair damaged application files. TypeR 3.0 packages include the integrity inventory required by these installers. Restart Photoshop after a successful update; TypeR itself does not need to be open.
+Global shortcuts (such as `Cmd + Ctrl` for Paste) need to read the keyboard while the canvas has the focus. UXP cannot, so the plugin starts a small keyboard reader that reports the pressed keys while Photoshop is in front, and stops with Photoshop.
 
-## Your first typesetting session
+On macOS, add Photoshop to **System Settings → Privacy & Security → Input Monitoring**. macOS gives no way to add it automatically, so TypeR detects the missing permission and offers to open that pane, also from **Settings → Shortcuts**. Without it, macOS only shows the reader the modifiers and keys such as Enter, Tab or the function keys: shortcuts with a letter, digit or symbol do not run, and Photoshop shortcuts such as `Cmd + Shift + Z` also run the TypeR shortcut they start with.
 
-1. Open TypeR from **Window → Extensions → TypeR**.
+### Updates
+
+TypeR checks for updates when it starts and installs them from the panel, or by itself if you turn on **Settings → General → Install updates automatically**. Through Creative Cloud's installer, the new TypeR reloads without restarting Photoshop; otherwise, restart Photoshop afterwards. Your data is kept: the new TypeR stores it in `~/Library/Application Support/TypeR/UXP` on macOS and `%APPDATA%\TypeR\UXP` on Windows, outside Photoshop's version-specific folders.
+
+<details>
+<summary><strong>Install from the archive, offline</strong></summary>
+
+1. [Download the latest `TypeR.zip`](https://github.com/PauloKutscher/TypeR/releases/latest/download/TypeR.zip) and extract it completely.
+2. Close Photoshop.
+3. Run the installer and choose a version with the arrow keys and Enter:
+   - Windows: double-click `install_win.cmd`.
+   - macOS: double-click `install_mac.command`. macOS blocks it the first time, because the script is not signed by Apple: click **Done**, open **System Settings → Privacy & Security**, click **Open Anyway** at the bottom, then confirm. You can also run `bash install_mac.command` from Terminal in the extracted folder.
+4. Reopen Photoshop.
+
+`-Uxp` / `-Legacy` on Windows and `--uxp` / `--legacy` on macOS skip the menu. Everything else the installers need is in the `installer` folder, which must stay next to them.
+
+On Windows, close Photoshop before installing. The UXP installer updates existing TypeR copies inside Photoshop's `Plug-ins` folders as well as registered external copies, even when their version numbers match. It verifies every installed file before confirming success, preserves other plugins, and keeps backups outside Photoshop's plugin folders. An interrupted installation is recovered on the next run. Creative Cloud is not needed by this script. For a custom Photoshop location that is not detected, run `install_win.cmd -Uxp -PhotoshopPath "E:\My Photoshop"`.
+
+Windows installer regression tests run with `npm test`, or directly with `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/testInstallWindows.ps1`. They use disposable fixtures and do not change Adobe installations. If present, `Releases/TypeR-UXP.ccx` is also verified.
+
+</details>
+
+<details>
+<summary><strong>Legacy on Apple Silicon: Rosetta</strong></summary>
+
+Photoshop 2026 (v27) and later only include CEP support in their Intel code, so the Legacy version appears only when Photoshop runs with Rosetta. Prefer the new TypeR, which runs natively.
+
+For Legacy, recent macOS versions ignore Finder's **Open using Rosetta** option, so the installer creates a launcher in `~/Applications`, for example **Adobe Photoshop 2026 (TypeR)**. Put it in the Dock and use it instead of the usual Photoshop icon. TypeR is then under **Window → Extensions (Legacy) → TypeR**.
+
+To repair an installation or recreate the launcher, close Photoshop and run from the extracted folder:
+
+```sh
+bash installer/fix_mac_rosetta.sh
+```
+
+The script checks each installed Photoshop, installs Rosetta if needed, creates the launcher only for builds that require it, enables the CEP debug setting and removes the macOS download quarantine from TypeR files. If Photoshop is already open without Rosetta, the launcher offers to quit and reopen it.
+
+</details>
+
+<details>
+<summary><strong>Update without opening TypeR</strong></summary>
+
+Keep the extracted archive and run its standalone updater whenever you want to check for a stable update:
+
+- On Windows, double-click `update_typer_win.cmd` in the `installer` folder.
+- On macOS, run `bash installer/update_typer_mac.sh` from the extracted folder.
+
+It downloads the latest `TypeR.zip` and updates the versions you have installed. If you only have Legacy and your Photoshop can run the new TypeR (2025 or later), it first asks which version you want, with the new one recommended. For Legacy, it validates the complete package before replacing files, preserves all `storage*` user data, and rolls back if installation fails. Reinstalling the same version can repair damaged files. Restart Photoshop afterwards.
+
+On Windows, the updater also detects UXP copies installed directly in Photoshop's `Plug-ins` folder. It uses the UXP package from the downloaded release and reports a failing installer exit code instead of announcing success. Close Photoshop before updating.
+
+</details>
+
+<details>
+<summary><strong>Compatibility details</strong></summary>
+
+- Windows or macOS, with a standard desktop Photoshop. Portable or heavily modified builds may not load the panel.
+- The new TypeR needs Photoshop 2025 (UXP 8.0), the first version whose plugin panels can display the plugin's own web pages, and is tested with Photoshop 2026.
+- Legacy declares Photoshop 16.0+ and CEP 6+. It contains two builds of the same application: Photoshop 2020+ with Chromium 74+ loads the modern one, and older or unknown runtimes load the compatibility one automatically. It is an unsigned CEP extension: the installers place it in the user-level Adobe CEP extensions folder and set the required debug setting.
+
+The project does not maintain a verified OS and version matrix, so compatibility is not guaranteed for every combination.
+
+</details>
+
+## Your first page
+
+1. Open TypeR: **Plugins → TypeR → TypeR**, or **Window → Extensions → TypeR (CEP)** for Legacy.
 2. Paste your script into the text panel.
-3. Optionally import the chapter pages and add `Page N` markers to the script.
-4. Create a style or copy one from an existing Photoshop text layer, then assign its script prefix.
+3. Optionally import the chapter pages and add `Page N` headings to the script.
+4. Create a style or copy one from a Photoshop text layer, then assign its script prefix.
 5. Select a bubble in Photoshop.
-6. Click **Paste** or use the matching shortcut.
-7. Use **Align** or TextShapeR to fit the text, then continue to the next line.
+6. Click **Paste** or use the shortcut. Smart paste fits the text, and the next line is ready.
+7. Use **Align** or TextShapeR if a bubble needs a hand.
 8. Export your style folders once the project setup is ready to share.
-
-The built-in walkthrough can replay this complete workflow at any time from **Settings**.
 
 ## Default shortcuts
 
-Every binding is customizable in **Settings → Shortcuts**. `Win` is TypeR's label for the operating-system meta key; it maps to the Windows key on Windows and Command on macOS. Likewise, `Alt` maps to Option on macOS.
+Every binding can be changed in **Settings → Shortcuts**, which warns when one combination is assigned twice. `Win` is TypeR's label for the operating-system key: Windows on Windows, Command on macOS. `Alt` is Option on macOS.
 
-| Action | Default shortcut |
+| Action | Default |
 | --- | --- |
-| Create a styled layer in the selection and advance | `Win + Ctrl` |
+| Paste the current line in the selection and advance | `Win + Ctrl` |
 | Apply the current line and style to the active layer | `Win + Shift` |
 | Center the active layer in the selection | `Win + Alt` |
-| Next line | `Ctrl + Enter` |
-| Previous line | `Ctrl + Tab` |
-| Increase text size | `Ctrl + Shift + Plus` |
-| Decrease text size | `Ctrl + Shift + Minus` |
-| Insert text into the active layer without changing its style | `Win + Shift + V` |
-| Keep the active text size while creating or applying text | Hold `Alt` with the action |
-| Select style 1 to 9 in the current folder, panel focused outside a text field | Numeric keypad `1` to `9` |
-| Jump to the next page marker | `Shift + X` |
+| Keep the active text size while pasting or applying | Hold `Alt` |
+| Next / previous line | `Ctrl + Enter` / `Ctrl + Shift + Enter` |
+| Next page | `Ctrl + Alt + Enter` |
+| Increase / decrease text size | `Ctrl + Alt + U` / `Ctrl + Alt + D` |
+| Insert text into the active layer without changing its style | `Ctrl + Alt + L` |
 | Toggle multi-bubble mode | `Ctrl + Alt + M` |
-| Jump to the previous page marker | Not assigned |
-| Select the previous style | Not assigned |
-| Select the next style | Not assigned |
-| Apply only the active style to the selected text layer | Not assigned |
-| Paste consecutive lines into selected text layers | Not assigned |
-| Remove the last multi-bubble selection | Not assigned |
-| Clear all multi-bubble selections | Not assigned |
-| Toggle TextShapeR | Not assigned |
-| Switch to the previous tab | Not assigned |
-| Switch to the next tab | Not assigned |
+| Show or hide cleaning layers | `Ctrl + H` |
+| Select style 1 to 9 in the current folder (panel focused, outside a text field) | Numeric keypad `1` to `9` |
 
-Shortcut behavior can vary with keyboard layouts and operating-system bindings. If a combination conflicts with another application, assign a different one in TypeR. Settings warns when the same combination is assigned to more than one TypeR action.
+Available without a default key: paste on click, TextShapeR, previous page, previous or next style, next size preset, the style's stroke, apply style only, paste consecutive lines to selected layers, center a double bubble, cycle auto-center, remove or clear multi-bubble selections, previous or next tab.
 
-## More productivity features
-
-- Bold and italic Markdown/rich-text interpretation when pasting scripts.
-- Multiple work tabs for keeping separate series and their page sync in one panel.
-- Saved work states for restoring a script, imported pages, current line, and active style.
-- Adjustable interface scale, panel order, visibility, and Photoshop-aware or editor-inspired themes.
-- Quick style-size controls and configurable size increments.
-- Automatic update checks with an in-app download flow.
-- English, French, German, Spanish, Brazilian Portuguese, Russian, Turkish, Ukrainian, Vietnamese, and Arabic interfaces.
+A shortcut made of modifier keys only (`Win + Ctrl`, `Win + Shift`, `Win + Alt`) runs when you release it, and not if another key joined it: `Cmd + Shift + Z` stays Photoshop's redo. Behavior can vary with keyboard layouts and system bindings; if a combination conflicts with another application, assign a different one.
 
 ## Troubleshooting
 
 <details>
 <summary><strong>TypeR does not appear in Photoshop</strong></summary>
 
-1. Confirm that the archive was extracted before running the installer.
-2. Close every Photoshop window and run the installer again.
-3. Restart Photoshop and look under **Window → Extensions → TypeR**.
-4. On Apple Silicon, try launching Photoshop with **Open using Rosetta** enabled.
-5. Confirm that you are using a standard desktop Photoshop build. Portable/light builds often remove or alter CEP support.
+1. Close every Photoshop window and run the installer again. If you used the archive, extract it completely first.
+2. Restart Photoshop and look under **Plugins → TypeR → TypeR**, or **Window → Extensions → TypeR (CEP)** for Legacy.
+3. Legacy on Apple Silicon: open Photoshop with the **Adobe Photoshop … (TypeR)** launcher in `~/Applications`, not the usual icon, and look under **Window → Extensions (Legacy)**. If the launcher is missing, close Photoshop and run `bash installer/fix_mac_rosetta.sh`.
+4. Check that you use a standard desktop Photoshop. Portable or light builds often remove or alter extension support.
 
-The included installers configure `PlayerDebugMode` for supported CSXS versions automatically.
+</details>
+
+<details>
+<summary><strong>TypeR UXP opens as an empty panel</strong></summary>
+
+TypeR UXP renders its interface in Photoshop's WebView. If it stays silent, TypeR retries the address once after 5 seconds and shows a native diagnostic after 15 seconds. Once the WebView answers, the interface has up to 15 seconds to finish initializing. These deadlines pause while the panel is hidden. Copy the message and the Photoshop/UXP versions for support. **Reload TypeR** recreates the WebView and preserves pending settings writes.
+
+On Windows, a missing or damaged **UXP WebView / Microsoft Edge WebView2** component is one possible cause, especially with an incomplete Photoshop installation. Adobe documents its shared runtime at `C:\Program Files\Common Files\Adobe\Microsoft\EdgeWebView\`. Repair the Adobe installation if that component is missing or damaged, then restart Photoshop; reinstalling TypeR alone cannot restore an Adobe runtime. See [Adobe's UXP WebView documentation](https://helpx.adobe.com/creative-cloud/apps/integration-with-other-apps/manage-plugins/uxp-webview.html).
+
+If the diagnostic says the panel did not finish initializing, its WebView has answered: send that message to support rather than assuming the runtime is missing.
+
+TypeR listens for WebView messages on both the element and the native UXP window, as described in [Adobe's messaging API](https://developer.adobe.com/photoshop/uxp/2022/uxp-api/reference-js/global-members/html-elements/html-web-view-element). A timeout alone does not prove that WebView2 is missing: the diagnostic also reports whether loading started, finished, and reached the message bridge.
+
+For a support build, run `npm run package:uxp:debug`. It creates `Releases/TypeR-DEBUG-Windows-EN.zip`, with a direct installer and a read-only Windows collector. The temporary **TypeR DEBUG** build keeps the normal plugin ID and data, records startup events outside the WebView, and offers **Export diagnostic** from the native panel. Its bounded automatic reports live in the plugin's `PluginData/diagnostics` folder; the collector combines them with runtime versions and relevant Photoshop log lines. No report is uploaded automatically. Reinstall the normal TypeR package after diagnosis. This support build does not enable the developer code-execution channel (`package:uxp:debug` is distinct from `build:uxp:dev`).
+
+</details>
+
+<details>
+<summary><strong>Shortcuts with a letter or digit do nothing on macOS</strong></summary>
+
+Add Photoshop to **System Settings → Privacy & Security → Input Monitoring**. See [macOS: allow the shortcuts](#macos-allow-the-shortcuts).
+
 </details>
 
 <details>
 <summary><strong>A shared style uses the wrong font</strong></summary>
 
-The font must be installed on the receiving computer. TypeR can bundle matching font files with an export, but fonts that cannot be found are listed as missing. Only redistribute font files when their license allows it.
+The font must be installed on the receiving computer. An export can bundle the matching font files, when their license allows it, and Font FindeR can look up the missing ones.
+
 </details>
 
 <details>
 <summary><strong>I want to update without losing my setup</strong></summary>
 
-The current installers back up and restore TypeR's local `storage` data during installation. For an additional portable backup, export your folders and settings to JSON before updating.
+Installers and updates keep your data. For a portable copy, export your folders and settings to JSON first. An export covers one profile: to back up all of them on Legacy, close Photoshop and copy every `storage*` file and folder from the TypeR extension folder.
+
 </details>
 
-If the problem continues, [open an issue](https://github.com/ScanR/TypeR/issues/new) and include:
-
-- your TypeR version, Photoshop version, and operating system;
-- the exact steps that reproduce the problem;
-- the expected and actual result;
-- a screenshot, short recording, or sanitized PSD when relevant.
+Still stuck? Ask on [Discord](https://discord.com/invite/Pdmfmqk) or [open an issue](https://github.com/ScanR/TypeR/issues/new) with your TypeR, Photoshop and OS versions, the steps that reproduce the problem, the expected and actual result, and a screenshot, recording or sanitized PSD when relevant.
 
 ## Build from source
 
-You only need Node.js and npm when developing TypeR or installing the current unreleased branch. Use Node 24 (see `.nvmrc`); the minimum build-tool version is Node 22.12. This does not change the Photoshop runtime requirement.
+You only need Node.js and npm to develop TypeR or install the unreleased branch. Use Node 24 (see `.nvmrc`); the minimum is Node 22.12.
 
 ```sh
 git clone --branch develop https://github.com/ScanR/TypeR.git
@@ -296,34 +335,33 @@ npm install
 npm run build
 ```
 
-After it succeeds, install the extension with `install_win.cmd` on Windows or `./install_mac.sh` on macOS.
-
-Useful development commands:
+Then install the extension with `install_win.cmd` on Windows or `bash install_mac.command` on macOS.
 
 | Command | Purpose |
 | --- | --- |
-| `npm test` | Run the pure logic and locale test suites |
+| `npm test` | Run the logic, locale and UXP test suites |
 | `npm run build` | Create a production build |
 | `npm run build_dev` | Create a development build |
 | `npm run build_watch` | Rebuild while source files change |
 | `npm run test:build` | Validate generated build artifacts |
+| `npm run build:uxp` | Build the Windows UXP plugin into `uxp/` |
+| `npm run package:uxp` | Build and verify the Windows and macOS CCX packages |
+| `npm run test:uxp` | Run the UXP plugin's own test suites |
+| `npm run verify` | Run the tests, a production build and the artifact checks |
+| `npm run release` | Do all of the above and generate the release files |
 
-## Contributing
+[docs/uxp.md](docs/uxp.md) explains how the UXP plugin is put together and what to keep in step when `host.js` changes. [docs/smart-paste.md](docs/smart-paste.md) covers smart paste and paste on click.
 
-Bug reports, translations, workflow suggestions, and pull requests are welcome. Please search the [existing issues](https://github.com/ScanR/TypeR/issues) before opening a new one and keep changes focused so they are easy to review and test.
+### Contributing
 
-For code changes, run `npm run verify` before submitting a pull request.
-
-## Credits and license
-
-TypeR is maintained by **Sakushi** and is based on [TyperTools](https://swirt.github.io/typertools/) by **Swirt**.
-
-The project is distributed under the [MIT License](./LICENSE.md). For TypeR help, join the [ScanR support server](https://discord.com/invite/Pdmfmqk).
+Bug reports, translations, workflow suggestions and pull requests are welcome. Search the [existing issues](https://github.com/ScanR/TypeR/issues) first, keep changes focused, and run `npm run verify` before submitting a pull request.
 
 ### Preparing a release
 
-Run `npm run release` to test, build both runtimes, verify the artifacts and generate `Releases/TypeR.zip` with a SHA-256 checksum. `build_release.cmd` runs the same pipeline on Windows. Publish this built ZIP, which includes documentation and the license, rather than GitHub's source archive.
+`npm run release` generates `Releases/TypeR.zip`, `Releases/UXP-Windows.ccx` (Windows) and `Releases/TypeR-UXP.ccx` (macOS, and the first step on Windows for clients up to 3.0.0), with their SHA-256 checksums; `build_release.cmd` runs the same pipeline on Windows. Publish all three with their checksums. New clients choose the matching platform asset. The Windows addon ships prebuilt; only rebuilding its C++ sources requires Visual Studio and the Adobe UXP Hybrid Plugin SDK. See the platform transition notes in [docs/uxp.md](docs/uxp.md) before publishing the first split release. Publish this built ZIP rather than GitHub's source archive. See [the release acceptance checklist](docs/release-3.0.0.md) for the real-Photoshop checks and recovery procedures.
 
-See [the release acceptance checklist](docs/release-3.0.0.md) for remaining real-Photoshop checks and recovery procedures. The existing video guide shows an earlier version; the in-panel walkthrough describes the current workflow.
+## Credits and license
 
-For a full workspace backup, close Photoshop and copy every `storage*` file/directory from the TypeR extension folder. A settings export from one profile does not back up the other profiles.
+TypeR is maintained by **Sakushi** and is based on [TyperTools](https://swirt.github.io/typertools/) by **Swirt**. Smart paste's bubble geometry and layout come from [MD TYPER](docs/smart-paste.md), a TypeR fork, reused with its author's permission.
+
+Distributed under the [MIT License](./LICENSE.md). For help, join the [ScanR support server](https://discord.com/invite/Pdmfmqk).

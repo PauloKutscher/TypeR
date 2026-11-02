@@ -1,0 +1,87 @@
+// In-app confirmation dialog (replaces the OS-native confirm popup).
+// Loaded at startup, not with the lazy modal.scss: the tab bar opens it outside any modal.
+.settings-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+}
+.settings-confirm-dialog {
+    box-sizing: border-box;
+    width: 280px;
+    max-width: calc(100% - 30px);
+    padding: 18px 16px 14px;
+    border-radius: 8px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+    text-align: center;
+}
+.settings-confirm-icon {
+    color: #e2a03f;
+    margin-bottom: 6px;
+}
+.settings-confirm-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+.settings-confirm-text {
+    font-size: 12px;
+    line-height: 1.45;
+    opacity: 0.8;
+    margin-bottom: 14px;
+}
+.settings-confirm-actions {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    & > button {
+        min-width: 90px;
+    }
+}
+.settings-confirm-danger {
+    background: #c0392b !important;
+    border-color: #a93226 !important;
+    color: #fff;
+}
+.export-folder-name {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.export-folder-options {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+.export-folder-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    height: auto;
+    padding: 8px 10px;
+    line-height: 1.3;
+    text-align: left;
+    white-space: normal;
+    & > svg {
+        flex: none;
+    }
+}
+.export-folder-option-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    strong {
+        font-size: 12px;
+        font-weight: 600;
+    }
+    small {
+        font-size: 11px;
+        opacity: 0.75;
+    }
+}

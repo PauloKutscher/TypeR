@@ -15,6 +15,9 @@
 const assert = require("assert");
 
 function liftFrom(source, overrides) {
+  if (!source.includes("function _splitOutlineAtCusps(")) {
+    source = require("fs").readFileSync(require("path").join(__dirname, "../../app_src/bubbleGeometry.jsxinc"), "utf8") + "\n" + source;
+  }
   overrides = overrides || {};
   function lift(signature, deps) {
     const escaped = signature.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

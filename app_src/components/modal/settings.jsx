@@ -1,13 +1,17 @@
 import { useModalClose } from "../../modalClose";
-import { serializeStyle, validateImportData } from "../../librarySerialization";
+import { serializeStyle, validateImportData, hasStyleImportConflicts } from "../../librarySerialization";
 import React from "react";
-import { FiX, FiSettings, FiEye, FiEyeOff, FiToggleLeft, FiDatabase, FiAlertTriangle, FiChevronUp, FiChevronDown, FiRotateCcw, FiCheck, FiPlayCircle, FiType, FiEdit2, FiPlus, FiImage, FiTrash2, FiUsers } from "react-icons/fi";
-import { MdSave } from "react-icons/md";
+import { FiX, FiSearch, FiSettings, FiEye, FiEyeOff, FiEdit3, FiFileText, FiLayers, FiAlertTriangle, FiChevronUp, FiChevronDown, FiRotateCcw, FiCheck, FiPlayCircle, FiEdit2, FiGrid, FiPlus, FiImage, FiTrash2, FiDatabase, FiHelpCircle, FiFolderPlus, FiLock, FiMonitor, FiType, FiZoomIn } from "react-icons/fi";
+import { MdSave, MdTab, MdCenterFocusWeak, MdFormatSize, MdSwapVert, MdOutlineSubject, MdOutlineCallToAction } from "react-icons/md";
+import { AiOutlineBorderInner } from "react-icons/ai";
 import { FaKeyboard, FaFileExport, FaFileImport } from "react-icons/fa";
 
 import config from "../../config";
-import { backupStorage, locale, nativeAlert, nativeConfirm, checkUpdate, readStorage, writeToStorage, deleteStorageFile } from "../../utils";
-import { useContext, defaultUiLayout, normalizeUiLayout } from "../../context";
+import { reloadApp, backupStorage, locale, baseLocale, nativeAlert, nativeConfirm, checkUpdate, readStorage, writeToStorage, deleteStorageFile, getUpdateTestConfig, getUserFonts } from "../../utils";
+import { readUxpMigrationState } from "../../uxpMigration";
+import { openKeyboardAccessSettings, readKeyboardAccess } from "../../keyboardAccess";
+import { useContext, defaultUiLayout, normalizeUiLayout, normalizeSmartPasteMinScale } from "../../context";
+import { normalizeRefontRules } from "../../oneClick/refont";
 import { sanitizeTextShapeRTuning } from "../../textShapeR";
 import {
   CUSTOM_IMAGE_THEME_ID,
@@ -24,7 +28,6 @@ import {
   readBackgroundImageData,
   writeBackgroundImageData,
 } from "../../backgroundImage";
-import ColorField from "./colorField";
 import ThemeEditor from "./themeEditor";
 import BackgroundEditor from "./backgroundEditor";
 import Shortcut from "./shortCut";
@@ -34,31 +37,80 @@ import UnsavedChangesDialog from "./unsavedChangesDialog";
 import FontViewer from "./fontViewer";
 import TextShapeRTraining from "./textShapeRTraining";
 import FontFinderLogo from "./fontFinderLogo";
+import MissingFontsDialog from "./missingFontsDialog";
+import { collectMissingStyleFonts } from "../../fontFinderMatch";
+import { NO_TEXT_PRESETS, toolPresetFileToImportData } from "../../toolPresetImport";
 import { getFontViewerStatus } from "../../fontViewerApi";
 import { shortcutCommands } from "../../shortcutCommands";
-import { isPerfDebugEnabled, setPerfDebugEnabled, reportPerfDebug, resetPerfDebug } from "../../perfDebug";
 import { clearTypeRCache, formatCacheBytes, getTypeRCacheInfo } from "../../cepCache";
+import { DEFAULT_SETTINGS_TAB, normalizeSettingsTab, readSettingsTab, writeSettingsTab } from "../../settingsTab";
+import { buildSettingsSearchIndex, findSettingRow, searchSettings } from "../../settingsSearch";
+import SettingsSearchResults from "./settingsSearchResults";
+import { FOOTER_MODE_KEYS } from "../../uiLayout";
+import { FOOTER_MODE_ICONS, footerModeLabel } from "../footer/footer";
 
 // Interactive layout mockup: canvas px per real panel px
 const LAYOUT_CANVAS_SCALE = 0.3;
+const FOOTER_MODE_IDS = Object.keys(FOOTER_MODE_KEYS);
 // Sub-elements shown in the inspector for each selectable mockup region
 const LAYOUT_BLOCK_ELEMENTS = {
   preview: ["previewCreateButton", "previewAlignButton", "previewSizeControls", "previewNav", "previewWidget"],
   text: ["tabBar"],
   styles: [],
-  footer: ["footerHelp", "footerRepo", "footerTextShapeR", "footerMultiBubble"],
+  footer: ["footerHelp", "footerRepo"].concat(FOOTER_MODE_IDS.map((id) => FOOTER_MODE_KEYS[id])),
 };
-// Footer links that are always visible: their size stays editable but they
-// cannot be hidden. The Settings link is the only way back into this dialog,
-// so hiding it would lock the user out of the configuration.
-const FOOTER_ALWAYS_VISIBLE_KEYS = ["footerSettings"];
-// Footer element -> per-button size key stored in uiLayout.sizes.footer
-const FOOTER_SIZE_KEYS = {
-  footerHelp: "help",
-  footerSettings: "settings",
-  footerRepo: "repo",
-  footerTextShapeR: "textShapeR",
-  footerMultiBubble: "multiBubble",
+const LAYOUT_ELEMENT_BLOCK = Object.keys(LAYOUT_BLOCK_ELEMENTS).reduce((map, block) => {
+  LAYOUT_BLOCK_ELEMENTS[block].forEach((key) => {
+    map[key] = block;
+  });
+  return map;
+}, {});
+const LAYOUT_BLOCK_ICONS = { preview: FiMonitor, text: MdOutlineSubject, styles: FiLayers, footer: MdOutlineCallToAction };
+const LAYOUT_ELEMENT_ICONS = FOOTER_MODE_IDS.reduce((icons, id) => {
+  icons[FOOTER_MODE_KEYS[id]] = FOOTER_MODE_ICONS[id];
+  return icons;
+}, {
+  tabBar: MdTab,
+  previewCreateButton: AiOutlineBorderInner,
+  previewAlignButton: MdCenterFocusWeak,
+  previewSizeControls: MdFormatSize,
+  previewNav: MdSwapVert,
+  previewWidget: FiType,
+  footerHelp: FiHelpCircle,
+  footerRepo: FiFolderPlus,
+});
+
+// On/off switch of the layout inspector (also clickable through its row label)
+const LayoutSwitch = ({ checked, onChange, title }) => (
+  <span className={"settings-switch" + (checked ? " m-on" : "")} title={title}>
+    <input type="checkbox" checked={checked} onChange={onChange} />
+    <span className="settings-switch-thumb" />
+  </span>
+);
+// Same cap as normalizeRefontRules
+const MAX_REFONT_RULES = 16;
+const REFONT_MARKER_MAX_LENGTH = 8;
+// The smart paste minimum size is edited in percent of the style size
+const minScaleToPercent = (value) => String(Math.round(normalizeSmartPasteMinScale(value) * 100));
+// Shortcuts tab: commands grouped by what they act on. A command missing
+// here still shows, in the last group, so a new one is never hidden.
+const SHORTCUT_GROUPS = [
+  { id: "navigation", labelKey: "settingsShortcutGroupNavigation", fallback: "Navigation", commands: ["previous", "next", "previousPage", "nextPage", "previousTab", "nextTab"] },
+  { id: "insertion", labelKey: "settingsShortcutGroupInsertion", fallback: "Insertion", commands: ["add", "insertText", "applyMultiple", "keepTextSize"] },
+  { id: "centering", labelKey: "settingsGroupCentering", fallback: "Centering", commands: ["center", "centerDouble", "cycleAutoCenter"] },
+  { id: "styles", labelKey: "settingsShortcutGroupStyles", fallback: "Styles and size", commands: ["apply", "applyStyle", "previousStyle", "nextStyle", "increase", "decrease", "nextTextSizePreset", "toggleStyleStroke"] },
+  { id: "multiBubble", labelKey: "settingsShortcutGroupMultiBubble", fallback: "Multi-bubble", commands: ["toggleMultiBubble", "removeLastSelection", "clearSelections"] },
+  { id: "modes", labelKey: "settingsShortcutGroupModes", fallback: "Modes", commands: ["togglePasteOnClick", "toggleTextShapeR", "toggleCleaningLayers"] },
+];
+const groupShortcutCommands = (commands) => {
+  const groups = SHORTCUT_GROUPS.map((group) => ({
+    ...group,
+    commands: group.commands.map((id) => commands.find((command) => command.id === id)).filter(Boolean),
+  }));
+  const grouped = new Set(SHORTCUT_GROUPS.reduce((ids, group) => ids.concat(group.commands), []));
+  const rest = commands.filter((command) => !grouped.has(command.id));
+  groups[groups.length - 1].commands.push(...rest);
+  return groups.filter((group) => group.commands.length);
 };
 
 const SettingsModal = React.memo(function SettingsModal() {
@@ -69,14 +121,20 @@ const SettingsModal = React.memo(function SettingsModal() {
     defaultStyleId: state.defaultStyleId,
     language: state.language,
     direction: state.direction,
-    middleEast: state.middleEast,
     autoClosePSD: state.autoClosePSD,
-    autoScrollStyle: state.autoScrollStyle,
     currentFolderTagPriority: state.currentFolderTagPriority,
     resizeTextBoxOnCenter: state.resizeTextBoxOnCenter,
     checkUpdates: state.checkUpdates,
     autoUpdate: state.autoUpdate,
     multiBubbleMode: state.multiBubbleMode,
+    autoCenterMode: state.autoCenterMode,
+    smartPaste: state.smartPaste,
+    pasteOnClick: state.pasteOnClick,
+    smartPasteDistribute: state.smartPasteDistribute,
+    smartPasteAutoClean: state.smartPasteAutoClean,
+    smartPasteMinScale: state.smartPasteMinScale,
+    smartPasteHyphenation: state.smartPasteHyphenation,
+    refontRules: state.refontRules,
     showTips: state.showTips,
     showQuickStyleSize: state.showQuickStyleSize,
     inlineTextShapeR: state.inlineTextShapeR,
@@ -85,19 +143,19 @@ const SettingsModal = React.memo(function SettingsModal() {
     internalPadding: state.internalPadding,
     interpretMarkdown: state.interpretMarkdown,
     resetLineCounterOnPage: state.resetLineCounterOnPage,
-    multiTabEnabled: state.multiTabEnabled,
     editorTheme: state.editorTheme,
     customThemes: state.customThemes,
-    pageLineColor: state.pageLineColor,
     backgroundImage: state.backgroundImage,
     shortcut: state.shortcut,
     uiLayout: state.uiLayout,
     tabs: state.tabs,
     textShapeRTuning: state.textShapeRTuning,
     styles: state.styles,
+    modalData: state.modalData,
   }));
-  const [activeTab, setActiveTab] = React.useState("general");
-  const [perfDebug, setPerfDebug] = React.useState(isPerfDebugEnabled);
+  // Other windows (the What's new tour) can open a given tab; otherwise the
+  // settings reopen on the last tab the user looked at
+  const [activeTab, setActiveTab] = React.useState(() => normalizeSettingsTab((context.state.modalData && context.state.modalData.tab) || readSettingsTab()));
   const [pastePointText, setPastePointText] = React.useState(context.state.pastePointText ? "1" : "");
   const [ignoreLinePrefixes, setIgnoreLinePrefixes] = React.useState(
     context.state.ignoreLinePrefixes.join("\n")
@@ -108,12 +166,8 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [defaultStyleId, setDefaultStyleId] = React.useState(context.state.defaultStyleId || "");
   const [language, setLanguage] = React.useState(context.state.language || "auto");
   const [direction, setDirection] = React.useState(context.state.direction || "ltr");
-  const [middleEast, setMiddleEast] = React.useState(!!context.state.middleEast);
   const [autoClosePSD, setAutoClosePSD] = React.useState(
     !!context.state.autoClosePSD
-  );
-  const [autoScrollStyle, setAutoScrollStyle] = React.useState(
-    context.state.autoScrollStyle !== false
   );
   const [currentFolderTagPriority, setCurrentFolderTagPriority] = React.useState(
     context.state.currentFolderTagPriority !== false
@@ -130,6 +184,24 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [multiBubbleMode, setMultiBubbleMode] = React.useState(
     !!context.state.multiBubbleMode
   );
+  const [autoCenterMode, setAutoCenterMode] = React.useState(
+    context.state.autoCenterMode || "off"
+  );
+  const [smartPaste, setSmartPaste] = React.useState(context.state.smartPaste !== false);
+  const [pasteOnClick, setPasteOnClick] = React.useState(context.state.pasteOnClick === true);
+  const [smartPasteDistribute, setSmartPasteDistribute] = React.useState(
+    context.state.smartPasteDistribute !== false
+  );
+  const [smartPasteAutoClean, setSmartPasteAutoClean] = React.useState(
+    context.state.smartPasteAutoClean === true
+  );
+  const [smartPasteMinScale, setSmartPasteMinScale] = React.useState(
+    () => minScaleToPercent(context.state.smartPasteMinScale)
+  );
+  const [smartPasteHyphenation, setSmartPasteHyphenation] = React.useState(
+    context.state.smartPasteHyphenation || "auto"
+  );
+  const [refontRules, setRefontRules] = React.useState(() => normalizeRefontRules(context.state.refontRules));
   const [showTips, setShowTips] = React.useState(
     context.state.showTips !== false
   );
@@ -154,11 +226,8 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [resetLineCounterOnPage, setResetLineCounterOnPage] = React.useState(
     context.state.resetLineCounterOnPage !== false
   );
-  const [multiTabEnabled, setMultiTabEnabled] = React.useState(
-    context.state.multiTabEnabled !== false
-  );
   const [editorTheme, setEditorTheme] = React.useState(context.state.editorTheme || "system");
-  // Themes, background and page line color are applied as soon as they change
+  // Themes and background are applied as soon as they change
   // (an appearance editor without a live result is unusable), so they are read
   // straight from the state instead of being drafts waiting for "Save".
   const customThemes = React.useMemo(
@@ -169,7 +238,6 @@ const SettingsModal = React.memo(function SettingsModal() {
     () => normalizeBackgroundImage(context.state.backgroundImage),
     [context.state.backgroundImage]
   );
-  const pageLineColor = context.state.pageLineColor || "";
   // The picture itself is not part of the state: it lives in its own file
   const [backgroundData, setBackgroundData] = React.useState(() => readBackgroundImageData());
   const [editedThemeId, setEditedThemeId] = React.useState(null);
@@ -177,10 +245,10 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [backgroundEditorOpen, setBackgroundEditorOpen] = React.useState(false);
   const [backgroundBusy, setBackgroundBusy] = React.useState(false);
   const [shortcutDraft, setShortcutDraft] = React.useState(() => ({ ...context.state.shortcut }));
-  const [multiTabConfirmOpen, setMultiTabConfirmOpen] = React.useState(false);
   const [edited, setEdited] = React.useState(false);
   const [discardConfirmOpen, setDiscardConfirmOpen] = React.useState(false);
   const [fontViewerAvailable, setFontViewerAvailable] = React.useState(false);
+  const [missingFontsImport, setMissingFontsImport] = React.useState(null);
 
   // Interface layout editor (appearance tab)
   const [uiLayout, setUiLayoutLocal] = React.useState(() => normalizeUiLayout(context.state.uiLayout));
@@ -194,9 +262,6 @@ const SettingsModal = React.memo(function SettingsModal() {
     String(readStorage("bottomHeight") || 70)
   );
   const initialStylesHeight = React.useRef(String(readStorage("bottomHeight") || 70));
-  const [footerSizes, setFooterSizes] = React.useState(
-    () => ({ ...normalizeUiLayout(context.state.uiLayout).sizes.footer })
-  );
 
   // Interactive layout canvas (appearance tab)
   const [selectedLayoutBlock, setSelectedLayoutBlock] = React.useState("preview");
@@ -206,28 +271,102 @@ const SettingsModal = React.memo(function SettingsModal() {
   const layoutDragInfo = React.useRef(null);
 
   const [cacheInfo, setCacheInfo] = React.useState(getTypeRCacheInfo);
+  const [keyboardAccess, setKeyboardAccess] = React.useState("unknown");
+
+  // UXP on macOS: Input Monitoring for Photoshop, read again on each tab change
+  React.useEffect(() => {
+    let active = true;
+    readKeyboardAccess().then((value) => {
+      if (active) setKeyboardAccess(value);
+    });
+    return () => {
+      active = false;
+    };
+  }, [activeTab]);
 
   React.useEffect(() => {
     setShortcutDraft({ ...context.state.shortcut });
   }, [context.state.shortcut]);
 
   React.useEffect(() => {
-    if (activeTab === "data") setCacheInfo(getTypeRCacheInfo());
+    writeSettingsTab(activeTab);
+    if (activeTab === "general") setCacheInfo(getTypeRCacheInfo());
   }, [activeTab]);
+
+  const [searchQuery, setSearchQuery] = React.useState("");
+  const [searchHighlight, setSearchHighlight] = React.useState(0);
+  const [searchTarget, setSearchTarget] = React.useState(null);
+  const searchInputRef = React.useRef(null);
+  const settingsFormRef = React.useRef(null);
+  const searching = searchQuery.trim() !== "";
+
+  // Runs once the tab of the chosen result is displayed
+  React.useEffect(() => {
+    if (!searchTarget || !settingsFormRef.current) return undefined;
+    const form = settingsFormRef.current;
+    const row = searchTarget.isTab ? null : findSettingRow(form, searchTarget);
+    if (!row) {
+      const body = form.closest(".app-modal-body");
+      if (body) body.scrollTop = 0;
+      return undefined;
+    }
+    row.scrollIntoView({ block: "center" });
+    row.classList.add("settings-search-flash");
+    const timer = setTimeout(() => row.classList.remove("settings-search-flash"), 1800);
+    return () => {
+      clearTimeout(timer);
+      row.classList.remove("settings-search-flash");
+    };
+  }, [searchTarget]);
+
+  // Cmd/Ctrl+F, except while a shortcut row is recording that very combination
+  React.useEffect(() => {
+    const focusSearch = (e) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || e.keyCode !== 70) return;
+      const active = document.activeElement;
+      if (active && active.closest && active.closest(".shortcut-row")) return;
+      e.preventDefault();
+      if (!searchInputRef.current) return;
+      searchInputRef.current.focus();
+      searchInputRef.current.select();
+    };
+    document.addEventListener("keydown", focusSearch);
+    return () => document.removeEventListener("keydown", focusSearch);
+  }, []);
+
+  // Paste on click and auto clean also have a shortcut / footer toggle: follow
+  // a change made there so saving the modal never reverts it
+  React.useEffect(() => {
+    setPasteOnClick(context.state.pasteOnClick === true);
+  }, [context.state.pasteOnClick]);
+  // Multi-bubble too, since turning paste on click on there turns it off
+  React.useEffect(() => {
+    setMultiBubbleMode(!!context.state.multiBubbleMode);
+  }, [context.state.multiBubbleMode]);
+  React.useEffect(() => {
+    setSmartPasteAutoClean(context.state.smartPasteAutoClean === true);
+  }, [context.state.smartPasteAutoClean]);
 
   React.useEffect(() => {
     let active = true;
     getFontViewerStatus()
       .then((status) => {
         if (active) setFontViewerAvailable(status.enabled === true);
+        if (active && status.enabled !== true) setActiveTab((tab) => (tab === "fontViewer" ? DEFAULT_SETTINGS_TAB : tab));
       })
       .catch(() => {
         if (active) setFontViewerAvailable(false);
+        if (active) setActiveTab((tab) => (tab === "fontViewer" ? DEFAULT_SETTINGS_TAB : tab));
       });
     return () => {
       active = false;
     };
   }, []);
+
+  const shortcutGroups = React.useMemo(
+    () => groupShortcutCommands(shortcutCommands).map((group) => ({ ...group, label: locale[group.labelKey] || group.fallback })),
+    []
+  );
 
   const shortcutConflicts = React.useMemo(() => {
     const bySignature = {};
@@ -337,18 +476,8 @@ const SettingsModal = React.memo(function SettingsModal() {
     setEdited(true);
   };
 
-  const changeMiddleEast = (e) => {
-    const val = e.target.checked;
-    setMiddleEast(val);
-    setEdited(true);
-  };
-
   const changeAutoClosePSD = (e) => {
     setAutoClosePSD(e.target.checked);
-    setEdited(true);
-  };
-  const changeAutoScrollStyle = (e) => {
-    setAutoScrollStyle(e.target.checked);
     setEdited(true);
   };
   const changeCurrentFolderTagPriority = (e) => {
@@ -398,18 +527,95 @@ const SettingsModal = React.memo(function SettingsModal() {
     setEdited(true);
   };
 
+  // Multi-bubble and paste on click are exclusive: checking one unchecks the other
   const changeMultiBubbleMode = (e) => {
     setMultiBubbleMode(e.target.checked);
+    if (e.target.checked) setPasteOnClick(false);
     setEdited(true);
   };
 
+  // Turning tips on brings back the "Did you know?" ones already seen
   const changeShowTips = (e) => {
     setShowTips(e.target.checked);
+    if (e.target.checked) context.dispatch({ type: "resetFeatureTips" });
     setEdited(true);
   };
 
   const changeDehyphenateTextShapeR = (e) => {
     setDehyphenateTextShapeR(e.target.checked);
+    setEdited(true);
+  };
+
+  const changeAutoCenterMode = (e) => {
+    setAutoCenterMode(e.target.value);
+    setEdited(true);
+  };
+
+  const changeSmartPaste = (e) => {
+    setSmartPaste(e.target.checked);
+    setEdited(true);
+  };
+
+  const changePasteOnClick = (e) => {
+    setPasteOnClick(e.target.checked);
+    if (e.target.checked) setMultiBubbleMode(false);
+    setEdited(true);
+  };
+
+  const changeSmartPasteDistribute = (e) => {
+    setSmartPasteDistribute(e.target.checked);
+    setEdited(true);
+  };
+
+  const changeSmartPasteAutoClean = (e) => {
+    setSmartPasteAutoClean(e.target.checked);
+    setEdited(true);
+  };
+
+  const changeSmartPasteMinScale = (e) => {
+    const value = e.target.value;
+    // Allow clearing the field while typing; the value is clamped on blur/save
+    if (value === "" || /^\d{1,3}$/.test(value)) {
+      setSmartPasteMinScale(value);
+      setEdited(true);
+    }
+  };
+  const resetSmartPasteMinScale = () => {
+    const percent = parseInt(smartPasteMinScale, 10);
+    setSmartPasteMinScale(
+      Number.isFinite(percent)
+        ? String(Math.min(100, Math.max(50, percent)))
+        : minScaleToPercent(context.state.smartPasteMinScale)
+    );
+  };
+
+  const changeSmartPasteHyphenation = (e) => {
+    setSmartPasteHyphenation(e.target.value);
+    setEdited(true);
+  };
+
+  // Conditional refont rules: edited as a draft, normalized on save (rows
+  // with an empty marker are dropped there)
+  const updateRefontRule = (index, patch) => {
+    setRefontRules((rules) => rules.map((rule, i) => (i === index ? { ...rule, ...patch } : rule)));
+    setEdited(true);
+  };
+  const changeRefontRuleStyle = (index, value) => {
+    const style = (context.state.styles || []).find((item) => String(item.id) === value);
+    updateRefontRule(index, { styleId: style ? style.id : null });
+  };
+  const addRefontRule = () => {
+    const firstStyle = (context.state.styles || [])[0];
+    setRefontRules((rules) => (rules.length >= MAX_REFONT_RULES ? rules : rules.concat({
+      open: "\"",
+      close: "\"",
+      keepMarkers: false,
+      styleId: firstStyle ? firstStyle.id : null,
+    })));
+    setEdited(true);
+  };
+  const removeRefontRule = (index) => {
+    setRefontRules((rules) => rules.filter((rule, i) => i !== index));
     setEdited(true);
   };
 
@@ -424,11 +630,6 @@ const SettingsModal = React.memo(function SettingsModal() {
 
   const changeInterpretMarkdown = (e) => {
     setInterpretMarkdown(e.target.checked);
-    setEdited(true);
-  };
-
-  const changeMultiTabEnabled = (e) => {
-    setMultiTabEnabled(e.target.checked);
     setEdited(true);
   };
 
@@ -499,12 +700,9 @@ const SettingsModal = React.memo(function SettingsModal() {
     setBackgroundEditorOpen((current) => !current);
   };
 
-  const changePageLineColor = (color) => {
-    context.dispatch({ type: "setPageLineColor", color: color || null });
-  };
-
-  const importBackgroundImage = () => {
-    const pathSelect = window.cep.fs.showOpenDialogEx(false, false, null, null, ["png", "jpg", "jpeg", "webp", "bmp"]);
+  // File dialogs and reads return promises in the UXP plugin
+  const importBackgroundImage = async () => {
+    const pathSelect = await window.cep.fs.showOpenDialogEx(false, false, null, null, ["png", "jpg", "jpeg", "webp", "bmp"]);
     const path = pathSelect?.data?.length ? pathSelect.data[0] : null;
     if (!path) return;
     setBackgroundBusy(true);
@@ -548,6 +746,22 @@ const SettingsModal = React.memo(function SettingsModal() {
       ...current,
       visible: { ...current.visible, [key]: current.visible[key] === false },
     }));
+    setEdited(true);
+  };
+
+  const toggleFooterModeIcons = () => {
+    setUiLayoutLocal((current) => normalizeUiLayout({ ...current, footerModeIcons: !current.footerModeIcons }));
+    setEdited(true);
+  };
+
+  const setUiElements = (keys, value) => {
+    setUiLayoutLocal((current) => {
+      const visible = { ...current.visible };
+      keys.forEach((key) => {
+        visible[key] = value;
+      });
+      return normalizeUiLayout({ ...current, visible });
+    });
     setEdited(true);
   };
 
@@ -656,7 +870,6 @@ const SettingsModal = React.memo(function SettingsModal() {
     setPreviewHeight(String(defaultUiLayout.sizes.previewHeight));
     setUiScale(String(defaultUiLayout.sizes.uiScale));
     setStylesHeight("70");
-    setFooterSizes({ ...defaultUiLayout.sizes.footer });
     setEdited(true);
   };
 
@@ -665,35 +878,11 @@ const SettingsModal = React.memo(function SettingsModal() {
     sizes: {
       previewHeight: previewHeight === "" ? defaultUiLayout.sizes.previewHeight : previewHeight,
       uiScale: uiScale === "" ? defaultUiLayout.sizes.uiScale : uiScale,
-      footer: footerSizes,
     },
   });
 
   const save = (e) => {
     e.preventDefault();
-    // Disabling multi-tab with several open tabs needs an in-app confirmation
-    if (
-      !multiTabEnabled &&
-      context.state.multiTabEnabled !== false &&
-      (context.state.tabs || []).length > 1
-    ) {
-      setMultiTabConfirmOpen(true);
-      return;
-    }
-    applySave();
-  };
-
-  const confirmDisableMultiTab = () => {
-    setMultiTabConfirmOpen(false);
-    applySave();
-  };
-
-  const cancelDisableMultiTab = () => {
-    setMultiTabEnabled(true);
-    setMultiTabConfirmOpen(false);
-  };
-
-  const applySave = () => {
     if (pastePointText !== context.state.pastePointText) {
       context.dispatch({
         type: "setPastePointText",
@@ -723,18 +912,12 @@ const SettingsModal = React.memo(function SettingsModal() {
         type: "setLanguage",
         lang: language,
       });
-      setTimeout(() => window.location.reload(), 100);
+      setTimeout(() => reloadApp(), 100);
     }
     if (direction !== context.state.direction) {
       context.dispatch({
         type: "setDirection",
         direction,
-      });
-    }
-    if (middleEast !== context.state.middleEast) {
-      context.dispatch({
-        type: "setMiddleEast",
-        value: middleEast,
       });
     }
     if (autoClosePSD !== context.state.autoClosePSD) {
@@ -744,12 +927,6 @@ const SettingsModal = React.memo(function SettingsModal() {
       });
     }
 
-    if (autoScrollStyle !== context.state.autoScrollStyle) {
-      context.dispatch({
-        type: "setAutoScrollStyle",
-        value: autoScrollStyle,
-      });
-    }
     if (currentFolderTagPriority !== context.state.currentFolderTagPriority) {
       context.dispatch({
         type: "setCurrentFolderTagPriority",
@@ -779,6 +956,38 @@ const SettingsModal = React.memo(function SettingsModal() {
         type: "setMultiBubbleMode",
         value: multiBubbleMode,
       });
+    }
+    if (autoCenterMode !== (context.state.autoCenterMode || "off")) {
+      context.dispatch({
+        type: "setAutoCenterMode",
+        value: autoCenterMode,
+      });
+    }
+    if (smartPaste !== (context.state.smartPaste !== false)) {
+      context.dispatch({ type: "setSmartPaste", value: smartPaste });
+    }
+    if (pasteOnClick !== (context.state.pasteOnClick === true)) {
+      context.dispatch({ type: "setPasteOnClick", value: pasteOnClick });
+    }
+    if (smartPasteDistribute !== (context.state.smartPasteDistribute !== false)) {
+      context.dispatch({ type: "setSmartPasteDistribute", value: smartPasteDistribute });
+    }
+    if (smartPasteAutoClean !== (context.state.smartPasteAutoClean === true)) {
+      context.dispatch({ type: "setSmartPasteAutoClean", value: smartPasteAutoClean });
+    }
+    const minScalePercent = parseInt(smartPasteMinScale, 10);
+    if (Number.isFinite(minScalePercent)) {
+      const minScale = normalizeSmartPasteMinScale(minScalePercent / 100);
+      if (minScale !== context.state.smartPasteMinScale) {
+        context.dispatch({ type: "setSmartPasteMinScale", value: minScale });
+      }
+    }
+    if (smartPasteHyphenation !== (context.state.smartPasteHyphenation || "auto")) {
+      context.dispatch({ type: "setSmartPasteHyphenation", value: smartPasteHyphenation });
+    }
+    const refontRulesToSave = normalizeRefontRules(refontRules);
+    if (JSON.stringify(refontRulesToSave) !== JSON.stringify(normalizeRefontRules(context.state.refontRules))) {
+      context.dispatch({ type: "setRefontRules", rules: refontRulesToSave });
     }
     if (showTips !== context.state.showTips) {
       context.dispatch({
@@ -833,10 +1042,7 @@ const SettingsModal = React.memo(function SettingsModal() {
         value: resetLineCounterOnPage,
       });
     }
-    if (multiTabEnabled !== (context.state.multiTabEnabled !== false)) {
-      context.dispatch({ type: "setMultiTabEnabled", value: multiTabEnabled });
-    }
-    // Themes, background image and page line color are not part of the draft:
+    // Themes and background image are not part of the draft:
     // they are applied and persisted as soon as they change.
     const layoutToSave = buildUiLayoutToSave();
     if (JSON.stringify(layoutToSave) !== JSON.stringify(normalizeUiLayout(context.state.uiLayout))) {
@@ -856,20 +1062,23 @@ const SettingsModal = React.memo(function SettingsModal() {
     closeModal();
   };
 
-  const importSettings = () => {
-    const pathSelect = window.cep.fs.showOpenDialogEx(true, false, null, null, ["json"]);
+  const importSettings = async () => {
+    const pathSelect = await window.cep.fs.showOpenDialogEx(true, false, null, null, ["json", "tpl"]);
     if (!pathSelect?.data?.length) return false;
     let foldersImported = 0;
     let backedUp = false;
-    pathSelect.data.forEach((path) => {
-      const result = window.cep.fs.readFile(path);
+    const importedStyles = [];
+    for (const path of pathSelect.data) {
+      const isToolPresetFile = /\.tpl$/i.test(path);
+      const result = await window.cep.fs.readFile(path, isToolPresetFile ? window.cep.encoding.Base64 : undefined);
       if (result.err) {
         nativeAlert(locale.errorImportStyles, locale.errorTitle, true);
       } else {
         try {
-          const data = validateImportData(JSON.parse(result.data));
+          const data = validateImportData(isToolPresetFile ? toolPresetFileToImportData(result.data, path) : JSON.parse(result.data));
+          if (data.incomplete) nativeAlert(locale.importTplPartial, locale.errorTitle, true);
           if (!backedUp) {
-            if (!backupStorage()) { nativeAlert(locale.storageWarning, locale.errorTitle, true); return; }
+            if (!backupStorage()) { nativeAlert(locale.storageWarning, locale.errorTitle, true); continue; }
             backedUp = true;
           }
           if (data.pastePointText === undefined && data.textItemKind !== undefined) {
@@ -900,6 +1109,7 @@ const SettingsModal = React.memo(function SettingsModal() {
                 edited: importedAt,
             }));
             context.dispatch({ type: "importStyleFolder", folder: dataFolder, styles });
+            importedStyles.push(...styles);
             foldersImported++;
           } else if (
             data.folders &&
@@ -940,25 +1150,29 @@ const SettingsModal = React.memo(function SettingsModal() {
               edited: importedAt,
             }));
             context.dispatch({ type: "importStyleLibrary", folders, styles });
+            importedStyles.push(...styles);
             foldersImported += folders.length;
           } else {
-            context.dispatch({ type: "import", data });
-            setTimeout(() => window.location.reload(), 100);
+            const currentStyles = context.getState().styles;
+            const keepExistingStyles = data.styles && hasStyleImportConflicts(currentStyles, data.styles)
+              ? await new Promise(resolve => nativeConfirm(locale.settingsImportReplace, locale.confirmTitle, resolve))
+              : false;
+            context.dispatch({ type: "import", data, keepExistingStyles });
+            setTimeout(() => reloadApp(), 100);
             closeModal();
           }
         } catch (error) {
-          nativeAlert(locale.errorImportStyles, locale.errorTitle, true);
+          nativeAlert(error.message === NO_TEXT_PRESETS ? locale.importTplNoText : locale.errorImportStyles, locale.errorTitle, true);
         }
       }
-    });
+    }
     if (foldersImported > 0) {
-      nativeAlert(
-        foldersImported > 1
-          ? locale.importFoldersSuccess
-          : locale.importFolderSuccess,
-        locale.successTitle,
-        false
-      );
+      const message = foldersImported > 1 ? locale.importFoldersSuccess : locale.importFolderSuccess;
+      // An empty list means Photoshop's fonts are not known yet: no warning
+      const installedFonts = getUserFonts();
+      const missingFonts = installedFonts.length ? collectMissingStyleFonts(importedStyles, installedFonts) : [];
+      if (missingFonts.length) setMissingFontsImport({ fonts: missingFonts, message });
+      else nativeAlert(message, locale.successTitle, false);
     }
   };
 
@@ -969,29 +1183,29 @@ const SettingsModal = React.memo(function SettingsModal() {
   // TextShapeR learning travels in its own file, on purpose separate from the
   // style export flow: sharing a learned line-break style must not drag the
   // sender's folders, styles, or preferences along with it
-  const exportShapeTuning = () => {
+  const exportShapeTuning = async () => {
     const tuningState = context.state.textShapeRTuning;
     if (!tuningState || !tuningState.samples) {
       nativeAlert(locale.textShapeRTuningExportEmpty || "Nothing learned yet — use the star button on TextShapeR suggestions first.", locale.errorTitle, true);
       return;
     }
-    const pathSelect = window.cep.fs.showSaveDialogEx(false, false, ["json"], "typer-textshaper-style.json");
+    const pathSelect = await window.cep.fs.showSaveDialogEx(false, false, ["json"], "typer-textshaper-style.json");
     if (!pathSelect?.data) return;
     const data = {
       typerTextShapeRTuning: tuningState,
       version: config.appVersion,
       exported: new Date(),
     };
-    const result = window.cep.fs.writeFile(pathSelect.data, JSON.stringify(data));
+    const result = await window.cep.fs.writeFile(pathSelect.data, JSON.stringify(data));
     if (result.err) {
       nativeAlert(locale.textShapeRTuningImportError || "This file does not contain TextShapeR learning data.", locale.errorTitle, true);
     }
   };
 
-  const importShapeTuning = () => {
-    const pathSelect = window.cep.fs.showOpenDialogEx(false, false, null, null, ["json"]);
+  const importShapeTuning = async () => {
+    const pathSelect = await window.cep.fs.showOpenDialogEx(false, false, null, null, ["json"]);
     if (!pathSelect?.data?.length) return;
-    const result = window.cep.fs.readFile(pathSelect.data[0]);
+    const result = await window.cep.fs.readFile(pathSelect.data[0]);
     if (result.err) {
       nativeAlert(locale.textShapeRTuningImportError || "This file does not contain TextShapeR learning data.", locale.errorTitle, true);
       return;
@@ -1011,8 +1225,16 @@ const SettingsModal = React.memo(function SettingsModal() {
     }
   };
 
-  const openWalkthrough = () => {
-    context.dispatch({ type: "setModal", modal: "walkthrough", data: { source: "settings" } });
+  // Legacy panel: the switch to the new TypeR (UXP), when Photoshop can run it
+  const uxpMigration = React.useMemo(() => {
+    try {
+      return readUxpMigrationState(getUpdateTestConfig());
+    } catch (error) {
+      return { eligibility: "uxp", forced: false };
+    }
+  }, []);
+  const openUxpMigration = () => {
+    context.dispatch({ type: "setModal", modal: "uxpMigration", data: { forced: uxpMigration.forced } });
   };
 
   const checkUpdatesNow = () => {
@@ -1038,7 +1260,7 @@ const SettingsModal = React.memo(function SettingsModal() {
             locale.successTitle,
             false
           );
-          setTimeout(() => window.location.reload(), 300);
+          setTimeout(() => reloadApp(), 300);
         } else {
           nativeAlert(
             locale.settingsResetProfileError,
@@ -1097,33 +1319,15 @@ const SettingsModal = React.memo(function SettingsModal() {
     );
   };
 
-  // Performance logger: writes its own flag, never goes through the panel
-  // storage, so it can be switched on even to diagnose the storage itself
-  const changePerfDebug = (e) => {
-    setPerfDebug(setPerfDebugEnabled(e.target.checked));
-  };
-
-  const showPerfReport = () => {
-    const report = reportPerfDebug();
-    const slowest = report.hostCalls[0];
-    nativeAlert(
-      [
-        `${locale.settingsPerfDebugReportClicks || "Click to paint"}: ${report.clickToPaint.avgMs}ms (max ${report.clickToPaint.worstMs}ms, ${report.clickToPaint.samples})`,
-        `${locale.settingsPerfDebugReportHost || "Slowest Photoshop call"}: ${slowest ? `${slowest.name} ${slowest.avgMs}ms x${slowest.calls}` : "-"}`,
-        `${locale.settingsPerfDebugReportFrames || "Long frames"}: ${report.longFrames.count} (max ${report.longFrames.worstMs}ms)`,
-      ].join("\n"),
-      locale.settingsPerfDebugReport || "Performance report",
-      false
-    );
-  };
-
+  // Work tabs first (in the order of the job), then the panel and the data
   const tabs = [
-    { id: "profiles", label: locale.settingsTabProfiles, icon: FiUsers },
     { id: "general", label: locale.settingsTabGeneral || "General", icon: FiSettings },
-    { id: "text", label: locale.settingsTabText || "Text", icon: FiType },
-    { id: "appearance", label: locale.settingsTabAppearance || "Appearance", icon: FiEye },
-    { id: "behavior", label: locale.settingsTabBehavior || "Behavior", icon: FiToggleLeft },
+    { id: "insertion", label: locale.settingsTabInsertion || "Insertion", icon: FiEdit3 },
+    { id: "script", label: locale.settingsTabScript || "Script", icon: FiFileText },
+    { id: "styles", label: locale.settingsTabStyles || "Styles", icon: FiLayers },
     { id: "shortcuts", label: locale.settingsTabShortcuts || "Shortcuts", icon: FaKeyboard },
+    { id: "appearance", label: locale.settingsTabAppearance || "Appearance", icon: FiEye },
+    { id: "data", label: locale.settingsTabData || "Data", icon: FiDatabase },
     {
       id: "fontViewer",
       label: locale.settingsTabFontViewer,
@@ -1131,55 +1335,81 @@ const SettingsModal = React.memo(function SettingsModal() {
       disabled: !fontViewerAvailable,
       disabledTitle: locale.fontViewerUnavailable,
     },
-    { id: "data", label: locale.settingsTabData || "Data", icon: FiDatabase }
   ];
 
-  // Shared markup for a toggle row (checkbox + label + optional hint)
-  const renderToggle = (checked, onChange, label, hint) => (
-    <div className="settings-checkbox-item">
-      <label className="settings-checkbox-label" onMouseDown={(e) => e.preventDefault()}>
-        <input type="checkbox" checked={checked} onChange={onChange} />
-        <div className="settings-checkbox-custom"></div>
-        <div className="settings-checkbox-content">
-          <span>{label}</span>
-          {hint ? <div className="settings-checkbox-hint">{hint}</div> : null}
-        </div>
-      </label>
-    </div>
+  const searchIndex = React.useMemo(() => buildSettingsSearchIndex({
+    locale,
+    baseLocale,
+    tabs,
+    shortcutGroups,
+    themes: themeList.map((theme) => (theme.labelKey ? locale[theme.labelKey] : theme.label)).filter(Boolean),
+    footerModes: FOOTER_MODE_IDS.map(footerModeLabel),
+    available: {
+      uxpMigration: uxpMigration.eligibility === "ok" || uxpMigration.forced,
+      clearCache: cacheInfo.supported,
+      keyboardAccess: keyboardAccess === "missing",
+    },
+  }), [shortcutGroups, themeList, fontViewerAvailable, uxpMigration, cacheInfo.supported, keyboardAccess]);
+  const searchResults = React.useMemo(() => searchSettings(searchIndex, searchQuery), [searchIndex, searchQuery]);
+
+  const changeSearchQuery = (value) => {
+    setSearchQuery(value);
+    setSearchHighlight(0);
+    const body = settingsFormRef.current && settingsFormRef.current.closest(".app-modal-body");
+    if (body) body.scrollTop = 0;
+  };
+
+  const openSearchResult = (entry) => {
+    if (entry.layoutBlock) setSelectedLayoutBlock(entry.layoutBlock);
+    setActiveTab(entry.tab);
+    changeSearchQuery("");
+    setSearchTarget({ ...entry });
+    if (searchInputRef.current) searchInputRef.current.blur();
+  };
+
+  const handleSearchKeyDown = (e) => {
+    if (e.key === "Escape") {
+      if (!searchQuery) return;
+      // The search is cleared first: the next Escape closes the window
+      e.preventDefault();
+      e.stopPropagation();
+      changeSearchQuery("");
+    } else if (!searching) {
+      return;
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!searchResults.length) return;
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      setSearchHighlight((searchHighlight + step + searchResults.length) % searchResults.length);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (searchResults[searchHighlight]) openSearchResult(searchResults[searchHighlight].entry);
+    }
+  };
+
+  // Shared markup for a toggle row (checkbox + label + optional hint). The
+  // options that only matter while it is checked sit indented under it.
+  const renderToggle = (checked, onChange, label, hint, children) => (
+    <React.Fragment>
+      <div className="settings-checkbox-item">
+        <label className="settings-checkbox-label">
+          <input type="checkbox" checked={checked} onChange={onChange} />
+          <div className="settings-checkbox-custom"></div>
+          <div className="settings-checkbox-content">
+            <span>{label}</span>
+            {hint ? <div className="settings-checkbox-hint">{hint}</div> : null}
+          </div>
+        </label>
+      </div>
+      {checked && children ? <div className="settings-checkbox-children">{children}</div> : null}
+    </React.Fragment>
   );
 
   const renderTabContent = () => {
     switch (activeTab) {
-      case "profiles":
-        return (
-          <ProfileSettings
-            currentLanguage={context.state.language}
-            hasUnsavedChanges={edited}
-          />
-        );
-
       case "general":
         return (
           <div className="fields">
-            <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupOnboarding || "Getting started"}</div>
-              <div className="field">
-                <button type="button" className="topcoat-button--large" onClick={openWalkthrough}>
-                  {locale.settingsOpenWalkthrough || "Open walkthrough"}
-                </button>
-              </div>
-              <div className="field-descr">
-                {locale.settingsOpenWalkthroughHint || "Replay the first-time guide for the complete TypeR workflow."}
-              </div>
-              <div className="settings-checkbox-grid">
-                {renderToggle(
-                  showTips,
-                  changeShowTips,
-                  locale.settingsShowTipsLabel || "Show tips",
-                  locale.settingsShowTipsHint || "Display tips in the interface (multi-bubble hints, etc.)"
-                )}
-              </div>
-            </div>
             <div className="settings-group">
               <div className="settings-group-title">{locale.settingsLanguageLabel}</div>
               <div className="field">
@@ -1195,19 +1425,30 @@ const SettingsModal = React.memo(function SettingsModal() {
               </div>
             </div>
             <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupOnboarding || "Getting started"}</div>
+              <div className="settings-checkbox-grid">
+                {renderToggle(
+                  showTips,
+                  changeShowTips,
+                  locale.settingsShowTipsLabel || "Show tips",
+                  locale.settingsShowTipsHint
+                )}
+              </div>
+            </div>
+            <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupAppUpdates || "Updates"}</div>
               <div className="settings-checkbox-grid">
                 {renderToggle(
                   checkUpdates,
                   changeCheckUpdates,
                   locale.settingsCheckUpdatesLabel,
-                  locale.settingsCheckUpdatesHint || "Automatically checks for available updates"
-                )}
-                {renderToggle(
-                  autoUpdate,
-                  changeAutoUpdate,
-                  locale.settingsAutoUpdateLabel || "Install updates automatically",
-                  locale.settingsAutoUpdateHint || "New versions are downloaded and installed silently; they take effect the next time Photoshop restarts"
+                  null,
+                  renderToggle(
+                    autoUpdate,
+                    changeAutoUpdate,
+                    locale.settingsAutoUpdateLabel || "Install updates automatically",
+                    locale.settingsAutoUpdateHint || "New versions install silently in the background. TypeR reloads by itself, or at the next Photoshop restart when it cannot"
+                  )
                 )}
               </div>
               <div className="field">
@@ -1215,15 +1456,54 @@ const SettingsModal = React.memo(function SettingsModal() {
                   {locale.settingsCheckUpdatesButton}
                 </button>
               </div>
+              {(uxpMigration.eligibility === "ok" || uxpMigration.forced) && (
+              <div className="field">
+                <div className="settings-checkbox-hint">
+                  {locale.settingsUxpMigrationHint || "Your Photoshop can run the new TypeR (UXP), the faster version of the panel."}
+                </div>
+                <button type="button" className="topcoat-button--large" onClick={openUxpMigration}>
+                  {locale.settingsUxpMigrationButton || "Switch to the new TypeR"}
+                </button>
+              </div>
+              )}
+              {uxpMigration.eligibility === "installed" && !uxpMigration.forced && (
+              <div className="field">
+                <div className="settings-checkbox-hint">
+                  {locale.settingsUxpMigrationInstalled || "The new TypeR (UXP) is installed: open it from the Plugins > TypeR menu."}
+                </div>
+              </div>
+              )}
             </div>
+            {cacheInfo.supported && (
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupMaintenance || "Maintenance"}</div>
+              <div className="field">
+                <button
+                  type="button"
+                  className="topcoat-button--large"
+                  onClick={clearCache}
+                  disabled={cacheInfo.bytes === 0}
+                >
+                  <FiTrash2 size={18} /> {locale.settingsClearCache || "Clear cache"}
+                </button>
+              </div>
+              <div className="field-descr">
+                {(locale.settingsCacheAccumulated || "Accumulated cache: {size}")
+                  .replace("{size}", formatCacheBytes(cacheInfo.bytes))}
+              </div>
+              <div className="field-descr">
+                {locale.settingsClearCacheHint || "Deletes TypeR's temporary browser files without touching texts, tabs, settings, styles, themes, or saved states."}
+              </div>
+            </div>
+            )}
           </div>
         );
 
-      case "text":
+      case "insertion":
         return (
           <div className="fields">
             <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupTextInsertion || "Text insertion"}</div>
+              <div className="settings-group-title">{locale.settingsGroupPaste || "Paste"}</div>
               <div className="field">
                 <div className="field-label">{locale.settingsTextItemKindLabel}</div>
                 <div className="field-input">
@@ -1233,21 +1513,104 @@ const SettingsModal = React.memo(function SettingsModal() {
                   </select>
                 </div>
               </div>
-              <div className="field">
-                <div className="field-label">{locale.settingsDefaultStyleLabel}</div>
+              <div className="settings-checkbox-grid">
+                {renderToggle(
+                  smartPaste,
+                  changeSmartPaste,
+                  <React.Fragment>
+                    {locale.settingsSmartPasteLabel || "Smart paste"}
+                    <b className="settings-new-badge">{locale.settingsNewBadge || "New"}</b>
+                  </React.Fragment>,
+                  locale.settingsSmartPasteHelp || "Paste fits the text to the real shape of the bubble: the style size is the maximum, text turns white on black bubbles, and styles marked shout or narration are used for those bubbles.",
+                  <React.Fragment>
+                    {renderToggle(
+                      smartPasteDistribute,
+                      changeSmartPasteDistribute,
+                      locale.settingsSmartPasteDistributeLabel || "Split lines across connected bubbles",
+                      locale.settingsSmartPasteDistributeHelp || "Double or triple bubbles receive the next lines, one per part."
+                    )}
+                    {renderToggle(
+                      smartPasteAutoClean,
+                      changeSmartPasteAutoClean,
+                      locale.settingsSmartPasteAutoCleanLabel || "Auto clean",
+                      locale.settingsSmartPasteAutoCleanHelp || "Paints a white or black fill under the text to cover the original lettering (plain white or black bubbles only)."
+                    )}
+                    <div className="field">
+                      <div className="field-label">{locale.settingsSmartPasteMinScaleLabel || "Minimum text size (%)"}</div>
+                      <div className="field-input">
+                        <input
+                          type="number"
+                          min="50"
+                          max="100"
+                          step="5"
+                          value={smartPasteMinScale}
+                          onChange={changeSmartPasteMinScale}
+                          onBlur={resetSmartPasteMinScale}
+                          className="topcoat-text-input--large"
+                        />
+                      </div>
+                      <div className="field-descr">
+                        {locale.settingsSmartPasteMinScaleHelp || "To fit a small bubble, the text may shrink down to this share of the style size (50-100)."}
+                      </div>
+                    </div>
+                    <div className="field">
+                      <div className="field-label">{locale.settingsSmartPasteHyphenationLabel || "Hyphenation"}</div>
+                      <div className="field-input">
+                        <select value={smartPasteHyphenation} onChange={changeSmartPasteHyphenation} className="topcoat-textarea">
+                          <option value="auto">{locale.settingsHyphenationAuto || "Automatic (script language)"}</option>
+                          <option value="fr">{locale.settingsHyphenationFr || "French"}</option>
+                          <option value="en">{locale.settingsHyphenationEn || "English"}</option>
+                          <option value="off">{locale.settingsHyphenationOff || "Off"}</option>
+                        </select>
+                      </div>
+                    </div>
+                  </React.Fragment>
+                )}
+                {renderToggle(
+                  pasteOnClick,
+                  changePasteOnClick,
+                  locale.settingsPasteOnClickLabel || "Paste on click",
+                  locale.settingsPasteOnClickHelp || "A Magic Wand click or a rectangle/lasso selection pastes the current line right away, without pressing Paste."
+                )}
+                {renderToggle(
+                  multiBubbleMode,
+                  changeMultiBubbleMode,
+                  locale.multiBubbleModeToggle || "Multi-Bubble Mode",
+                  <React.Fragment>
+                    {locale.multiBubbleModeHint || "Allows capturing multiple selections to insert multiple texts at once"}
+                    <button
+                      type="button"
+                      className="settings-help-badge"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        window.cep && window.cep.util && window.cep.util.openURLInDefaultBrowser('https://youtu.be/gmIh-eEj2HY');
+                      }}
+                      title={locale.multiBubbleModeHowToUse || "How to use"}
+                    >
+                      <FiPlayCircle size={12} />
+                      {locale.multiBubbleModeHowToUse || "How to use"}
+                    </button>
+                  </React.Fragment>
+                )}
+              </div>
+            </div>
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupCentering || "Centering"}</div>
+              <div className={"field" + (smartPaste ? " m-disabled" : "")}>
+                <div className="field-label">{locale.settingsAutoCenterLabel || "Center after classic paste"}</div>
                 <div className="field-input">
-                  <select value={defaultStyleId} onChange={changeDefaultStyle} className="topcoat-textarea">
-                    <option key="none" value="">
-                      {locale.settingsDefaultStyleNone}
-                    </option>
-                    {context.state.styles.map((style) => (
-                      <option key={style.id} value={style.id}>
-                        {style.name}
-                      </option>
-                    ))}
+                  <select value={autoCenterMode} onChange={changeAutoCenterMode} className="topcoat-textarea" disabled={smartPaste}>
+                    <option value="off">{locale.settingsAutoCenterOff || "Off"}</option>
+                    <option value="single">{locale.settingsAutoCenterSingle || "Center in the bubble"}</option>
+                    <option value="multi">{locale.settingsAutoCenterMulti || "Multi center (detects double bubbles)"}</option>
                   </select>
                 </div>
-                <div className="field-descr">{locale.settingsDefaultStyleDescr}</div>
+                <div className="field-descr">
+                  {smartPaste
+                    ? locale.settingsAutoCenterSmartPasteNote || "Smart paste places the text itself: this setting only applies when it falls back to the classic paste."
+                    : locale.settingsAutoCenterHint || "With the classic paste, each text is re-centered in the bubble detected around it. Multi center also recognizes double bubbles and splits them between their texts: a text already in the bubble moves to its part unless its layer is locked."}
+                </div>
               </div>
               <div className="settings-checkbox-grid">
                 {renderToggle(
@@ -1257,7 +1620,48 @@ const SettingsModal = React.memo(function SettingsModal() {
                   locale.settingsResizeTextBoxOnCenterHint || "Fits the text box to the bubble before centering without changing the font size."
                 )}
               </div>
+              <div className="field">
+                <div className="field-label">{locale.settingsInternalPaddingLabel || "Internal padding (px)"}</div>
+                <div className="field-input">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={internalPadding}
+                    onChange={changeInternalPadding}
+                    className="topcoat-text-input--large"
+                  />
+                </div>
+                <div className="field-descr">{locale.settingsInternalPaddingHint || "Internal space to prevent text from touching bubble edges (0-100 pixels)"}</div>
+              </div>
             </div>
+            <div className="settings-group">
+              <div className="settings-group-title">TextShapeR</div>
+              <div className="settings-checkbox-grid">
+                {renderToggle(
+                  inlineTextShapeR,
+                  changeInlineTextShapeR,
+                  <React.Fragment>
+                    {locale.settingsInlineTextShapeRLabel || "TextShapeR"}
+                    <b className="settings-new-badge">{locale.settingsNewBadge || "New"}</b>
+                  </React.Fragment>,
+                  locale.settingsInlineTextShapeRHint || "Shows text shape suggestions directly in the main panel. This may impact performance.",
+                  renderToggle(
+                    dehyphenateTextShapeR,
+                    changeDehyphenateTextShapeR,
+                    locale.settingsDehyphenateLabel || "TextShapeR: join words split by hyphenation",
+                    locale.settingsDehyphenateHint || "When shaping text, joins words split across line breaks. Turn off if real compound words should stay separated."
+                  )
+                )}
+              </div>
+            </div>
+            <TextShapeRTraining onImportLearning={importShapeTuning} onExportLearning={exportShapeTuning} />
+          </div>
+        );
+
+      case "script":
+        return (
+          <div className="fields">
             <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupTextScript || "Script & tags"}</div>
               <div className="field">
@@ -1281,11 +1685,22 @@ const SettingsModal = React.memo(function SettingsModal() {
                   locale.settingsMarkdownLabel || "Interpret markdown (bold/italic)",
                   locale.settingsMarkdownHint || "Convert markdown and rich text on paste and apply bold/italic in the text block."
                 )}
+              </div>
+            </div>
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupPages || "Pages"}</div>
+              <div className="settings-checkbox-grid">
                 {renderToggle(
                   resetLineCounterOnPage,
                   changeResetLineCounterOnPage,
                   locale.settingsResetLineCounterOnPageLabel || "Reset line counter on page markers",
                   locale.settingsResetLineCounterOnPageHint || "Restarts text line numbering at 1 after each Page N marker."
+                )}
+                {renderToggle(
+                  autoClosePSD,
+                  changeAutoClosePSD,
+                  locale.settingsAutoClosePsdLabel,
+                  locale.settingsAutoClosePsdHint || "Closes the previous page's PSD when you move to another page"
                 )}
               </div>
             </div>
@@ -1300,75 +1715,272 @@ const SettingsModal = React.memo(function SettingsModal() {
                   </select>
                 </div>
               </div>
-              <div className="settings-checkbox-grid">
-                {renderToggle(middleEast, changeMiddleEast, locale.settingsMiddleEastLabel, null)}
-              </div>
             </div>
           </div>
         );
 
+      case "styles":
+        return (
+          <div className="fields">
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupStyleSelection || "Automatic selection"}</div>
+              <div className="field">
+                <div className="field-label">{locale.settingsDefaultStyleLabel}</div>
+                <div className="field-input">
+                  <select value={defaultStyleId} onChange={changeDefaultStyle} className="topcoat-textarea">
+                    <option key="none" value="">
+                      {locale.settingsDefaultStyleNone}
+                    </option>
+                    {context.state.styles.map((style) => (
+                      <option key={style.id} value={style.id}>
+                        {style.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field-descr">{locale.settingsDefaultStyleDescr}</div>
+              </div>
+              <div className="settings-checkbox-grid">
+                {renderToggle(
+                  currentFolderTagPriority,
+                  changeCurrentFolderTagPriority,
+                  locale.settingsCurrentFolderTagPriorityLabel,
+                  locale.settingsCurrentFolderTagPriorityHint ||
+                    "Prevents script tags from selecting a style from another folder"
+                )}
+              </div>
+            </div>
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsGroupQuickSizes || "Quick sizes"}</div>
+              <div className="settings-checkbox-grid">
+                {renderToggle(
+                  showQuickStyleSize,
+                  changeShowQuickStyleSize,
+                  locale.settingsQuickStyleSizeLabel || "Show style size presets",
+                  null,
+                  <div className="field">
+                    <div className="field-label">{locale.settingsQuickStyleSizeStepLabel || "Quick size step"}</div>
+                    <div className="field-input">
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="any"
+                        value={styleSizeStep}
+                        onChange={changeStyleSizeStep}
+                        onBlur={resetStyleSizeStep}
+                        className="topcoat-text-input--large"
+                      />
+                    </div>
+                    <div className="field-descr">
+                      {locale.settingsQuickStyleSizeStepHint || "Sets the increment used when editing size presets."}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="settings-group">
+              <div className="settings-group-title">{locale.settingsRefontTitle || "Conditional refont"}</div>
+              <div className="field-descr">
+                {locale.settingsRefontHelp || "Text between two markers takes the font of another style (the size is kept). Example: quoted passages in italics."}
+              </div>
+              {refontRules.length > 0 && (
+                <div className="settings-refont-list">
+                  {refontRules.map((rule, index) => {
+                    const styles = context.state.styles || [];
+                    const styleValue = rule.styleId === null || rule.styleId === undefined ? "" : String(rule.styleId);
+                    const hasStyle = styles.some((style) => String(style.id) === styleValue);
+                    return (
+                      <div className="settings-refont-row" key={index}>
+                        <input
+                          type="text"
+                          maxLength={REFONT_MARKER_MAX_LENGTH}
+                          value={rule.open}
+                          onChange={(e) => updateRefontRule(index, { open: e.target.value })}
+                          className={"topcoat-text-input settings-refont-marker" + (rule.open ? "" : " is-invalid")}
+                          title={locale.settingsRefontOpen || "Opening marker"}
+                          aria-label={locale.settingsRefontOpen || "Opening marker"}
+                        />
+                        <span className="settings-refont-between" aria-hidden="true">…</span>
+                        <input
+                          type="text"
+                          maxLength={REFONT_MARKER_MAX_LENGTH}
+                          value={rule.close}
+                          onChange={(e) => updateRefontRule(index, { close: e.target.value })}
+                          className={"topcoat-text-input settings-refont-marker" + (rule.close ? "" : " is-invalid")}
+                          title={locale.settingsRefontClose || "Closing marker"}
+                          aria-label={locale.settingsRefontClose || "Closing marker"}
+                        />
+                        <select
+                          value={hasStyle ? styleValue : ""}
+                          onChange={(e) => changeRefontRuleStyle(index, e.target.value)}
+                          className="topcoat-textarea settings-refont-style"
+                          title={locale.settingsRefontStyle || "Font taken from"}
+                          aria-label={locale.settingsRefontStyle || "Font taken from"}
+                        >
+                          {!hasStyle && <option value="">—</option>}
+                          {styles.map((style) => (
+                            <option key={style.id} value={String(style.id)}>
+                              {style.name}
+                            </option>
+                          ))}
+                        </select>
+                        <label className="settings-checkbox-label settings-refont-keep">
+                          <input
+                            type="checkbox"
+                            checked={rule.keepMarkers === true}
+                            onChange={(e) => updateRefontRule(index, { keepMarkers: e.target.checked })}
+                          />
+                          <div className="settings-checkbox-custom"></div>
+                          <span>{locale.settingsRefontKeepMarkers || "Keep markers"}</span>
+                        </label>
+                        <button
+                          type="button"
+                          className="topcoat-icon-button--quiet settings-refont-remove"
+                          onClick={() => removeRefontRule(index)}
+                          title={locale.settingsRefontRemove || "Remove rule"}
+                          aria-label={locale.settingsRefontRemove || "Remove rule"}
+                        >
+                          <FiTrash2 size={13} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <button
+                type="button"
+                className="topcoat-button settings-refont-add"
+                onClick={addRefontRule}
+                disabled={refontRules.length >= MAX_REFONT_RULES}
+              >
+                <FiPlus size={13} /> {locale.settingsRefontAdd || "Add rule"}
+              </button>
+            </div>
+          </div>
+        );
+
+      case "data":
+        return (
+          <React.Fragment>
+            <ProfileSettings
+              currentLanguage={context.state.language}
+              hasUnsavedChanges={edited}
+            />
+            <div className="fields">
+              <div className="settings-group">
+                <div className="settings-group-title">{locale.settingsGroupImportExport || "Import/Export"}</div>
+                <FontScanPromo />
+                <div className="field">
+                  <button type="button" className="topcoat-button--large" onClick={importSettings}>
+                    <FaFileImport size={18} /> {locale.settingsImport}
+                  </button>
+                </div>
+                <div className="field">
+                  <button type="button" className="topcoat-button--large" data-tour="export-settings" onClick={exportSettings}>
+                    <FaFileExport size={18} /> {locale.settingsExport}
+                  </button>
+                </div>
+              </div>
+              <div className="settings-group">
+                <div className="settings-group-title">{locale.settingsGroupDanger || "Danger zone"}</div>
+                <div className="field">
+                  <button type="button" className="topcoat-button--large settings-danger-btn" onClick={resetStorage}>
+                    {locale.settingsResetProfile}
+                  </button>
+                </div>
+                <div className="field-descr">
+                  {locale.settingsResetProfileHint}
+                </div>
+              </div>
+            </div>
+          </React.Fragment>
+        );
+
       case "appearance": {
         const vis = uiLayout.visible;
+        const isShown = (key) => vis[key] !== false;
         const blockLabels = {
           preview: locale.settingsLayoutBlockPreview || "Preview & actions",
           text: locale.settingsLayoutBlockText || "Text",
           styles: locale.settingsLayoutBlockStyles || "Styles",
           footer: locale.settingsLayoutBlockFooter || "Footer",
         };
-        const elementLabels = {
+        const elementLabels = FOOTER_MODE_IDS.reduce((labels, id) => {
+          labels[FOOTER_MODE_KEYS[id]] = footerModeLabel(id);
+          return labels;
+        }, {
           tabBar: locale.settingsLayoutElTabBar || "Tab bar",
           previewCreateButton: locale.settingsLayoutElCreate || "Create layer button",
           previewAlignButton: locale.settingsLayoutElAlign || "Align button",
           previewSizeControls: locale.settingsLayoutElSize || "Text size controls",
           previewNav: locale.settingsLayoutElNav || "Line navigation arrows",
           previewWidget: locale.settingsLayoutElWidget || "Line preview / TextShapeR",
-          footerHelp: locale.settingsLayoutElFooterHelp || "Footer: Help link",
-          footerSettings: locale.settingsLayoutElFooterSettings || "Footer: Settings link",
-          footerRepo: locale.settingsLayoutElFooterRepo || "Footer: Repository link",
-          footerTextShapeR: locale.settingsLayoutElFooterTextShapeR || "Footer: TextShapeR toggle",
-          footerMultiBubble: locale.settingsLayoutElFooterMultiBubble || "Footer: Multi-bubble toggle",
+          footerHelp: locale.settingsLayoutElHelp || "Help button",
+          footerRepo: locale.settingsLayoutElRepo || "Import pages button",
+        });
+        // Mode states after "Save", like the toggles in the other tabs
+        const modeStates = {
+          textShapeR: { on: inlineTextShapeR },
+          multiBubble: { on: multiBubbleMode },
+          pasteOnClick: { on: pasteOnClick },
+          autoClean: { on: smartPasteAutoClean },
         };
-        const previewMockHeight = Math.max(26, Math.round((parseInt(previewHeight, 10) || 130) * LAYOUT_CANVAS_SCALE));
+        const onText = locale.multiBubbleModeOn || "ON";
+        const offText = locale.multiBubbleModeOff || "OFF";
+        const showText = locale.settingsLayoutShow || "Show";
+        const hideText = locale.settingsLayoutHide || "Hide";
+        const modeKeys = FOOTER_MODE_IDS.map((id) => FOOTER_MODE_KEYS[id]);
+        const hiddenCount = (block) => LAYOUT_BLOCK_ELEMENTS[block].filter((key) => !isShown(key)).length;
+        const previewMockHeight = Math.max(30, Math.round((parseInt(previewHeight, 10) || 130) * LAYOUT_CANVAS_SCALE));
         const stylesMockHeight = Math.max(14, Math.round((parseInt(stylesHeight, 10) || 70) * LAYOUT_CANVAS_SCALE));
         const visibleOrder = uiLayout.order.filter((id) => vis[id]);
         const lastVisibleBlock = visibleOrder[visibleOrder.length - 1];
         const hl = (key) => (layoutHoverEl === key ? " m-hl" : "");
         const stopMouse = (e) => e.stopPropagation();
-        const mockElementProps = (key) => ({
-          onMouseDown: stopMouse,
-          onClick: (e) => {
-            e.stopPropagation();
-            toggleUiElement(key);
-          },
-          onMouseEnter: () => setLayoutHoverEl(key),
-          onMouseLeave: () => setLayoutHoverEl(null),
-          title: elementLabels[key],
-        });
+        // A hidden element stays in the mockup, outlined: one click brings it back
+        const mockEl = (key, className, children, extraClass = "") => (
+          <span
+            key={key}
+            className={className + (isShown(key) ? "" : " m-off") + extraClass + hl(key)}
+            onMouseDown={stopMouse}
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelectedLayoutBlock(LAYOUT_ELEMENT_BLOCK[key]);
+              toggleUiElement(key);
+            }}
+            onMouseEnter={() => setLayoutHoverEl(key)}
+            onMouseLeave={() => setLayoutHoverEl(null)}
+            title={elementLabels[key] + " – " + (isShown(key) ? hideText : showText)}
+          >
+            {children}
+          </span>
+        );
+        const mockIcon = (key) => {
+          const Icon = LAYOUT_ELEMENT_ICONS[key];
+          return <Icon size={7} />;
+        };
         const mockContents = {
           preview: (
             <div className="settings-layout-mock-inner">
               <div className="settings-layout-mock-row">
-                {vis.previewCreateButton && <span className={"mk-pill mk-cta" + hl("previewCreateButton")} {...mockElementProps("previewCreateButton")} />}
-                {vis.previewAlignButton && <span className={"mk-pill" + hl("previewAlignButton")} {...mockElementProps("previewAlignButton")} />}
-                {vis.previewSizeControls && <span className={"mk-pill mk-small" + hl("previewSizeControls")} {...mockElementProps("previewSizeControls")} />}
+                {mockEl("previewCreateButton", "mk-pill mk-cta", mockIcon("previewCreateButton"))}
+                {mockEl("previewAlignButton", "mk-pill", mockIcon("previewAlignButton"))}
+                {mockEl("previewSizeControls", "mk-pill mk-small", mockIcon("previewSizeControls"))}
               </div>
-              {(vis.previewNav || vis.previewWidget) && (
-                <div className="settings-layout-mock-row">
-                  {vis.previewNav && <span className={"mk-nav" + hl("previewNav")} {...mockElementProps("previewNav")} />}
-                  {vis.previewWidget && <span className={"mk-widget" + hl("previewWidget")} {...mockElementProps("previewWidget")} />}
-                  {vis.previewNav && <span className={"mk-nav" + hl("previewNav")} {...mockElementProps("previewNav")} />}
-                </div>
-              )}
+              <div className="settings-layout-mock-row">
+                {mockEl("previewNav", "mk-nav", mockIcon("previewNav"))}
+                {mockEl("previewWidget", "mk-widget", mockIcon("previewWidget"))}
+              </div>
             </div>
           ),
           text: (
             <div className="settings-layout-mock-inner m-top">
-              {vis.tabBar && (
-                <div className={"settings-layout-mock-tabs" + hl("tabBar")} {...mockElementProps("tabBar")}>
+              {mockEl("tabBar", "settings-layout-mock-tabs", (
+                <React.Fragment>
                   <span className="m-active-tab" />
                   <span />
-                </div>
-              )}
+                </React.Fragment>
+              ))}
               <div className="settings-layout-mock-lines">
                 <span style={{ width: "82%" }} />
                 <span style={{ width: "58%" }} />
@@ -1420,10 +2032,11 @@ const SettingsModal = React.memo(function SettingsModal() {
               <button
                 type="button"
                 className="settings-layout-mock-eye"
-                title={hidden ? (locale.settingsLayoutShow || "Show") : (locale.settingsLayoutHide || "Hide")}
+                title={hidden ? showText : hideText}
                 onMouseDown={stopMouse}
                 onClick={(e) => {
                   e.stopPropagation();
+                  setSelectedLayoutBlock(id);
                   toggleUiElement(id);
                 }}
               >
@@ -1459,10 +2072,50 @@ const SettingsModal = React.memo(function SettingsModal() {
             />
           </div>
         );
+        const renderElementRow = (key, { extra = null, note = null } = {}) => {
+          const Icon = LAYOUT_ELEMENT_ICONS[key];
+          const shown = isShown(key);
+          return (
+            <label
+              key={key}
+              className={"settings-layout-element" + (shown ? "" : " m-off") + hl(key)}
+              onMouseEnter={() => setLayoutHoverEl(key)}
+              onMouseLeave={() => setLayoutHoverEl(null)}
+            >
+              <Icon size={13} className="settings-layout-element-icon" />
+              <span className="settings-layout-element-text">
+                <span className="settings-layout-element-label">{elementLabels[key]}</span>
+                {note && <span className="settings-layout-element-note">{note}</span>}
+              </span>
+              {extra}
+              <LayoutSwitch checked={shown} onChange={() => toggleUiElement(key)} title={shown ? hideText : showText} />
+            </label>
+          );
+        };
+        const renderModeRow = (id) => {
+          const state = modeStates[id];
+          return renderElementRow(FOOTER_MODE_KEYS[id], {
+            note: id === "autoClean" && !smartPaste
+              ? (locale.settingsLayoutAutoCleanNote || "Only shown while smart paste is on.")
+              : null,
+            extra: (
+              <span
+                className={"settings-layout-mode-state" + (state.on ? " m-on" : "")}
+                title={locale.settingsLayoutModeState || "Current state of the mode"}
+              >
+                <i />
+                {state.on ? onText : offText}
+              </span>
+            ),
+          });
+        };
+        const allModesShown = modeKeys.every(isShown);
         const selectedIsPanel = selectedLayoutBlock !== "footer";
         const selectedVisible = selectedIsPanel ? vis[selectedLayoutBlock] !== false : true;
         const selectedIndex = uiLayout.order.indexOf(selectedLayoutBlock);
         const selectedElements = LAYOUT_BLOCK_ELEMENTS[selectedLayoutBlock] || [];
+        const SelectedIcon = LAYOUT_BLOCK_ICONS[selectedLayoutBlock];
+        const scaleValue = Math.min(150, Math.max(70, parseInt(uiScale, 10) || 100));
         return (
           <div className="fields">
             <div className="settings-group">
@@ -1479,7 +2132,7 @@ const SettingsModal = React.memo(function SettingsModal() {
                       : theme.label || (locale.settingsThemeUntitled || "Custom theme");
                   const editable = isImage || theme.custom;
                   return (
-                    <div className="settings-theme-cell" key={theme.id}>
+                    <div className={"settings-theme-cell" + (editable ? " m-editable" : "")} key={theme.id}>
                       <button
                         type="button"
                         className={"settings-theme-choice" + (isActive ? " m-active" : "")}
@@ -1547,7 +2200,7 @@ const SettingsModal = React.memo(function SettingsModal() {
                     title={locale.settingsThemeNew || "New theme"}
                   >
                     <span className="settings-theme-preview m-add">
-                      <FiPlus size={20} />
+                      <FiPlus size={14} />
                     </span>
                     <span className="settings-theme-name">{locale.settingsThemeNew || "New theme"}</span>
                   </button>
@@ -1561,7 +2214,7 @@ const SettingsModal = React.memo(function SettingsModal() {
                       title={locale.settingsThemeImage || "Custom image"}
                     >
                       <span className="settings-theme-preview m-add">
-                        <FiImage size={20} />
+                        <FiImage size={14} />
                       </span>
                       <span className="settings-theme-name">{locale.settingsThemeImage || "Custom image"}</span>
                     </button>
@@ -1586,21 +2239,43 @@ const SettingsModal = React.memo(function SettingsModal() {
                   onClose={() => setBackgroundEditorOpen(false)}
                 />
               )}
-              <div className="settings-color-row">
-                <ColorField
-                  label={locale.settingsPageLineColor || "Page line background"}
-                  value={pageLineColor}
-                  onChange={changePageLineColor}
-                  clearable={true}
-                  onClear={() => changePageLineColor("")}
-                />
-                <span className="settings-color-hint">
-                  {locale.settingsPageLineColorHint || "Background of the lines marked as a page separator."}
-                </span>
-              </div>
             </div>
             <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupInterface || "Interface layout"}</div>
+              <div className="settings-layout-picker">
+                {uiLayout.order.concat(["footer"]).map((id) => {
+                  const Icon = LAYOUT_BLOCK_ICONS[id];
+                  const count = hiddenCount(id);
+                  const blockHidden = id !== "footer" && !vis[id];
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className={
+                        "settings-layout-pick" +
+                        (selectedLayoutBlock === id ? " m-active" : "") +
+                        (blockHidden ? " m-hidden" : "")
+                      }
+                      title={blockLabels[id]}
+                      onClick={() => setSelectedLayoutBlock(id)}
+                    >
+                      <Icon size={12} />
+                      <span className="settings-layout-pick-label">{blockLabels[id]}</span>
+                      {(blockHidden || count > 0) && (
+                        <span
+                          className="settings-layout-pick-badge"
+                          title={blockHidden
+                            ? (locale.settingsLayoutBlockHidden || "Panel hidden")
+                            : (locale.settingsLayoutHiddenCount || "{count} hidden").replace("{count}", count)}
+                        >
+                          <FiEyeOff size={8} />
+                          {!blockHidden && count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
               <div className="settings-layout">
                 <div className="settings-layout-canvas-wrap">
                   <div
@@ -1613,63 +2288,34 @@ const SettingsModal = React.memo(function SettingsModal() {
                       title={blockLabels.footer}
                       onClick={() => setSelectedLayoutBlock("footer")}
                     >
-                      {vis.footerHelp && <span className={"mk-f" + hl("footerHelp")} {...mockElementProps("footerHelp")} />}
-                      <span
-                        className={"mk-f m-on" + hl("footerSettings")}
-                        onMouseDown={stopMouse}
-                        onMouseEnter={() => setLayoutHoverEl("footerSettings")}
-                        onMouseLeave={() => setLayoutHoverEl(null)}
-                        title={elementLabels.footerSettings}
-                      />
-                      {vis.footerRepo && <span className={"mk-f" + hl("footerRepo")} {...mockElementProps("footerRepo")} />}
+                      {mockEl("footerHelp", "mk-f", mockIcon("footerHelp"))}
+                      <span className="mk-f m-fixed" title={locale.settingsLayoutElSettings || "Settings button"}>
+                        <FiSettings size={7} />
+                      </span>
+                      {mockEl("footerRepo", "mk-f", mockIcon("footerRepo"))}
                       <span className="mk-fspacer" />
-                      {vis.footerTextShapeR && (
-                        <span className={"mk-fdots" + hl("footerTextShapeR")} {...mockElementProps("footerTextShapeR")}>
-                          <i />
-                          <i />
-                        </span>
-                      )}
-                      {vis.footerMultiBubble && (
-                        <span className={"mk-fdots m-sep" + hl("footerMultiBubble")} {...mockElementProps("footerMultiBubble")}>
-                          <i />
-                          <i />
-                        </span>
-                      )}
+                      {FOOTER_MODE_IDS.map((id) => mockEl(
+                        FOOTER_MODE_KEYS[id],
+                        "mk-fmode",
+                        (
+                          <React.Fragment>
+                            <i className={"mk-fdot" + (modeStates[id].on ? " m-on" : "")} />
+                            {mockIcon(FOOTER_MODE_KEYS[id])}
+                          </React.Fragment>
+                        ),
+                        id === "autoClean" && !smartPaste ? " m-na" : ""
+                      ))}
                     </div>
-                  </div>
-                  <div className="settings-layout-scale">
-                    <input
-                      type="range"
-                      min="70"
-                      max="150"
-                      step="5"
-                      title={locale.settingsLayoutUiScale || "Interface scale (%)"}
-                      value={Math.min(150, Math.max(70, parseInt(uiScale, 10) || 100))}
-                      onChange={(e) => {
-                        setUiScale(e.target.value);
-                        setEdited(true);
-                      }}
-                    />
-                    <span className="settings-layout-scale-value">
-                      {(locale.settingsLayoutScaleCaption || "Scale: {scale}%").replace("{scale}", uiScale || "100")}
-                    </span>
                   </div>
                 </div>
                 <div className="settings-layout-inspector">
                   <div className="settings-layout-inspector-head">
+                    <SelectedIcon size={14} className="settings-layout-inspector-icon" />
                     <span className={"settings-layout-inspector-title" + (selectedVisible ? "" : " m-hidden")}>
                       {blockLabels[selectedLayoutBlock]}
                     </span>
                     {selectedIsPanel && (
                       <div className="settings-layout-inspector-tools">
-                        <button
-                          type="button"
-                          className="settings-layout-icon-btn"
-                          title={selectedVisible ? (locale.settingsLayoutHide || "Hide") : (locale.settingsLayoutShow || "Show")}
-                          onClick={() => toggleUiElement(selectedLayoutBlock)}
-                        >
-                          {selectedVisible ? <FiEye size={13} /> : <FiEyeOff size={13} />}
-                        </button>
                         <button
                           type="button"
                           className="settings-layout-icon-btn"
@@ -1688,128 +2334,116 @@ const SettingsModal = React.memo(function SettingsModal() {
                         >
                           <FiChevronDown size={13} />
                         </button>
+                        <LayoutSwitch
+                          checked={selectedVisible}
+                          onChange={() => toggleUiElement(selectedLayoutBlock)}
+                          title={selectedVisible ? hideText : showText}
+                        />
                       </div>
                     )}
                   </div>
-                  {selectedLayoutBlock === "preview" && renderHeightSlider(previewHeight, setPreviewHeight, 80, 300, defaultUiLayout.sizes.previewHeight)}
-                  {selectedLayoutBlock === "styles" && (vis.text
+                  {selectedIsPanel && !selectedVisible && (
+                    <div className="settings-layout-inspector-note">
+                      {locale.settingsLayoutBlockHiddenNote || "This panel is hidden. Turn it back on with the switch above."}
+                    </div>
+                  )}
+                  {selectedVisible && selectedLayoutBlock === "preview" && renderHeightSlider(previewHeight, setPreviewHeight, 80, 300, defaultUiLayout.sizes.previewHeight)}
+                  {selectedVisible && selectedLayoutBlock === "styles" && (vis.text
                     ? renderHeightSlider(stylesHeight, setStylesHeight, 70, 500, 70)
                     : (
                       <div className="settings-layout-inspector-note">
                         {locale.settingsLayoutTextAuto || "Fills the remaining space automatically."}
                       </div>
                     ))}
-                  {selectedLayoutBlock === "text" && (
+                  {selectedVisible && selectedLayoutBlock === "text" && (
                     <div className="settings-layout-inspector-note">
                       {locale.settingsLayoutTextAuto || "Fills the remaining space automatically."}
                     </div>
                   )}
                   {selectedLayoutBlock === "footer" ? (
-                    <div className="settings-layout-elements">
-                      {FOOTER_ALWAYS_VISIBLE_KEYS.map((key) => {
-                        const sizeKey = FOOTER_SIZE_KEYS[key];
-                        const size = parseInt(footerSizes[sizeKey], 10) || 12;
-                        return (
-                          <div
-                            key={key}
-                            className="settings-layout-footer-element"
-                            onMouseEnter={() => setLayoutHoverEl(key)}
-                            onMouseLeave={() => setLayoutHoverEl(null)}
-                          >
-                            <label className="settings-layout-element" onMouseDown={(e) => e.preventDefault()}>
-                              <span>{elementLabels[key]}</span>
-                            </label>
-                            <input
-                              type="range"
-                              min="8"
-                              max="20"
-                              title={((locale.settingsLayoutFooterSize || "Button size (px)") + ": ") + elementLabels[key]}
-                              value={Math.min(20, Math.max(8, size))}
-                              onChange={(e) => {
-                                setFooterSizes((current) => ({ ...current, [sizeKey]: e.target.value }));
-                                setEdited(true);
-                              }}
-                            />
-                            <input
-                              type="number"
-                              min="8"
-                              max="20"
-                              value={footerSizes[sizeKey]}
-                              className="settings-layout-footer-size-input"
-                              onChange={(e) => {
-                                if (e.target.value === "" || /^[0-9]+$/.test(e.target.value)) {
-                                  setFooterSizes((current) => ({ ...current, [sizeKey]: e.target.value }));
-                                  setEdited(true);
-                                }
-                              }}
-                            />
-                          </div>
-                        );
-                      })}
-                      {selectedElements.map((key) => {
-                        const sizeKey = FOOTER_SIZE_KEYS[key];
-                        const size = parseInt(footerSizes[sizeKey], 10) || 12;
-                        return (
-                          <div
-                            key={key}
-                            className="settings-layout-footer-element"
-                            onMouseEnter={() => setLayoutHoverEl(key)}
-                            onMouseLeave={() => setLayoutHoverEl(null)}
-                          >
-                            <label className="settings-layout-element" onMouseDown={(e) => e.preventDefault()}>
-                              <input type="checkbox" checked={vis[key] !== false} onChange={() => toggleUiElement(key)} />
-                              <div className="settings-checkbox-custom"></div>
-                              <span>{elementLabels[key]}</span>
-                            </label>
-                            <input
-                              type="range"
-                              min="8"
-                              max="20"
-                              title={((locale.settingsLayoutFooterSize || "Button size (px)") + ": ") + elementLabels[key]}
-                              value={Math.min(20, Math.max(8, size))}
-                              onChange={(e) => {
-                                setFooterSizes((current) => ({ ...current, [sizeKey]: e.target.value }));
-                                setEdited(true);
-                              }}
-                            />
-                            <input
-                              type="number"
-                              min="8"
-                              max="20"
-                              value={footerSizes[sizeKey]}
-                              className="settings-layout-footer-size-input"
-                              onChange={(e) => {
-                                if (e.target.value === "" || /^[0-9]+$/.test(e.target.value)) {
-                                  setFooterSizes((current) => ({ ...current, [sizeKey]: e.target.value }));
-                                  setEdited(true);
-                                }
-                              }}
-                            />
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : selectedElements.length > 0 ? (
-                    <div className="settings-layout-elements">
-                      {selectedElements.map((key) => (
-                        <label
-                          key={key}
-                          className="settings-layout-element"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onMouseEnter={() => setLayoutHoverEl(key)}
-                          onMouseLeave={() => setLayoutHoverEl(null)}
+                    <React.Fragment>
+                      <div className="settings-layout-subtitle">
+                        <span>{locale.settingsLayoutGroupButtons || "Buttons"}</span>
+                      </div>
+                      <div className="settings-layout-elements">
+                        {renderElementRow("footerHelp")}
+                        <div className="settings-layout-element m-locked">
+                          <FiSettings size={13} className="settings-layout-element-icon" />
+                          <span className="settings-layout-element-text">
+                            <span className="settings-layout-element-label">{locale.settingsLayoutElSettings || "Settings button"}</span>
+                          </span>
+                          <span className="settings-layout-locked">
+                            <FiLock size={10} /> {locale.settingsLayoutAlwaysShown || "Always shown"}
+                          </span>
+                        </div>
+                        {renderElementRow("footerRepo")}
+                      </div>
+                      <div className="settings-layout-subtitle">
+                        <span>{locale.settingsLayoutGroupModes || "Mode toggles"}</span>
+                        <button
+                          type="button"
+                          className="settings-layout-link"
+                          onClick={() => setUiElements(modeKeys, !allModesShown)}
                         >
-                          <input type="checkbox" checked={vis[key] !== false} onChange={() => toggleUiElement(key)} />
-                          <div className="settings-checkbox-custom"></div>
-                          <span>{elementLabels[key]}</span>
+                          {allModesShown
+                            ? (locale.settingsLayoutHideAll || "Hide all")
+                            : (locale.settingsLayoutShowAll || "Show all")}
+                        </button>
+                      </div>
+                      <div className="settings-layout-elements">
+                        {FOOTER_MODE_IDS.map(renderModeRow)}
+                        <label className="settings-layout-element">
+                          <FiGrid size={13} className="settings-layout-element-icon" />
+                          <span className="settings-layout-element-text">
+                            <span className="settings-layout-element-label">{locale.settingsLayoutModeIcons || "Always show icons"}</span>
+                            <span className="settings-layout-element-note">{locale.settingsLayoutModeIconsNote || "Otherwise, icons replace the names only when the panel is too narrow."}</span>
+                          </span>
+                          <LayoutSwitch checked={uiLayout.footerModeIcons} onChange={toggleFooterModeIcons} />
                         </label>
-                      ))}
+                      </div>
+                      <div className="settings-layout-inspector-note">
+                        {locale.settingsLayoutModeKeepsState || "A hidden toggle keeps its current state, and its shortcut still works."}
+                      </div>
+                    </React.Fragment>
+                  ) : selectedElements.length > 0 && (
+                    <div className={"settings-layout-elements" + (selectedVisible ? "" : " m-disabled")}>
+                      {selectedElements.map((key) => renderElementRow(key))}
                     </div>
-                  ) : null}
+                  )}
                 </div>
               </div>
+              <div className="settings-layout-scale">
+                <span className="settings-layout-scale-label">
+                  <FiZoomIn size={13} />
+                  {locale.settingsLayoutScaleLabel || "Interface scale"}
+                </span>
+                <input
+                  type="range"
+                  min="70"
+                  max="150"
+                  step="5"
+                  value={scaleValue}
+                  onChange={(e) => {
+                    setUiScale(e.target.value);
+                    setEdited(true);
+                  }}
+                />
+                <span className="settings-layout-scale-value">{scaleValue}%</span>
+                <button
+                  type="button"
+                  className="settings-layout-icon-btn"
+                  disabled={scaleValue === defaultUiLayout.sizes.uiScale}
+                  title={(locale.settingsLayoutScaleReset || "Back to {scale}%").replace("{scale}", defaultUiLayout.sizes.uiScale)}
+                  onClick={() => {
+                    setUiScale(String(defaultUiLayout.sizes.uiScale));
+                    setEdited(true);
+                  }}
+                >
+                  <FiRotateCcw size={11} />
+                </button>
+              </div>
               <div className="field-descr">
-                {locale.settingsLayoutCanvasHint || "Click a panel in the preview to edit it. Drag panels to reorder them, or drag their edge to resize."}
+                {locale.settingsLayoutCanvasHint || "Click an element in the preview to show or hide it: hidden ones stay outlined. Drag panels to reorder them, or drag their edge to resize."}
               </div>
               <div className="field">
                 <button type="button" className="topcoat-button--large" onClick={resetUiLayout}>
@@ -1821,159 +2455,48 @@ const SettingsModal = React.memo(function SettingsModal() {
         );
       }
 
-      case "behavior":
-        return (
-          <div className="fields">
-            <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupExperimental || "Experimental"}</div>
-              <div className="settings-checkbox-grid">
-                {renderToggle(
-                  inlineTextShapeR,
-                  changeInlineTextShapeR,
-                  <React.Fragment>
-                    {locale.settingsInlineTextShapeRLabel || "TextShapeR"}
-                    <b className="settings-new-badge">{locale.settingsNewBadge || "New"}</b>
-                  </React.Fragment>,
-                  locale.settingsInlineTextShapeRHint || "Shows text shape suggestions directly in the main panel. This may impact performance."
-                )}
-                {inlineTextShapeR && renderToggle(
-                  dehyphenateTextShapeR,
-                  changeDehyphenateTextShapeR,
-                  locale.settingsDehyphenateLabel || "TextShapeR: join words split by hyphenation",
-                  locale.settingsDehyphenateHint || "When shaping text, joins words split across line breaks. Turn off if real compound words should stay separated."
-                )}
-                {renderToggle(
-                  multiTabEnabled,
-                  changeMultiTabEnabled,
-                  <React.Fragment>
-                    {locale.settingsMultiTabLabel || "Multi-tab"}
-                    <b className="settings-new-badge">{locale.settingsNewBadge || "New"}</b>
-                  </React.Fragment>,
-                  locale.settingsMultiTabHint || "Manage several series at once with tabs above the text block, each with its own text and PSD sync."
-                )}
-              </div>
-            </div>
-            <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupTextPositioning || "Text positioning"}</div>
-              <div className="settings-checkbox-grid">
-                {renderToggle(
-                  multiBubbleMode,
-                  changeMultiBubbleMode,
-                  locale.multiBubbleModeToggle || "Multi-Bubble Mode",
-                  <React.Fragment>
-                    {locale.multiBubbleModeHint || "Allows capturing multiple selections to insert multiple texts at once"}
-                    <button
-                      type="button"
-                      className="settings-help-badge"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        window.cep && window.cep.util && window.cep.util.openURLInDefaultBrowser('https://youtu.be/gmIh-eEj2HY');
-                      }}
-                      title={locale.multiBubbleModeHowToUse || "How to use"}
-                    >
-                      <FiPlayCircle size={12} />
-                      {locale.multiBubbleModeHowToUse || "How to use"}
-                    </button>
-                  </React.Fragment>
-                )}
-              </div>
-              <div className="field">
-                <div className="field-label">{locale.settingsInternalPaddingLabel || "Internal padding (px)"}</div>
-                <div className="field-input">
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={internalPadding}
-                    onChange={changeInternalPadding}
-                    className="topcoat-text-input--large"
-                  />
-                </div>
-                <div className="field-descr">{locale.settingsInternalPaddingHint || "Internal space to prevent text from touching bubble edges (0-100 pixels)"}</div>
-              </div>
-            </div>
-            <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupStyles || "Styles"}</div>
-              <div className="settings-checkbox-grid">
-                {renderToggle(
-                  autoScrollStyle,
-                  changeAutoScrollStyle,
-                  locale.settingsAutoScrollStyleLabel,
-                  locale.settingsAutoScrollStyleHint || "Automatically scrolls to selected style"
-                )}
-                {renderToggle(
-                  currentFolderTagPriority,
-                  changeCurrentFolderTagPriority,
-                  locale.settingsCurrentFolderTagPriorityLabel,
-                  locale.settingsCurrentFolderTagPriorityHint ||
-                    "Prevents script tags from selecting a style from another folder"
-                )}
-                {renderToggle(
-                  showQuickStyleSize,
-                  changeShowQuickStyleSize,
-                  locale.settingsQuickStyleSizeLabel || "Show style size presets",
-                  locale.settingsQuickStyleSizeHint || "Display the clickable size presets on each style."
-                )}
-              </div>
-              <div className="field">
-                <div className="field-label">{locale.settingsQuickStyleSizeStepLabel || "Quick size step"}</div>
-                <div className="field-input">
-                  <input
-                    type="number"
-                    min="0.01"
-                    step="any"
-                    value={styleSizeStep}
-                    onChange={changeStyleSizeStep}
-                    onBlur={resetStyleSizeStep}
-                    className="topcoat-text-input--large"
-                  />
-                </div>
-                <div className="field-descr">
-                  {locale.settingsQuickStyleSizeStepHint || "Sets the increment used when editing size presets."}
-                </div>
-              </div>
-            </div>
-            <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupAutomations || "Automations"}</div>
-              <div className="settings-checkbox-grid">
-                {renderToggle(
-                  autoClosePSD,
-                  changeAutoClosePSD,
-                  locale.settingsAutoClosePsdLabel,
-                  locale.settingsAutoClosePsdHint || "Automatically closes PSD files after processing"
-                )}
-              </div>
-            </div>
-          </div>
-        );
-
       case "shortcuts":
         return (
           <div className="fields">
             <div className="settings-group">
-              <div className="settings-group-title">{locale.shortcut}</div>
               <div className="field-descr">
                 {locale.settingsShortcutsHint || "Click a shortcut and press the new key combination."}
               </div>
-              <div className="shortcut-list">
-                {shortcutCommands.map((command) => (
-                  <Shortcut
-                    key={command.id}
-                    value={shortcutDraft[command.id] || []}
-                    index={command.id}
-                    modifierOnly={command.modifierOnly === true}
-                    onChange={changeShortcut}
-                    conflict={shortcutConflicts[command.id]
-                      ? (locale.shortcutConflict || "Also assigned to: {actions}")
-                        .replace("{actions}", shortcutConflicts[command.id])
-                      : shortcutModifierOverlaps[command.id]
-                        ? (locale.shortcutModifierOverlap || "Always combined with: {actions}")
-                          .replace("{actions}", shortcutModifierOverlaps[command.id])
-                        : ""}
-                  />
-                ))}
+            </div>
+            {keyboardAccess === "missing" && (
+              <div className="settings-group">
+                <div className="field-descr">{locale.settingsKeyboardAccessText}</div>
+                <div className="field">
+                  <button type="button" className="topcoat-button--large" onClick={openKeyboardAccessSettings}>
+                    {locale.settingsKeyboardAccessOpen}
+                  </button>
+                </div>
               </div>
+            )}
+            {shortcutGroups.map((group) => (
+              <div className="settings-group" key={group.id}>
+                <div className="settings-group-title">{group.label}</div>
+                <div className="shortcut-list">
+                  {group.commands.map((command) => (
+                    <Shortcut
+                      key={command.id}
+                      value={shortcutDraft[command.id] || []}
+                      index={command.id}
+                      modifierOnly={command.modifierOnly === true}
+                      onChange={changeShortcut}
+                      conflict={shortcutConflicts[command.id]
+                        ? (locale.shortcutConflict || "Also assigned to: {actions}")
+                          .replace("{actions}", shortcutConflicts[command.id])
+                        : shortcutModifierOverlaps[command.id]
+                          ? (locale.shortcutModifierOverlap || "Always combined with: {actions}")
+                            .replace("{actions}", shortcutModifierOverlaps[command.id])
+                          : ""}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+            <div className="settings-group">
               <div className="field">
                 <button type="button" className="topcoat-button--large" onClick={resetShortcuts}>
                   <FiRotateCcw size={14} /> {locale.settingsResetShortcuts || "Reset shortcuts"}
@@ -1989,80 +2512,6 @@ const SettingsModal = React.memo(function SettingsModal() {
       case "fontViewer":
         return <FontViewer />;
 
-      case "data":
-        return (
-          <div className="fields">
-            <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupImportExport || "Import/Export"}</div>
-              <FontScanPromo />
-              <div className="field">
-                <button className="topcoat-button--large" onClick={importSettings}>
-                  <FaFileImport size={18} /> {locale.settingsImport}
-                </button>
-              </div>
-              <div className="field">
-                <button className="topcoat-button--large" onClick={exportSettings}>
-                  <FaFileExport size={18} /> {locale.settingsExport}
-                </button>
-              </div>
-            </div>
-            <TextShapeRTraining onImportLearning={importShapeTuning} onExportLearning={exportShapeTuning} />
-            <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupDiagnostics || "Diagnostics"}</div>
-              <div className="settings-checkbox-grid">
-                {renderToggle(
-                  perfDebug,
-                  changePerfDebug,
-                  locale.settingsPerfDebugLabel || "Performance logger",
-                  locale.settingsPerfDebugHint ||
-                    "Measures Photoshop calls, redraws and click latency. Leave it off unless the panel feels slow."
-                )}
-              </div>
-              {perfDebug && (
-                <div className="field" style={{ display: "flex", gap: 8 }}>
-                  <button className="topcoat-button--large" onClick={showPerfReport}>
-                    {locale.settingsPerfDebugReport || "Performance report"}
-                  </button>
-                  <button className="topcoat-button--large" onClick={resetPerfDebug}>
-                    {locale.settingsPerfDebugReset || "Reset counters"}
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupCache || "Cache"}</div>
-              <div className="field">
-                <button
-                  type="button"
-                  className="topcoat-button--large"
-                  onClick={clearCache}
-                  disabled={!cacheInfo.supported || cacheInfo.bytes === 0}
-                >
-                  <FiTrash2 size={18} /> {locale.settingsClearCache || "Clear cache"}
-                </button>
-              </div>
-              <div className="field-descr">
-                {(locale.settingsCacheAccumulated || "Accumulated cache: {size}")
-                  .replace("{size}", formatCacheBytes(cacheInfo.bytes))}
-              </div>
-              <div className="field-descr">
-                {locale.settingsClearCacheHint || "Deletes TypeR's temporary browser files without touching texts, tabs, settings, styles, themes, or saved states."}
-              </div>
-            </div>
-            <div className="settings-group">
-              <div className="settings-group-title">{locale.settingsGroupDanger || "Danger zone"}</div>
-              <div className="field">
-                <button type="button" className="topcoat-button--large settings-danger-btn" onClick={resetStorage}>
-                  {locale.settingsResetProfile}
-                </button>
-              </div>
-              <div className="field-descr">
-                {locale.settingsResetProfileHint}
-              </div>
-            </div>
-          </div>
-        );
-
       default:
         return null;
     }
@@ -2071,7 +2520,26 @@ const SettingsModal = React.memo(function SettingsModal() {
   return (
     <React.Fragment>
       <div className="app-modal-header hostBrdBotContrast">
-        <div className="app-modal-title">{locale.settingsTitle}</div>
+        <div className="app-modal-title settings-title">{locale.settingsTitle}</div>
+        <div className="settings-search">
+          <FiSearch size={14} />
+          <input
+            ref={searchInputRef}
+            type="text"
+            className="topcoat-textarea"
+            spellCheck={false}
+            value={searchQuery}
+            placeholder={locale.settingsSearchPlaceholder}
+            aria-label={locale.settingsSearchPlaceholder}
+            onChange={(e) => changeSearchQuery(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+          />
+          {searchQuery ? (
+            <button type="button" className="topcoat-icon-button--quiet" title={locale.fontViewerClearSearch} onClick={() => changeSearchQuery("")}>
+              <FiX size={14} />
+            </button>
+          ) : null}
+        </div>
         <button className="topcoat-icon-button--large--quiet" title={locale.close} onClick={close}>
           <FiX size={18} />
         </button>
@@ -2084,11 +2552,14 @@ const SettingsModal = React.memo(function SettingsModal() {
               return (
                 <button
                   key={tab.id}
-                  className={`settings-tab ${activeTab === tab.id ? 'settings-tab--active' : ''}${tab.disabled ? ' settings-tab--disabled' : ''}`}
+                  className={`settings-tab ${activeTab === tab.id && !searching ? 'settings-tab--active' : ''}${tab.disabled ? ' settings-tab--disabled' : ''}`}
+                  data-tour={"settings-" + tab.id}
                   aria-disabled={tab.disabled || undefined}
                   title={tab.disabled ? tab.disabledTitle : tab.label}
                   onClick={() => {
-                    if (!tab.disabled) setActiveTab(tab.id);
+                    if (tab.disabled) return;
+                    setActiveTab(tab.id);
+                    changeSearchQuery("");
                   }}
                 >
                   <IconComponent size={16} />
@@ -2097,8 +2568,19 @@ const SettingsModal = React.memo(function SettingsModal() {
               );
             })}
           </div>
+          {searching && (
+            <SettingsSearchResults
+              query={searchQuery}
+              results={searchResults}
+              highlight={searchHighlight}
+              onOpen={openSearchResult}
+              onHighlight={setSearchHighlight}
+            />
+          )}
+          {/* Stays mounted under the results: the tabs keep their own state */}
           <form
-            className={`settings-content${activeTab === "fontViewer" ? " settings-content--font-viewer" : ""}`}
+            ref={settingsFormRef}
+            className={`settings-content${activeTab === "fontViewer" ? " settings-content--font-viewer" : ""}${searching ? " settings-content--hidden" : ""}`}
             onSubmit={activeTab === "fontViewer" ? (event) => event.preventDefault() : save}
           >
             {renderTabContent()}
@@ -2144,29 +2626,12 @@ const SettingsModal = React.memo(function SettingsModal() {
             </div>
           </div>
         )}
-        {multiTabConfirmOpen && (
-          <div className="settings-confirm-overlay" onClick={cancelDisableMultiTab}>
-            <div className="settings-confirm-dialog hostBgdLight" onClick={(e) => e.stopPropagation()}>
-              <div className="settings-confirm-icon">
-                <FiAlertTriangle size={26} />
-              </div>
-              <div className="settings-confirm-title">
-                {locale.settingsMultiTabDisableTitle || "Disable multi-tab?"}
-              </div>
-              <div className="settings-confirm-text">
-                {(locale.settingsMultiTabDisableConfirm || 'All tabs other than "{name}" will be lost.')
-                  .replace("{name}", (context.state.tabs || [])[0]?.name || "")}
-              </div>
-              <div className="settings-confirm-actions">
-                <button type="button" className="topcoat-button--large" onClick={cancelDisableMultiTab}>
-                  {locale.cancel || "Cancel"}
-                </button>
-                <button type="button" className="topcoat-button--large--cta settings-confirm-danger" onClick={confirmDisableMultiTab}>
-                  {locale.settingsMultiTabDisableAction || "Disable"}
-                </button>
-              </div>
-            </div>
-          </div>
+        {missingFontsImport && (
+          <MissingFontsDialog
+            fonts={missingFontsImport.fonts}
+            message={missingFontsImport.message}
+            onClose={() => setMissingFontsImport(null)}
+          />
         )}
         {discardConfirmOpen && (
           <UnsavedChangesDialog

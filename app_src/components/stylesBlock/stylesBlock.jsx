@@ -1,4 +1,4 @@
-import { serializeStyle } from "../../librarySerialization";
+import { buildFolderExport } from "../../librarySerialization";
 import "./stylesBlock.scss";
 
 import React from "react";
@@ -11,11 +11,13 @@ import { CiExport } from "react-icons/ci";
 import config from "../../config";
 import { locale, nativeAlert, nativeConfirm, getActiveLayerText, setActiveLayerText, rgbToHex, getStyleObject, getUserFonts, refreshUserFonts } from "../../utils";
 import { useContext } from "../../context";
+import ExportFolderDialog from "../modal/exportFolderDialog";
 import { buildFolderTree } from "../../folderUtils";
 import { collectFontRefs, exportZipWithFonts } from "../../fontFileExport";
 import { createFontPreviewRegistry, getFontPreviewFamily } from "../../fontPreview";
 import { notePerfRender } from "../../perfDebug";
-import { getStyleTextSize, normalizeStyleSizePresets } from "../../styleSizePresets";
+import { getStyleTextSize, normalizeStyleSizePresets, parseStyleSize, sanitizeStyleSizeInput, stepStyleSize } from "../../styleSizePresets";
+import { isStyleStrokeOn } from "../../styleStroke";
 
 const FontPreviewContext = React.createContext({ aliases: {}, css: "", revision: 0 });
 const emptyIdSet = new Set();
@@ -26,8 +28,6 @@ const StylesBlock = React.memo(function StylesBlock() {
     styles: state.styles,
     folders: state.folders,
     currentStyle: state.currentStyle,
-    exportFolderFontTipVisible: state.exportFolderFontTipVisible,
-    exportFolderFontTipDismissed: state.exportFolderFontTipDismissed,
     showTips: state.showTips,
     openFolders: state.openFolders,
     currentStyleId: state.currentStyleId,
@@ -56,6 +56,8 @@ const StylesBlock = React.memo(function StylesBlock() {
   }, [context.dispatch]);
 
   const openFolderContextMenu = React.useCallback((e, folderId) => {
+    // The export dialog is a portal: its events bubble here through the React tree
+    if (!e.currentTarget.contains(e.target)) return;
     e.preventDefault();
     e.stopPropagation();
     setStyleContextMenu({ type: "folder", folderId: folderId || null, x: e.clientX, y: e.clientY });
@@ -109,6 +111,19 @@ const StylesBlock = React.memo(function StylesBlock() {
     });
   }, [styleContextMenu, context.dispatch, closeStyleContextMenu]);
 
+  // The folder under the cursor receives a new style. A new folder stays at the
+  // root like the footer button, which small panels hide: their list can be full,
+  // and the header of each folder already has its subfolder button.
+  const addContextStyle = React.useCallback(() => {
+    context.dispatch({ type: "setModal", modal: "editStyle", data: { create: true, folder: styleContextMenu?.folderId || "" } });
+    closeStyleContextMenu();
+  }, [styleContextMenu, context.dispatch, closeStyleContextMenu]);
+
+  const addContextFolder = React.useCallback(() => {
+    context.dispatch({ type: "setModal", modal: "editFolder", data: { create: true } });
+    closeStyleContextMenu();
+  }, [context.dispatch, closeStyleContextMenu]);
+
   // Fonts are fetched once at panel startup: enumerating app.fonts blocks
   // Photoshop, and refreshing on focus used to swallow clicks on style items
   React.useEffect(() => {
@@ -158,41 +173,14 @@ const StylesBlock = React.memo(function StylesBlock() {
   );
   const unsortedFolder = React.useMemo(() => ({ name: locale.noFolderTitle }), []);
   const hasContent = context.state.folders.length || context.state.styles.length;
-  const showExportFontTip =
-    context.state.exportFolderFontTipVisible &&
-    !context.state.exportFolderFontTipDismissed &&
-    context.state.showTips !== false;
   return (
     <FontPreviewContext.Provider value={fontPreviewRegistry}>
       <style type="text/css">{fontPreviewRegistry.css}</style>
-      {showExportFontTip && (
-        <div className="export-font-tip hostBrdBotContrast">
-          <FiInfo size={14} className="export-font-tip-icon" />
-          <span className="export-font-tip-text">
-            {locale.exportFolderFontTip || "Tip: hold Ctrl while clicking Export folder to also bundle the fonts' .ttf/.otf files in a .zip."}
-          </span>
-          <button
-            type="button"
-            className="export-font-tip-dismiss"
-            onClick={() => context.dispatch({ type: "hideExportFolderFontTip", dismiss: true })}
-          >
-            {locale.dontShowAgain || "Don't show again"}
-          </button>
-          <button
-            type="button"
-            className="export-font-tip-close"
-            title={locale.close}
-            onClick={() => context.dispatch({ type: "hideExportFolderFontTip" })}
-          >
-            <FiX size={14} />
-          </button>
-        </div>
-      )}
       {context.state.showTips !== false && context.state.styleSizeTipVisible && (
         <div className="export-font-tip style-size-tip hostBrdBotContrast" role="status">
           <FiInfo size={14} className="export-font-tip-icon" />
           <span className="export-font-tip-text">
-            {locale.styleSizeStepTip || "Tip: You can change the font size increment in Settings > Behavior > Styles, for example to 0.5 for finer adjustments."}
+            {locale.styleSizeStepTip || "Tip: You can change the font size increment in Settings > Styles > Quick sizes, for example to 0.5 for finer adjustments."}
           </span>
           <button
             type="button"
@@ -204,7 +192,7 @@ const StylesBlock = React.memo(function StylesBlock() {
           </button>
         </div>
       )}
-      <div className="folders-list">
+      <div className="folders-list" onContextMenu={(e) => openFolderContextMenu(e, null)}>
         {hasContent ? (
           <React.Fragment>
             {unsortedStyles.length > 0 && (
@@ -253,7 +241,7 @@ const StylesBlock = React.memo(function StylesBlock() {
           role="menu"
           style={{
             left: Math.max(4, Math.min(styleContextMenu.x, window.innerWidth - 196)),
-            top: Math.max(4, Math.min(styleContextMenu.y, window.innerHeight - (styleContextMenu.type === "style" ? 146 : 42))),
+            top: Math.max(4, Math.min(styleContextMenu.y, window.innerHeight - (styleContextMenu.type === "style" ? 216 : 116))),
           }}
           onMouseDown={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}
@@ -270,10 +258,23 @@ const StylesBlock = React.memo(function StylesBlock() {
           </button>
           {styleContextMenu.type === "style" && (
             <React.Fragment>
-              <button type="button" role="menuitem" onClick={duplicateContextStyle}>
+              <button type="button" role="menuitem" data-tour="duplicate-style" onClick={duplicateContextStyle}>
                 <FiPlusSquare size={15} />
                 <span>{locale.duplicateStyle}</span>
               </button>
+            </React.Fragment>
+          )}
+          <div className="style-context-menu-separator hostBrdTopContrast" />
+          <button type="button" role="menuitem" onClick={addContextStyle}>
+            <FiPlus size={15} />
+            <span>{locale.addStyle}</span>
+          </button>
+          <button type="button" role="menuitem" onClick={addContextFolder}>
+            <FiFolderPlus size={15} />
+            <span>{locale.addFolder}</span>
+          </button>
+          {styleContextMenu.type === "style" && (
+            <React.Fragment>
               <div className="style-context-menu-separator hostBrdTopContrast" />
               <button type="button" role="menuitem" className="m-danger" onClick={deleteContextStyle}>
                 <FiTrash2 size={15} />
@@ -287,7 +288,7 @@ const StylesBlock = React.memo(function StylesBlock() {
         <button className="topcoat-button--large" onClick={() => context.dispatch({ type: "setModal", modal: "editFolder", data: { create: true } })}>
           <FiFolderPlus size={18} /> {locale.addFolder}
         </button>
-        <button className="topcoat-button--large" onClick={() => context.dispatch({ type: "setModal", modal: "editStyle", data: { create: true } })}>
+        <button className="topcoat-button--large" data-tour="add-style" onClick={() => context.dispatch({ type: "setModal", modal: "editStyle", data: { create: true } })}>
           <FiPlus size={18} /> {locale.addStyle}
         </button>
       </div>
@@ -387,6 +388,7 @@ const FolderItem = React.memo(function FolderItem(props) {
   const [dropActive, setDropActive] = React.useState(false);
   const [styleDropTarget, setStyleDropTarget] = React.useState(null);
   const [folderDropEdge, setFolderDropEdge] = React.useState(null);
+  const [exportDialogOpen, setExportDialogOpen] = React.useState(false);
   const openFolder = React.useCallback((e) => {
     e.stopPropagation();
     props.dispatch({ type: "setModal", modal: "editFolder", data: props.data });
@@ -512,31 +514,19 @@ const FolderItem = React.memo(function FolderItem(props) {
     setStyleDropTarget(null);
   }, []);
 
-  const exportFolder = React.useCallback((e) => {
-    e.stopPropagation();
-    // Ctrl/Cmd+Click also bundles the folder's font files into a .zip
-    const withFonts = e.ctrlKey || e.metaKey;
+  // File dialogs and writes return promises in the UXP plugin
+  const exportFolder = React.useCallback(async (withFonts) => {
+    setExportDialogOpen(false);
     const ext = withFonts ? "zip" : "json";
-    const pathSelect = window.cep.fs.showSaveDialogEx(false, false, [ext], props.data.name + "." + ext);
+    const pathSelect = await window.cep.fs.showSaveDialogEx(false, false, [ext], props.data.name + "." + ext);
     if (!pathSelect?.data) return false;
-    const exportedFolder = {};
-    exportedFolder.name = props.data.name;
-    const exportedStyles = styles.map((style) => ({
-      ...serializeStyle(style),
-      name: style.name,
-      textType: style.textType || "inherit",
-      textProps: style.textProps,
-      prefixes: style.prefixes || [],
-      prefixColor: style.prefixColor,
-      stroke: style.stroke,
-    }));
-    exportedFolder.exportedStyles = exportedStyles;
+    const { data: exportedFolder, styles: exportedStyles } = buildFolderExport(props.data, props.stylesByFolder);
     if (withFonts) {
-      const result = exportZipWithFonts({
+      const result = await exportZipWithFonts({
         zipPath: pathSelect.data,
         jsonFileName: props.data.name + ".json",
         jsonString: JSON.stringify(exportedFolder),
-        fontRefs: collectFontRefs(styles),
+        fontRefs: collectFontRefs(exportedStyles),
       });
       if (!result.ok) {
         nativeAlert(locale.exportFontFilesError || "Could not create the .zip archive.", locale.errorTitle, true);
@@ -552,11 +542,16 @@ const FolderItem = React.memo(function FolderItem(props) {
       }
       return;
     }
-    const written = window.cep.fs.writeFile(pathSelect.data, JSON.stringify(exportedFolder));
-    if (!written || written.err) { nativeAlert(locale.saveError, locale.errorTitle, true); return; }
-    // Plain export done: surface the Ctrl+Click zip shortcut once in a while
-    props.dispatch({ type: "showExportFolderFontTip" });
-  }, [props.data.name, styles, props.dispatch]);
+    const written = await window.cep.fs.writeFile(pathSelect.data, JSON.stringify(exportedFolder));
+    if (!written || written.err) nativeAlert(locale.saveError, locale.errorTitle, true);
+  }, [props.data, props.stylesByFolder]);
+
+  const openExportDialog = React.useCallback((e) => {
+    e.stopPropagation();
+    setExportDialogOpen(true);
+  }, []);
+
+  const closeExportDialog = React.useCallback(() => setExportDialogOpen(false), []);
 
   const duplicateFolder = React.useCallback((e) => {
     e.stopPropagation();
@@ -590,12 +585,12 @@ const FolderItem = React.memo(function FolderItem(props) {
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleStyleDrop}
+      onContextMenu={(e) => props.onOpenFolderContextMenu(e, props.data.id || null)}
     >
       <div
         className="folder-header"
         style={{ paddingLeft: props.depth ? props.depth * 12 + 4 : 4 }}
         onClick={toggleFolder}
-        onContextMenu={(e) => props.onOpenFolderContextMenu(e, props.data.id || null)}
         draggable={!!props.data.id}
         onDragStart={startFolderDrag}
         onDragEnd={endFolderDrag}
@@ -611,7 +606,7 @@ const FolderItem = React.memo(function FolderItem(props) {
               <button className="topcoat-icon-button--large--quiet" title={locale.addSubfolder || "Add subfolder"} onClick={addSubfolder}>
                 <FiFolderPlus size={14} />
               </button>
-              <button className="topcoat-icon-button--large--quiet" title={locale.exportFolder + " (" + (locale.exportFolderZipHint || "Ctrl+Click: .zip with font files") + ")"} onClick={exportFolder}>
+              <button className="topcoat-icon-button--large--quiet" title={locale.exportFolder} onClick={openExportDialog}>
                 <CiExport size={14} />
               </button>
               <button className="topcoat-icon-button--large--quiet" title={locale.editFolder} onClick={openFolder}>
@@ -626,6 +621,9 @@ const FolderItem = React.memo(function FolderItem(props) {
           )}
         </div>
       </div>
+      {exportDialogOpen && (
+        <ExportFolderDialog folderName={props.data.name} onChoose={exportFolder} onCancel={closeExportDialog} />
+      )}
       {isOpen && (
         <div className="folder-content">
           {!!childFolders.length && props.data.id && (
@@ -716,7 +714,6 @@ const StyleItem = React.memo(function StyleItem(props) {
   const quickWrapRef = React.useRef(null);
   const displaySize = quickSizeOverride !== null ? quickSizeOverride : (activeSize || "");
   const sizeStep = Number(props.styleSizeStep) > 0 ? Number(props.styleSizeStep) : 1;
-  const sizeStepDecimals = (sizeStep.toString().split(".")[1] || "").length;
 
   React.useEffect(() => () => {
     if (quickCloseTimeout.current) clearTimeout(quickCloseTimeout.current);
@@ -725,6 +722,7 @@ const StyleItem = React.memo(function StyleItem(props) {
   // StyleItem now handles its own select/open dispatch instead of receiving closures as props
   const selectStyle = React.useCallback(() => {
     dispatch({ type: "setCurrentStyleId", id: props.style.id });
+    dispatch({ type: "showFeatureTip", id: "numpadStyles" });
   }, [dispatch, props.style.id]);
 
   const openStyle = React.useCallback((e) => {
@@ -744,12 +742,14 @@ const StyleItem = React.memo(function StyleItem(props) {
         if (!nextTextStyle) return;
         nextTextStyle.size = activeTextStyle.size;
         styleWithActiveSize.autoSizeByPageWidth = false;
+        delete styleWithActiveSize.punctuationOnlyScale;
         setActiveLayerText("", styleWithActiveSize, direction);
       });
     } else {
       setActiveLayerText("", props.style, direction);
+      dispatch({ type: "showFeatureTip", id: "applyStyleKeepSize" });
     }
-  }, [props.direction, props.style]);
+  }, [dispatch, props.direction, props.style]);
 
   const togglePrefixes = React.useCallback((e) => {
     e.stopPropagation();
@@ -776,23 +776,26 @@ const StyleItem = React.memo(function StyleItem(props) {
   };
   const stopQuickEvent = (e) => e.stopPropagation();
   const applyQuickSize = (value) => {
-    const size = parseFloat(value);
-    if (!Number.isFinite(size) || size <= 0) return;
+    const size = parseStyleSize(value);
+    if (size === null) return;
     dispatch({ type: "updateActiveStyleSizePreset", id: props.style.id, size });
   };
   const changeQuickSize = (e) => {
     stopQuickEvent(e);
-    const value = e.target.value;
+    const value = sanitizeStyleSizeInput(e.target.value);
     setQuickSizeOverride(value);
     if (value !== "") applyQuickSize(value);
   };
   const nudgeQuickSize = (delta) => (e) => {
     stopQuickEvent(e);
-    const baseValue = parseFloat(quickSizeOverride ?? activeSize ?? 1);
-    const rounded = Math.round((baseValue + delta * sizeStep) / sizeStep) * sizeStep;
-    const nextValue = Math.max(1, parseFloat(rounded.toFixed(sizeStepDecimals)));
+    const nextValue = stepStyleSize(quickSizeOverride || activeSize, delta, sizeStep);
     setQuickSizeOverride(nextValue);
     applyQuickSize(nextValue);
+  };
+  const keyDownQuickSize = (e) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    nudgeQuickSize(e.key === "ArrowUp" ? 1 : -1)(e);
   };
   const startDrag = React.useCallback((e) => {
     currentDraggingStyleId = props.style.id;
@@ -836,6 +839,7 @@ const StyleItem = React.memo(function StyleItem(props) {
   return (
     <div
       id={props.style.id}
+      style={isStyleStrokeOn(props.style) ? { boxShadow: "inset 0 0 0 2px " + rgbToHex(props.style.stroke.color) } : undefined}
       className={
         "style-item hostBgdLight" +
         (props.active ? " m-current" : "") +
@@ -901,7 +905,7 @@ const StyleItem = React.memo(function StyleItem(props) {
             onMouseDown={stopQuickEvent}
             onClick={stopQuickEvent}
           >
-            <button className={"topcoat-icon-button--large--quiet" + (props.active ? " m-cta" : "")} title={locale.editStyle} onClick={openStyle}>
+            <button className={"topcoat-icon-button--large--quiet" + (props.active ? " m-cta" : "")} data-tour="edit-style" title={locale.editStyle} onClick={openStyle}>
               <MdEdit size={16} />
             </button>
             <div className="style-quick-size hostBrdContrast" title={locale.editStyleFontSize || "Font size"}>
@@ -909,11 +913,11 @@ const StyleItem = React.memo(function StyleItem(props) {
                 <FiMinus size={12} />
               </button>
               <input
-                type="number"
-                min={1}
-                step={sizeStep}
+                type="text"
+                inputMode="decimal"
                 value={displaySize}
                 onChange={changeQuickSize}
+                onKeyDown={keyDownQuickSize}
                 onBlur={() => setQuickSizeOverride(null)}
                 className="style-quick-size-input"
               />
@@ -923,11 +927,11 @@ const StyleItem = React.memo(function StyleItem(props) {
             </div>
           </div>
         ) : (
-          <button className={"topcoat-icon-button--large--quiet" + (props.active ? " m-cta" : "")} title={locale.editStyle} onClick={openStyle}>
+          <button className={"topcoat-icon-button--large--quiet" + (props.active ? " m-cta" : "")} data-tour="edit-style" title={locale.editStyle} onClick={openStyle}>
             <MdEdit size={16} />
           </button>
         )}
-        <button className={"topcoat-icon-button--large--quiet" + (props.active ? " m-cta" : "")} title={locale.insertStyle} onClick={insertStyle}>
+        <button className={"topcoat-icon-button--large--quiet" + (props.active ? " m-cta" : "")} data-tour="apply-style" title={locale.insertStyle} onClick={insertStyle}>
           <FiArrowRightCircle size={16} />
         </button>
       </div>
