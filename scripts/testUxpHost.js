@@ -392,10 +392,11 @@ shapes.forEach((bounds) => {
 
 /* ---------------- where a new text goes in the layer stack ---------------- */
 
-// A new text is released from a clipping mask, then brought to the front of
-// its folder with Photoshop's ordinal move: no index arithmetic (a background
-// layer and every folder shift the indexes).
-const stackPhotoshop = (answers) => ({ action: { batchPlay: (commands) => [answers(commands[0])] }, app: {}, core: {}, constants: { LayerKind: {} } });
+// Root text uses an ordinal move; folder placement is covered by testTextLayerStack.js.
+const stackPhotoshop = (answers) => ({
+  action: { batchPlay: (commands) => [answers(commands[0])] },
+  app: { activeDocument: { activeLayers: [{ parent: null }] } }, core: {}, constants: { LayerKind: {} },
+});
 const raiseCalls = [];
 const raisePort = loadPortModule(stackPhotoshop((command) => {
   raiseCalls.push(command);

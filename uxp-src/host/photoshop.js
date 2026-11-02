@@ -1880,14 +1880,8 @@ function _stripDirection(paragraphRanges) {
   }
 }
 
-// Photoshop makes a layer right above the active one, so under whatever is
-// higher up, and clipped when the active one is. A new text must not stay
-// there: it is released from the clipping mask, then brought to the front,
-// which Photoshop keeps inside the layer's folder (Layer > Arrange > Bring to
-// Front). No index arithmetic: layer indexes shift with a background layer and
-// with every folder, and the 3.0.1 index move misplaced texts under the clean
-// layer. It only decides where the text sits, so a refusal must not fail the
-// paste; Photoshop refuses the move when the layer is already in front.
+// Release inherited clipping, then raise within the current folder: an ordinal
+// front move targets the document root. A refusal must not fail the paste.
 function _raiseNewTextLayer() {
   try {
     if (get([{ _property: "group" }, TARGET_LAYER]).group) {
@@ -1897,6 +1891,12 @@ function _raiseNewTextLayer() {
     if (!(releaseError instanceof PhotoshopError)) console.warn("TypeR: clipping release", (releaseError && releaseError.message) || releaseError);
   }
   try {
+    const layer = ps.app.activeDocument.activeLayers[0];
+    if (layer.parent) {
+      const first = layer.parent.layers[0];
+      if (first && first.id !== layer.id) layer.move(first, ps.constants.ElementPlacement.PLACEBEFORE);
+      return;
+    }
     play({ _obj: "move", _target: [TARGET_LAYER], to: { _ref: "layer", _enum: "ordinal", _value: "front" } });
   } catch (moveError) {
     if (!(moveError instanceof PhotoshopError)) console.warn("TypeR: raise", (moveError && moveError.message) || moveError);

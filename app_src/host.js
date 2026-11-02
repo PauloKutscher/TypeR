@@ -2921,14 +2921,8 @@ function _applyRichTextRanges(textParams, textRuns, textLength) {
   return true;
 }
 
-// Photoshop makes a layer right above the active one, so under whatever is
-// higher up, and clipped when the active one is. A new text must not stay
-// there: it is released from the clipping mask, then brought to the front,
-// which Photoshop keeps inside the layer's folder (Layer > Arrange > Bring to
-// Front). No index arithmetic: layer indexes shift with a background layer and
-// with every folder, and the 3.0.1 index move misplaced texts under the clean
-// layer. It only decides where the text sits, so a refusal must not fail the
-// paste; Photoshop refuses the move when the layer is already in front.
+// Release inherited clipping, then raise within the current folder: an ordinal
+// front move targets the document root. A refusal must not fail the paste.
 function _raiseNewTextLayer() {
   var target = new ActionReference();
   target.putEnumerated(charID.Layer, charID.Ordinal, charID.Target);
@@ -2941,6 +2935,12 @@ function _raiseNewTextLayer() {
     }
   } catch (releaseError) {}
   try {
+    var layer = app.activeDocument.activeLayer;
+    if (layer.parent.typename === "LayerSet") {
+      var first = layer.parent.layers[0];
+      if (first && first.id !== layer.id) layer.move(first, ElementPlacement.PLACEBEFORE);
+      return;
+    }
     var destination = new ActionReference();
     destination.putEnumerated(charID.Layer, charID.Ordinal, charIDToTypeID("Frnt"));
     var move = new ActionDescriptor();

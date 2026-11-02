@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.2 — PauloKutscher fork (rebuild)
+
+- Keep pasted text inside the selected folder, including empty and nested folders, in UXP and CEP. Raise it before the folder's first child rather than moving it to the document root.
+- Preserve unclipping and the Auto clean fixes: text remains above `TypeR Clean`, including multi-bubble pastes and documents with a background layer. Cover both regressions with simulated layer ownership and stack-order tests.
+- Integrate the rewritten upstream shortcut commit `411c9f2` into the fork's history; its files are identical to the previously integrated `4d940ea`.
+
 ## 3.0.2
 
 - Fix the text pasted with Auto clean landing under the `TypeR Clean` layer, hidden by its fill, since 3.0.1: the text is made above the clean layer again, in the user's folder when that folder sits above it, and a new text is brought to the front of its folder with Photoshop's own command instead of a computed layer index (which also raised a Photoshop error on some documents).
