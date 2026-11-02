@@ -101,7 +101,10 @@ no load reported after 5 s sets the address once more, and no message from the p
 notice with the versions, the view's size, the load events and, on Windows, the WebView2 versions present
 (reported by `panelStart.js`). Once the bridge answers, the app has up to 15 s to finish initializing;
 repeated bridge messages do not extend that deadline. Only the app-ready message clears the loading
-notice. Hiding the panel suspends the deadlines and showing it starts a fresh waiting period. The native
+notice. Hiding the panel suspends the deadlines and showing it starts a fresh waiting period. The notice
+leaves the WebView in place: Photoshop 27.7 can take far longer than before to start it (its renderer is
+gone once the last WebView closes and starts cold), and a hidden WebView never loads (see
+`docs/uxp-startup-reproduction.md`), so a late start still opens the panel by itself. The native
 **Reload TypeR** button saves pending settings writes and recreates the WebView.
 
 `npm run package:uxp:debug` writes `Releases/TypeR-DEBUG-Windows-EN.zip`: the support build adds an independent
@@ -131,6 +134,22 @@ before and after sampling. The panel does not need focus. No keyboard hooks,
 background processes, network calls or keyboard state files are used. Mouse side
 buttons use edges; very short taps can be missed while the UXP scripting thread
 is busy. The existing key aliases and shortcut formats are preserved.
+
+The snapshot also carries `focusStolen` (issue #214). Photoshop's rich tooltips, the
+contextual task bar's among them, are dialog-class (`#32770`) layered popups shown
+without `WS_EX_NOACTIVATE`: on Windows they take the keyboard focus, and every
+shortcut (tool keys, `Ctrl+T`) dies until the user clicks the document or switches
+applications. After a paste on click or TextShapeR, that bar settles under the
+cursor with the new text layer, so its tooltip opens at once. The addon reads the
+focus window of the foreground thread (`GetGUIThreadInfo`, read only) and reports a
+captionless layered `#32770` owned by the enabled main window; a real dialog,
+Photoshop's (`PSFloatC`) or UXP's, has a caption and disables its owner.
+`keysAddon.js` reports a theft once, then once a second while it lasts, and
+`main.js` gives the focus back with `app.bringToFront()` from a modal scope: the
+only call that restored it in the live tests (`performMenuCommand` 1208 and a
+document `select` did nothing; focusing the panel's own DOM also worked but moved
+the focus to the panel). Photoshop busy (a text being edited, a dialog) leaves the
+focus as it was, like before. macOS has no such reader and no report of the bug.
 
 The keyboard Debug tab is disabled in the settings and their search index for
 production. A previously saved Debug tab falls back to Insertion.
