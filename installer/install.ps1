@@ -558,7 +558,7 @@ function Expand-TypeRPackage([string]$PackagePath, [string]$Destination) {
         if (-not $ManifestEntry -or $ManifestEntry.Length -gt 1MB) { throw 'Not a TypeR package: missing or invalid manifest.json' }
         $Reader = New-Object IO.StreamReader($ManifestEntry.Open(), [Text.Encoding]::UTF8)
         try { $Manifest = $Reader.ReadToEnd() | ConvertFrom-Json } finally { $Reader.Dispose() }
-        if ($Manifest.id -ne 'com.scanr.typer' -or [string]$Manifest.version -notmatch '^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$' -or $Manifest.host.app -ne 'PS' -or [string]$Manifest.host.minVersion -notmatch '^\d+(\.\d+){0,3}$' -or -not $Manifest.main) { throw 'Invalid TypeR manifest.' }
+        if ($Manifest.id -ne 'com.scanr.typer' -or [string]$Manifest.version -notmatch '^\d+\.\d+\.\d+(\.\d+)?([+-][0-9A-Za-z.-]+)?$' -or $Manifest.host.app -ne 'PS' -or [string]$Manifest.host.minVersion -notmatch '^\d+(\.\d+){0,3}$' -or -not $Manifest.main) { throw 'Invalid TypeR manifest.' }
         foreach ($Required in @('manifest.json', 'host.js', 'index.html', [string]$Manifest.main)) {
             $Entry = $Archive.GetEntry($Required)
             if (-not $Entry -or $Entry.Length -eq 0 -or $Required.EndsWith('/')) { throw "Incomplete TypeR package: $Required" }
@@ -947,7 +947,7 @@ foreach ($Relative in $Required) {
 }
 [xml]$Manifest = Get-Content -LiteralPath (Join-Path $ScriptDir 'CSXS/manifest.xml') -Raw
 $Extension = $Manifest.ExtensionManifest.ExtensionList.Extension | Where-Object { $_.Id -eq 'typer' }
-if ($Manifest.ExtensionManifest.ExtensionBundleId -ne 'com.scanr.typer' -or $Extension.Version -notmatch '^\d+\.\d+\.\d+$' -or $Manifest.ExtensionManifest.ExtensionBundleVersion -ne $Extension.Version) { throw 'Invalid TypeR identity or version' }
+if ($Manifest.ExtensionManifest.ExtensionBundleId -ne 'com.scanr.typer' -or $Extension.Version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$' -or $Manifest.ExtensionManifest.ExtensionBundleVersion -ne $Extension.Version) { throw 'Invalid TypeR identity or version' }
 foreach ($Folder in $Folders) {
     $FolderPath = Join-Path $ScriptDir $Folder
     if ((Get-Item -LiteralPath $FolderPath).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Package contains a link' }

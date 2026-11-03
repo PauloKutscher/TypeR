@@ -47,9 +47,9 @@ try {
   installPackageFiles(files, target, { fs, path, Buffer });
   assert.strictEqual(fs.readFileSync(path.join(target, 'app/old-hashed-chunk.js'), 'utf8'), 'old lazy chunk');
   assert(!fs.existsSync(path.join(target, '.typer-update-journal.json')));
-  Object.keys(files).forEach(name => {
+  Object.keys(fourPart).forEach(name => {
     fs.mkdirSync(path.dirname(path.join(source, name)), { recursive: true });
-    fs.writeFileSync(path.join(source, name), files[name]);
+    fs.writeFileSync(path.join(source, name), fourPart[name]);
   });
   const installer = process.platform === 'win32' ? ['powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.resolve(__dirname, 'helpers/runWindowsInstallerFixture.ps1')]] : ['bash', [path.resolve(__dirname, '../installer/install_mac.sh'), '--silent']];
   const runInstaller = () => spawnSync(installer[0], installer[1], { encoding: 'utf8', env: { ...process.env, TYPER_INSTALL_SOURCE: source, TYPER_INSTALL_TARGET: target, TYPER_INSTALL_SKIP_DEBUG: '1' } });

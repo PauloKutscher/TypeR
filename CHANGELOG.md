@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.3.2 — PauloKutscher fork
+
+- Fix Windows offline installation rejecting four-part UXP and CEP versions. Add native installation regressions for both editions.
+
 ## 3.0.3.1 — PauloKutscher fork
 
 - Integrate upstream 5654de3 and 30860ad: preserve clicked layers after temporary history reads, restore Photoshop focus after UXP document changes, and diagnose missing WebView2 runtimes.

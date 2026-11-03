@@ -198,6 +198,16 @@ try {
         Assert ($Registry.plugins[1].versionString -eq '3.0.0') 'Version not registered'
         Assert ($Registry.plugins[1].path -ceq '$localPlugins\External\com.scanr.typer_3.0.0') 'Photoshop cannot resolve a Windows registration with forward slashes'
     }
+    Test 'Four-part UXP versions install and register unchanged' {
+        New-Plugin $Source '3.0.3.2' 'four-part code'
+        Remove-Item -LiteralPath $PackagePath
+        [IO.Compression.ZipFile]::CreateFromDirectory($Source, $PackagePath)
+        Install-TypeRPluginManually $PackagePath
+        $Installed = Join-Path $UxpPlugins 'com.scanr.typer_3.0.3.2'
+        Assert ((Get-Content -LiteralPath (Join-Path $Installed 'host.js') -Raw) -eq 'four-part code') 'Four-part package not installed'
+        $Registry = Get-Content -LiteralPath $UxpRegistry -Raw | ConvertFrom-Json
+        Assert ($Registry.plugins[0].versionString -eq '3.0.3.2') 'Four-part version changed during registration'
+    }
     Test 'Same-version direct update replaces code, removes stale files, keeps backup' {
         New-Plugin $Direct
         Write-Text (Join-Path $Direct 'obsolete.js') 'stale'
