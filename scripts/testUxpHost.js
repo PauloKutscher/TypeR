@@ -63,6 +63,23 @@ assert.deepStrictEqual(
   { _obj: "grayscale", gray: 100 }
 );
 
+// The style editor stores caps switched off as null (e.g. Manga Murmur/Augie).
+// Photoshop requires the normal enumeration when applying that imported style.
+{
+  const imported = { typeUnit: "pointsUnit", layerText: { textStyleRange: [{ from: 0, to: 27,
+    textStyle: { fontPostScriptName: "Augie", size: 18, syntheticBold: true, fontCaps: null },
+  }] } };
+  const copy = JSON.stringify(imported);
+  const written = jamText.toLayerTextObject(imported).textStyleRange[0].textStyle;
+  assert.deepStrictEqual(written.fontCaps, { _enum: "fontCaps", _value: "normal" }, "an imported null caps flag must not reach Photoshop");
+  assert.strictEqual(written.syntheticBold, true, "keep the preset's faux bold");
+  const cep = {};
+  require("vm").runInNewContext(fs.readFileSync(path.join(root, "app_src/lib/jam/jamText.jsxinc"), "utf8").replace(/^﻿/, ""), cep);
+  const cepStyle = cep.jamText.toLayerTextObject(imported)[1][1].textStyleRange[1][0][1][1].textStyle[1][1];
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(cepStyle.fontCaps)), ["<enumerated>", ["fontCaps", "normal"]]);
+  assert.strictEqual(JSON.stringify(imported), copy, "conversion must not rewrite a saved preset");
+}
+
 // Middle Eastern keys are written back by both hosts: dropping directionType
 // sent every right-to-left layer back to left-to-right
 {
@@ -268,7 +285,7 @@ const loadKeysHelper = () => {
 
 const hostSource = fs.readFileSync(path.join(root, "app_src/host.js"), "utf8");
 const HOST_HELPERS = [
-  "_clone", "_normalizeTextKey", "_getHostDefaultStyle", "_getHostDefaultStroke", "_ensureStyle", "_overrideStyleTextSize", "_setLayerStroke",
+  "_clone", "_normalizeTextKey", "_getHostDefaultStyle", "_getHostDefaultStroke", "_ensureStyle", "_overrideStyleTextSize", "_setLayerStroke", "_bakeDirection", "_stripDirection",
   "_isPunctuationOnlyText", "_scaleStyleForPunctuationOnlyText", "_punctuationOnlyBoxDimensions", "_resolveStylePointText", "_getAdaptiveSelectionOpenRadius", "_calculateSelectionDimensions", "_clampAdjustAmount",
   "_getAdjustedSelectionBoundsFallback", "_buildBoundsShapeRows", "_normalizeShapeSampleCount", "_selectionBoundsKey",
   "_buildPathShapeRows", "_polygonScanlineSpan",
@@ -294,6 +311,28 @@ const loadPortModule = (photoshop) => {
   return mod.exports;
 };
 const port = loadPortModule()._internals;
+
+// The classic fallback and the preset's Apply button share this paragraph pass.
+for (const direction of ["ltr", "rtl"]) {
+  const paragraphs = [{ from: 0, to: 5, paragraphStyle: { alignment: "center" } }, { from: 5, to: 12, paragraphStyle: { hyphenate: false } }];
+  const uxp = JSON.parse(JSON.stringify(paragraphs));
+  const cep = JSON.parse(JSON.stringify(paragraphs));
+  assert.doesNotThrow(() => host._bakeDirection(cep, direction), "CEP direction must depend on the supplied paragraphs");
+  assert.doesNotThrow(() => port._bakeDirection(uxp, direction), "UXP direction must depend on the supplied paragraphs");
+  assert.deepStrictEqual(uxp, cep);
+  uxp.forEach((range, index) => {
+    assert.strictEqual(range.paragraphStyle.directionType, direction === "rtl" ? "dirRightToLeft" : "dirLeftToRight");
+    assert.strictEqual(range.paragraphStyle.textComposerEngine, direction === "rtl" ? "textOptycaComposer" : undefined);
+    assert.strictEqual(range.from, paragraphs[index].from);
+    assert.strictEqual(range.to, paragraphs[index].to);
+  });
+  port._stripDirection(uxp);
+  host._stripDirection(cep);
+  assert.deepStrictEqual(uxp, paragraphs, "an unsupported direction retry retains all other paragraph formatting");
+  assert.deepStrictEqual(cep, paragraphs);
+}
+assert.doesNotThrow(() => host._bakeDirection([], "ltr"));
+assert.doesNotThrow(() => port._bakeDirection([], "rtl"));
 
 assert.deepStrictEqual(port._getHostDefaultStyle(), host._getHostDefaultStyle(), "Default style must match host.js");
 assert.deepStrictEqual(port._getHostDefaultStroke(), host._getHostDefaultStroke(), "Default stroke must match host.js");
@@ -349,11 +388,13 @@ const scalable = (scale) => ({
   punctuationOnlyScale: scale,
   textProps: { layerText: { textStyleRange: [{ textStyle: { size: 10, impliedFontSize: 10, leading: 12, impliedLeading: 12, autoLeading: false } }, { textStyle: { size: 12 } }] } },
 });
-[[2, "?!"], [3, "!!"], [2, "Non!"], [1, "?!"], [undefined, "?!"]].forEach(([scale, text]) => {
+[[1.5, "?!"], [2, "?!"], [3, "!!"], [2, "Non!"], [1, "?!"], [undefined, "?!"]].forEach(([scale, text]) => {
   assert.deepStrictEqual(port._scaleStyleForPunctuationOnlyText(scalable(scale), text), host._scaleStyleForPunctuationOnlyText(scalable(scale), text));
 });
 const tripled = host._scaleStyleForPunctuationOnlyText(scalable(3), "?!").textProps.layerText.textStyleRange[0].textStyle;
 assert.deepStrictEqual(tripled, { size: 30, impliedFontSize: 30, leading: 36, impliedLeading: 36, autoLeading: false });
+const fractional = port._scaleStyleForPunctuationOnlyText(scalable(1.5), "?!").textProps.layerText.textStyleRange[0].textStyle;
+assert.deepStrictEqual(fractional, { size: 15, impliedFontSize: 15, leading: 18, impliedLeading: 18, autoLeading: false });
 const unscaledStyle = scalable(2);
 assert.strictEqual(host._scaleStyleForPunctuationOnlyText(unscaledStyle, "Non!"), unscaledStyle, "Other text keeps the style as is");
 assert.strictEqual(unscaledStyle.textProps.layerText.textStyleRange[0].textStyle.size, 10);
@@ -362,6 +403,7 @@ assert.strictEqual(unscaledStyle.textProps.layerText.textStyleRange[0].textStyle
 assert.strictEqual(port._scaleStyleForPunctuationOnlyText(null, "?!"), null);
 const selectionBox = { width: 60, height: 40 };
 [
+  [{ text: "?!", style: { punctuationOnlyScale: 1.5 } }, { width: 90, height: 60 }],
   [{ text: "?!", style: { punctuationOnlyScale: 3 } }, { width: 180, height: 120 }],
   [{ text: "Non", style: { punctuationOnlyScale: 3 } }, selectionBox],
   [{ text: "?!", style: {} }, selectionBox],

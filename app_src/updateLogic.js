@@ -9,15 +9,15 @@ const UPDATE_CHECK_INTERVAL = 24 * 60 * 60 * 1000;
 const INSTALL_FOLDERS = ["app/", "CSXS/", "icons/", "locale/"];
 
 const versionParts = (version) => {
-  const match = /^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*))?(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(String(version || ''));
-  if (!match || (match[4] || '').split('.').some(part => /^0[0-9]+$/.test(part))) return null;
-  return { numbers: match.slice(1, match[3] === undefined ? 3 : 4).map(Number), pre: match[4] ? match[4].split('.') : [] };
+  const match = /^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*))?(?:\.(0|[1-9][0-9]*))?(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(String(version || ''));
+  if (!match || (match[5] || '').split('.').some(part => /^0[0-9]+$/.test(part))) return null;
+  return { numbers: match.slice(1, 5).filter(part => part !== undefined).map(Number), pre: match[5] ? match[5].split('.') : [] };
 };
 const parseVersion = version => (versionParts(version) || { numbers: [0] }).numbers;
 const compareVersions = (left, right) => {
   const a = versionParts(left), b = versionParts(right);
   if (!a || !b) return a ? 1 : b ? -1 : 0;
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 4; i++) {
     const difference = (a.numbers[i] || 0) - (b.numbers[i] || 0);
     if (difference) return difference > 0 ? 1 : -1;
   }
@@ -42,8 +42,8 @@ const compareVersions = (left, right) => {
 const UXP_PACKAGE = "TypeR-UXP.ccx";
 const UXP_WINDOWS_PACKAGE = "UXP-Windows.ccx";
 
-// The Windows package of a release, whose tag is its version
-const windowsPackageUrl = (version) => "https://github.com/PauloKutscher/TypeR/releases/download/" + version + "/" + UXP_WINDOWS_PACKAGE;
+// This fork prefixes release tags with v; the manifest version has no prefix.
+const windowsPackageUrl = (version) => "https://github.com/PauloKutscher/TypeR/releases/download/v" + String(version).replace(/^v/, "") + "/" + UXP_WINDOWS_PACKAGE;
 
 // Only a built release asset is installable. The GitHub "source code" zipball
 // has no compiled app/ folder (webpack output), so installing it would leave a

@@ -124,18 +124,38 @@ for (const alreadyFirst of [false, true]) {
   assert.strictEqual(folder.layers[0], text);
 }
 
+// The CEP commit also keeps automatic wrapping as paragraph text and uses the
+// existing frame sizing/centring helper rather than converting it to point text.
+{
+  const calls = [];
+  const selection = { left: 0, top: 0, width: 100, height: 100, xMid: 50, yMid: 50 };
+  const box = vm.createContext({
+    _smartMakeText() {}, _raiseNewTextLayer() {}, _applyMiddleEast() {},
+    _placeLayerInRect: (...args) => calls.push(args),
+    _getActiveLayerId: () => 42,
+  });
+  vm.runInContext(hostSource.slice(hostSource.indexOf('function _smartPlaceText('), hostSource.indexOf('function _smartPasteCommitRun(')), box);
+  assert.strictEqual(box._smartPlaceText({ plan: { selection }, text: { params, pad: 4, autoWrap: true } }, false), 42);
+  assert.deepStrictEqual(calls, [[selection, true, 4]]);
+}
+
 (async () => {
   for (const background of [false, true]) for (const existingClean of [false, true]) {
+    for (const autoWrap of [false, true])
     for (const selected of ['folder', 'nested folder', 'folder child', 'folder below clean', 'root']) {
       const sim = createStack(selected, background, existingClean);
+      const placements = [];
       Object.assign(sim.port._internals, {
         modal: async (name, fn) => fn({}), suspendHistory: (context, name, fn) => fn(),
         _applyMiddleEast() {},
+        _placeLayerInRect: (...args) => placements.push(args),
       });
       const load = createLoader({ photoshop: sim.ps, './photoshop': sim.port });
       const smart = load('uxp-src/host/smartPaste.js');
-      const session = { plan: { autoClean: true, cleanupPolygon: polygon, cleanPolygon: polygon }, text: { params, pad: 0 } };
-      const result = await smart._internals.commitSessions({ documentId: sim.doc.id, sessions: [session, session], pointText: true });
+      const session = { plan: { autoClean: true, cleanupPolygon: polygon, cleanPolygon: polygon, selection: { left: 0, top: 0, width: 100, height: 100, xMid: 50, yMid: 50 } }, text: { params, pad: 0, autoWrap } };
+      const result = await smart._internals.commitSessions({ documentId: sim.doc.id, sessions: [session, session], pointText: !autoWrap });
+      assert.strictEqual(placements.length, autoWrap ? 2 : 0, 'only automatic wrapping resizes and centres the paragraph frame');
+      placements.forEach(args => assert.deepStrictEqual(args, [session.plan.selection, true, 0]));
       assert.strictEqual(result.layerIds.length, 2, 'every chamber gets its text');
       const stack = sim.flatten(sim.doc.layers);
       const clean = stack.find(layer => layer.name === 'TypeR Clean');

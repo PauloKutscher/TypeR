@@ -379,7 +379,9 @@ function placeText(session, pointText) {
   const firstStyle = params.layerText.textStyleRange[0] && params.layerText.textStyleRange[0].textStyle;
   host._applyMiddleEast(firstStyle);
   // Paragraph text keeps the composed lines: convert, then restore the ink
-  if (!pointText) {
+  if (text.autoWrap) {
+    host._placeLayerInRect(plan.selection, true, text.pad);
+  } else if (!pointText) {
     const before = layerInk();
     host._changeToBoxText();
     const after = layerInk();
@@ -396,11 +398,11 @@ function placeText(session, pointText) {
     }
   }
   let ink = layerInk();
-  if (!inkFits(plan, ink, text.pad) && ink) {
+  if (!text.autoWrap && !inkFits(plan, ink, text.pad) && ink) {
     const dx = Math.max(-2, Math.min(2, text.axis - (ink.left + ink.right) / 2));
     const dy = Math.max(-2, Math.min(2, (text.top + text.bottom - ink.top - ink.bottom) / 2));
     translateLayer(dx, dy);
-  } else if (text.terminalPause && ink) {
+  } else if (!text.autoWrap && text.terminalPause && ink) {
     // A lone "…" line: centre the whole ink if it still fits
     const dx = plan.selection.xMid - (ink.left + ink.right) / 2;
     const dy = plan.selection.yMid - (ink.top + ink.bottom) / 2;

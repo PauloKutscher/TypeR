@@ -367,13 +367,13 @@ export const planText = async (plan, payload, context) => {
   }
   if (!found) throw new NoPlacementError();
   const { graph, pass } = found;
-  const composed = composeText(graph, pass.best.choice, page);
+  const composed = composeText(graph, pass.best.choice, page, payload.autoWrap ? plan.selection : null);
   return {
     params: composed.params,
     renderedText: composed.renderedText,
     size: pass.best.choice.size,
     tier: found.tier,
-    hyphenated: hyphenated && !!graph.variants[pass.best.choice.variant].insertion,
+    hyphenated: !payload.autoWrap && hyphenated && !!graph.variants[pass.best.choice.variant].insertion,
     stroke: graph.stroke,
     candidate: pass.best.candidate,
     pad: pass.model.opts.pad,

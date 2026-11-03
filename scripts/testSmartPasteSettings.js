@@ -13,6 +13,7 @@ const { serializeStyle, validateImportData } = load("app_src/librarySerializatio
   assert.strictEqual(initial.pasteOnClick, false);
   assert.strictEqual(initial.smartPasteAutoClean, false);
   assert.strictEqual(initial.smartPasteDistribute, true);
+  assert.strictEqual(initial.smartPasteAutoWrap, false, "existing profiles keep contour-based line breaks");
   assert.strictEqual(initial.smartPasteMinScale, 0.75);
   assert.strictEqual(initial.smartPasteHyphenation, "auto");
   assert.deepStrictEqual(initial.refontRules, []);
@@ -136,6 +137,14 @@ for (const bad of ["FR", "de", 1, null, true, { mode: "fr" }, "toString"]) {
 
   assert.strictEqual(reducer(initial, { type: "setSmartPasteAutoClean", value: true }).smartPasteAutoClean, true);
   assert.strictEqual(reducer(initial, { type: "setSmartPasteDistribute", value: false }).smartPasteDistribute, false);
+  state = reducer(initial, { type: "setSmartPasteAutoWrap", value: true });
+  assert.strictEqual(state.smartPasteAutoWrap, true);
+  assert.strictEqual(lastWrite().smartPasteAutoWrap, true);
+  assert.strictEqual(loadContext({ smartPasteAutoWrap: true }).initial.smartPasteAutoWrap, true);
+  assert.strictEqual(loadContext({ smartPasteAutoWrap: "true" }).initial.smartPasteAutoWrap, false);
+  assert.strictEqual(reducer(initial, { type: "import", data: { smartPasteAutoWrap: true } }).smartPasteAutoWrap, true);
+  assert.strictEqual(reducer(state, { type: "import", data: {} }).smartPasteAutoWrap, true);
+  assert.strictEqual(reducer(state, { type: "setSmartPasteAutoWrap", value: false }).smartPasteAutoWrap, false);
 
   assert.strictEqual(reducer(initial, { type: "setSmartPasteMinScale", value: 0.55 }).smartPasteMinScale, 0.55);
   assert.strictEqual(reducer(initial, { type: "setSmartPasteMinScale", value: 0.1 }).smartPasteMinScale, 0.5);
@@ -199,6 +208,8 @@ for (const bad of ["FR", "de", 1, null, true, { mode: "fr" }, "toString"]) {
   assert.strictEqual(validateImportData({ folders: [], styles: [style] }).styles[0].bubbleType, "shout");
   assert.throws(() => validateImportData({ folders: [], styles: [{ ...style, bubbleType: 3 }] }));
   assert.strictEqual(serializeStyle({ ...style, punctuationOnlyScale: 3 }).punctuationOnlyScale, 3, "the punctuation scale survives export");
+  const fractional = serializeStyle({ ...style, punctuationOnlyScale: 1.5 });
+  assert.strictEqual(validateImportData({ folders: [], styles: [fractional] }).styles[0].punctuationOnlyScale, 1.5, "the fractional punctuation scale survives export and import");
   assert.throws(() => validateImportData({ folders: [], styles: [{ ...style, punctuationOnlyScale: "big" }] }));
 
   const { reducer, initial } = loadContext({});

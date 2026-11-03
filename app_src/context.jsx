@@ -100,6 +100,7 @@ const storeFields = [
   "pasteOnClick",
   "smartPasteAutoClean",
   "smartPasteDistribute",
+  "smartPasteAutoWrap",
   "smartPasteMinScale",
   "smartPasteHyphenation",
   "refontRules",
@@ -319,6 +320,7 @@ const initialState = {
   pasteOnClick: storage.data?.pasteOnClick === true && storage.data?.multiBubbleMode !== true,
   smartPasteAutoClean: storage.data?.smartPasteAutoClean === true,
   smartPasteDistribute: storage.data?.smartPasteDistribute !== false,
+  smartPasteAutoWrap: storage.data?.smartPasteAutoWrap === true,
   smartPasteMinScale: normalizeSmartPasteMinScale(storage.data?.smartPasteMinScale),
   smartPasteHyphenation: normalizeSmartPasteHyphenation(storage.data?.smartPasteHyphenation),
   refontRules: normalizeRefontRules(storage.data?.refontRules),
@@ -465,6 +467,9 @@ const baseReducer = (state, action) => {
       }
       if ("smartPasteDistribute" in action.data) {
         newState.smartPasteDistribute = action.data.smartPasteDistribute !== false;
+      }
+      if ("smartPasteAutoWrap" in action.data) {
+        newState.smartPasteAutoWrap = action.data.smartPasteAutoWrap === true;
       }
       if ("smartPasteMinScale" in action.data) {
         newState.smartPasteMinScale = normalizeSmartPasteMinScale(action.data.smartPasteMinScale);
@@ -1068,6 +1073,11 @@ const baseReducer = (state, action) => {
 
     case "setSmartPasteDistribute": {
       newState.smartPasteDistribute = !!action.value;
+      break;
+    }
+
+    case "setSmartPasteAutoWrap": {
+      newState.smartPasteAutoWrap = !!action.value;
       break;
     }
 

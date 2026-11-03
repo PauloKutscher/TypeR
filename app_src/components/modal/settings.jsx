@@ -131,6 +131,7 @@ const SettingsModal = React.memo(function SettingsModal() {
     smartPaste: state.smartPaste,
     pasteOnClick: state.pasteOnClick,
     smartPasteDistribute: state.smartPasteDistribute,
+    smartPasteAutoWrap: state.smartPasteAutoWrap,
     smartPasteAutoClean: state.smartPasteAutoClean,
     smartPasteMinScale: state.smartPasteMinScale,
     smartPasteHyphenation: state.smartPasteHyphenation,
@@ -192,6 +193,7 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [smartPasteDistribute, setSmartPasteDistribute] = React.useState(
     context.state.smartPasteDistribute !== false
   );
+  const [smartPasteAutoWrap, setSmartPasteAutoWrap] = React.useState(context.state.smartPasteAutoWrap === true);
   const [smartPasteAutoClean, setSmartPasteAutoClean] = React.useState(
     context.state.smartPasteAutoClean === true
   );
@@ -564,6 +566,11 @@ const SettingsModal = React.memo(function SettingsModal() {
 
   const changeSmartPasteDistribute = (e) => {
     setSmartPasteDistribute(e.target.checked);
+    setEdited(true);
+  };
+
+  const changeSmartPasteAutoWrap = (e) => {
+    setSmartPasteAutoWrap(e.target.checked);
     setEdited(true);
   };
 
@@ -971,6 +978,9 @@ const SettingsModal = React.memo(function SettingsModal() {
     }
     if (smartPasteDistribute !== (context.state.smartPasteDistribute !== false)) {
       context.dispatch({ type: "setSmartPasteDistribute", value: smartPasteDistribute });
+    }
+    if (smartPasteAutoWrap !== (context.state.smartPasteAutoWrap === true)) {
+      context.dispatch({ type: "setSmartPasteAutoWrap", value: smartPasteAutoWrap });
     }
     if (smartPasteAutoClean !== (context.state.smartPasteAutoClean === true)) {
       context.dispatch({ type: "setSmartPasteAutoClean", value: smartPasteAutoClean });
@@ -1528,6 +1538,12 @@ const SettingsModal = React.memo(function SettingsModal() {
                       changeSmartPasteDistribute,
                       locale.settingsSmartPasteDistributeLabel || "Split lines across connected bubbles",
                       locale.settingsSmartPasteDistributeHelp || "Double or triple bubbles receive the next lines, one per part."
+                    )}
+                    {renderToggle(
+                      smartPasteAutoWrap,
+                      changeSmartPasteAutoWrap,
+                      locale.settingsSmartPasteAutoWrapLabel || "Wrap automatically in a text box",
+                      locale.settingsSmartPasteAutoWrapHelp || "Photoshop wraps the text to a rectangular box without adding line breaks. Keeps black-bubble text colour and connected bubbles; the layout can differ from fitting the bubble outline."
                     )}
                     {renderToggle(
                       smartPasteAutoClean,

@@ -142,7 +142,8 @@ if (typeof jamText !== 'object')
                 {
                     if (desc.hasOwnProperty (key))
                     {
-                        var value = desc[key];
+                        // The editor's caps-off value is null; Photoshop requires a named enum.
+                        var value = (key === "fontCaps" && desc[key] === null) ? "normal" : desc[key];
                         var typedValue = null;
                         var restoredList;
                         switch (key)

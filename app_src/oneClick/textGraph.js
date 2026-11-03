@@ -443,7 +443,7 @@ export const probesForGraph = (graph) => {
 
 // The chosen lines as Photoshop text parameters: point text, centred on the
 // axis, first baseline at the chosen height. page = { width, height, resolution }
-export const composeText = (graph, choice, page) => {
+export const composeText = (graph, choice, page, box = null) => {
   if (!choice) throw new Error("No layout choice");
   const variant = graph.variants[choice.variant];
   if (!variant) throw new Error("Invalid layout variant");
@@ -452,7 +452,11 @@ export const composeText = (graph, choice, page) => {
   const scale = (choice.size * 72) / page.resolution / graph.baseSize;
   let text = "";
   const map = [];
-  for (let i = 0; i < choice.lines.length; i++) {
+  if (box) {
+    text = graph.source;
+    for (let i = 0; i < text.length; i++) map.push(i);
+  }
+  for (let i = 0; !box && i < choice.lines.length; i++) {
     const edge = variant.edges[choice.lines[i].edge];
     if (!edge) throw new Error("Invalid text edge");
     if (i) {
@@ -514,10 +518,14 @@ export const composeText = (graph, choice, page) => {
   lt.textStyleRange = ranges;
   lt.kerningRange = kerning;
   lt.paragraphStyleRange = [{ from: 0, to: text.length, paragraphStyle: p }];
-  lt.textShape = [{ textType: "point", orientation: "horizontal" }];
+  lt.textShape = box ? [{
+    textType: "box", orientation: "horizontal",
+    // Start tall; the host fits the frame to its rendered contents and centres it.
+    bounds: { top: 0, left: 0, right: box.width * 72 / page.resolution, bottom: box.height * 3 * 72 / page.resolution },
+  }] : [{ textType: "point", orientation: "horizontal" }];
   lt.textClickPoint = {
-    horizontal: (choice.axis / page.width) * 100,
-    vertical: (choice.lines[0].baseline / page.height) * 100,
+    horizontal: ((box ? box.left : choice.axis) / page.width) * 100,
+    vertical: ((box ? box.top : choice.lines[0].baseline) / page.height) * 100,
   };
   setDirection(params, graph.data.direction, text.length);
   return { params, renderedText: text, sourceMap: map };

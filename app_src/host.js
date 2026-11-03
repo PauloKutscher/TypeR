@@ -2837,7 +2837,7 @@ function _setParagraphDirection(paragraphStyle, direction) {
 }
 
 function _bakeDirection(paragraphRanges, direction) {
-  for (var p = 0; p < oldLayerText.paragraphStyleRange.length; p++) {
+  for (var p = 0; p < paragraphRanges.length; p++) {
     var paragraphRange = paragraphRanges[p] || {};
     var bakedStyle = paragraphRange.paragraphStyle || {};
     _setParagraphDirection(bakedStyle, direction);
@@ -7155,7 +7155,9 @@ function _smartPlaceText(session, pointText) {
   _raiseNewTextLayer();
   var ranges = params.layerText.textStyleRange;
   if (ranges && ranges[0]) _applyMiddleEast(ranges[0].textStyle);
-  if (!pointText) {
+  if (session.text.autoWrap) {
+    _placeLayerInRect(session.plan.selection, true, session.text.pad);
+  } else if (!pointText) {
     // Paragraph text keeps the composed lines; point text otherwise
     var before = _currentLayerBox();
     _changeToBoxText();

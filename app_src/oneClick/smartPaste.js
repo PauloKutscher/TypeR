@@ -12,7 +12,7 @@
 //   lines: [{ text, richTextRuns, style, styleLocked }],   // N, N+1, N+2
 //   roleStyles: { shout: style | null, narration: style | null },
 //   settings: { autoClean, distribute, minScale, hyphenation ("fr"|"en"|"off"),
-//               direction, padding, keepSize, pointText, forceSplit },
+//               direction, padding, keepSize, pointText, autoWrap, forceSplit },
 //   forceSplit: split the bubble at its likeliest neck even when it does not
 //   look double (the user clicked it again after a one-line paste)
 // }
@@ -173,6 +173,7 @@ export const prepareSmartPaste = async (request, adapter) => {
       style,
       direction: settings.direction,
       padding: settings.padding || 0,
+      autoWrap: settings.autoWrap === true,
     };
     const context = {
       page,
@@ -200,6 +201,7 @@ export const prepareSmartPaste = async (request, adapter) => {
         size: text.size,
         tier: text.tier,
         hyphenated: text.hyphenated,
+        autoWrap: settings.autoWrap === true,
         axis: text.candidate.axis,
         top: text.candidate.top,
         bottom: text.candidate.bottom,
@@ -215,7 +217,7 @@ export const prepareSmartPaste = async (request, adapter) => {
     documentId: input.documentId,
     source: input.source,
     selectionBounds: input.selectionBounds,
-    pointText: !!settings.pointText,
+    pointText: !settings.autoWrap && !!settings.pointText,
     sessions,
     consumed: sessions.length,
     cleanupSkipped: plan.cleanupSkipped || null,

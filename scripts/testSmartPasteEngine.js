@@ -231,6 +231,11 @@ const linesInside = (session) => {
   }, adapterFor(input));
   assert.ok(Math.abs((await pasteIn(ovalInput, "?!")).sessions[0].text.size - 72) < 1e-6, "tripled in a large bubble");
   assert.ok(Math.abs((await pasteIn(ovalInput, "Bonjour.")).sessions[0].text.size - 24) < 1e-6, "text keeps the style size");
+  const fractional = await prepareSmartPaste({
+    trigger: { source: "wand" }, lines: [line("?!", { ...shouting, punctuationOnlyScale: 1.5 })], roleStyles: {},
+    settings: { hyphenation: "off" },
+  }, adapterFor(ovalInput));
+  assert.ok(Math.abs(fractional.sessions[0].text.size - 36) < 1e-6, "fractional punctuation scale stays at 1.5 times the style size");
   const fistBubble = ellipseNodes(300, 300, 34, 34);
   const fistInput = { source: "wand", click: { x: 300, y: 300 }, selectionBounds: boundsOf(geometry.flatten(fistBubble)), rawPath: pathOf([fistBubble]), fill: white };
   const fittedPunctuation = (await pasteIn(fistInput, "?!!", { minScale: 0.85 })).sessions[0].text;
@@ -246,6 +251,26 @@ const linesInside = (session) => {
   }, adapterFor({ ...ovalInput, fill: black }));
   assert.deepStrictEqual(dark.sessions[0].text.params.layerText.textStyleRange[0].textStyle.color, { red: 255, green: 255, blue: 255 });
   assert.strictEqual(dark.sessions[0].text.stroke, null);
+  const autoText = "This translation keeps its original words without inserted line breaks.";
+  const automatic = await prepareSmartPaste({
+    trigger: { source: "wand" }, lines: [line(autoText)], roleStyles: {},
+    settings: { autoWrap: true, pointText: true, autoClean: true },
+  }, adapterFor({ ...ovalInput, fill: black }));
+  const autoLayer = automatic.sessions[0].text.params.layerText;
+  assert.strictEqual(automatic.pointText, false, "automatic wrapping requires paragraph text even with a point-text preset");
+  assert.strictEqual(autoLayer.textKey, autoText, "automatic wrapping adds no hard line breaks or hyphens");
+  assert.strictEqual(autoLayer.textShape[0].textType, "box");
+  assert.ok(autoLayer.textShape[0].bounds.right > 0);
+  assert.deepStrictEqual(autoLayer.textStyleRange[0].textStyle.color, { red: 255, green: 255, blue: 255 });
+  assert.strictEqual(automatic.sessions[0].text.stroke, null);
+  assert.ok(automatic.sessions[0].plan.autoClean, "automatic wrapping keeps Auto clean");
+  const authored = await prepareSmartPaste({
+    trigger: { source: "wand" }, lines: [{ ...line("One\r\nTwo"), richTextRuns: [{ text: "One\r\n", bold: false }, { text: "Two", bold: true }] }], roleStyles: {},
+    settings: { autoWrap: true },
+  }, adapterFor(ovalInput));
+  const authoredLayer = authored.sessions[0].text.params.layerText;
+  assert.strictEqual(authoredLayer.textKey, "One\rTwo", "explicit author line breaks remain");
+  assert.ok(authoredLayer.textStyleRange.some(range => range.textStyle.syntheticBold), "mixed formatting survives automatic wrapping");
   assert.ok(single.sessions[0].text.stroke, "a white bubble keeps the style stroke");
 
   // Shout bubble takes the shout style unless the line has a prefix style
@@ -312,6 +337,12 @@ const linesInside = (session) => {
   assert.strictEqual(pair.consumed, 2);
   assert.ok(pair.sessions[0].text.axis < pair.sessions[1].text.axis);
   pair.sessions.forEach(linesInside);
+  const automaticPair = await prepareSmartPaste({
+    trigger: { source: "wand" }, lines: [line("Toi, à gauche."), line("Et moi, à droite !")], roleStyles: {}, settings: { distribute: true, autoWrap: true },
+  }, adapterFor(doubleInput));
+  assert.strictEqual(automaticPair.consumed, 2, "automatic boxes retain connected-bubble distribution");
+  assert.deepStrictEqual(automaticPair.sessions.map(session => session.text.renderedText), ["Toi, à gauche.", "Et moi, à droite !"]);
+  automaticPair.sessions.forEach(session => assert.strictEqual(session.text.params.layerText.textShape[0].textType, "box"));
   const notDistributed = await prepareSmartPaste({
     trigger: { source: "wand" }, lines: [line("Toi, à gauche."), line("Et moi, à droite !")], roleStyles: {}, settings: { distribute: false },
   }, adapterFor(doubleInput));

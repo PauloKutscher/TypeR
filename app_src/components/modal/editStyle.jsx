@@ -34,7 +34,7 @@ import { pickFamilyPreviewFont } from "../../fontPreview";
 import UnsavedChangesDialog from "./unsavedChangesDialog";
 
 const BUBBLE_TYPES = ["shout", "narration"];
-const PUNCTUATION_ONLY_SCALES = [2, 3];
+const PUNCTUATION_ONLY_SCALES = [1.5, 2, 3];
 
 const EditStyleModal = React.memo(function EditStyleModal() {
   const context = useContext((state) => ({
@@ -770,10 +770,11 @@ const StyleDetails = React.memo(function StyleDetails(props) {
             <span>{locale.editStylePunctuationOnlyLabel || "Punctuation only"}</span>
             <select
               value={props.punctuationOnlyScale}
-              onChange={(e) => props.setPunctuationOnlyScale(parseInt(e.target.value, 10))}
+              onChange={(e) => props.setPunctuationOnlyScale(parseFloat(e.target.value))}
               className="topcoat-textarea"
             >
               <option value={1}>{locale.editStylePunctuationOnlyNormal || "Normal size"}</option>
+              <option value={1.5}>×1.5</option>
               <option value={2}>×2</option>
               <option value={3}>×3</option>
             </select>

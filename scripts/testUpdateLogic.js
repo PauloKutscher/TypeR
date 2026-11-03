@@ -18,6 +18,7 @@ const {
   compareVersions,
   manifestNeedsRestart,
   pickUpdateDownloadUrl,
+  windowsPackageUrl,
   findNewerReleases,
   findZipRootPrefix,
   mapZipEntryToTargetPath,
@@ -34,6 +35,13 @@ assert.strictEqual(compareVersions("3.0.0", "3.0.0-rc.1"), 1);
 assert.strictEqual(compareVersions("3.0.0-rc.10", "3.0.0-rc.2"), 1);
 assert.strictEqual(compareVersions("3.0.0+build.1", "3.0.0"), 0);
 assert.strictEqual(compareVersions("2.10.0", "2.9.9"), 1, "numeric compare, not lexicographic");
+assert.deepStrictEqual(parseVersion("v3.0.2.1"), [3, 0, 2, 1]);
+assert.strictEqual(compareVersions("3.0.3.1", "3.0.3"), 1);
+assert.strictEqual(compareVersions("3.0.3.0", "3.0.3"), 0);
+assert.strictEqual(compareVersions("3.0.3.10", "3.0.3.2"), 1);
+assert.strictEqual(compareVersions("3.0.3.1", "3.0.3.1-rc.1"), 1);
+assert.strictEqual(compareVersions("3.0.3.1+build.2", "3.0.3.1"), 0);
+assert.strictEqual(compareVersions("3.0.4", "3.0.3.99"), 1);
 
 // --- manifestNeedsRestart ---
 const manifestOf = (version, extra = "", menu = "TypeR") => '<ExtensionManifest ExtensionBundleVersion="' + version + '"><Extension Id="typer" Version="' + version + '" /><Host Name="PHXS" Version="[16.0,99.9]" />' + extra + "<Menu>" + menu + "</Menu></ExtensionManifest>";
@@ -58,6 +66,8 @@ assert.strictEqual(
   null
 );
 assert.strictEqual(pickUpdateDownloadUrl(null), null);
+assert.strictEqual(windowsPackageUrl("3.0.2"), "https://github.com/PauloKutscher/TypeR/releases/download/v3.0.2/UXP-Windows.ccx", "The Windows module uses the fork's v-prefixed release tag");
+assert.strictEqual(windowsPackageUrl("v3.0.2"), windowsPackageUrl("3.0.2"), "Do not duplicate the tag prefix");
 assert.strictEqual(pickUpdateDownloadUrl({ assets: [{ name: "other-tool.zip" }] }), null);
 
 // --- findNewerReleases ---
@@ -102,6 +112,13 @@ assert.deepStrictEqual(
 );
 assert.deepStrictEqual(findNewerReleases(releases, "3.2.0"), []);
 assert.deepStrictEqual(findNewerReleases(null, "3.0.0"), []);
+assert.deepStrictEqual(findNewerReleases([
+  { assets: [builtAsset], tag_name: "v3.0.3.1" },
+  { assets: [builtAsset], tag_name: "3.0.3.0" },
+  { assets: [builtAsset], tag_name: "3.0.3.1.1" },
+  { assets: [builtAsset], tag_name: "3.0.3.01" },
+  { assets: [builtAsset], tag_name: "3.0.3.1-rc.1" },
+], "3.0.3").map(release => release.tag_name), ["v3.0.3.1"], "four-part stable releases are offered, malformed and prerelease versions are skipped");
 
 // --- findZipRootPrefix ---
 assert.strictEqual(findZipRootPrefix(["CSXS/manifest.xml", "app/index.html"]), "");

@@ -36,6 +36,7 @@ const utilsStub = {
   locale: {
     smartPasteFallback: "Smart paste unavailable ({reason}): pasted the classic way.",
     smartPasteReason_noPlacement: "the text does not fit this bubble",
+    smartPasteReason_shape: "the bubble outline could not be read",
     smartPasteReason_error: "unexpected error",
     smartPasteReason_noSelection: "no selection",
     smartPasteCleanSkipped: "Auto clean skipped",
@@ -107,8 +108,9 @@ const baseState = () => ({
   assert.strictEqual(request.lines[1].styleLocked, true, "a prefix style is locked");
   assert.strictEqual(request.lines[1].style.id, "s");
   assert.deepStrictEqual(request.settings, {
-    autoClean: true, distribute: true, minScale: 0.8, hyphenation: "fr", direction: "rtl", padding: 4, keepSize: true, pointText: false,
+    autoClean: true, distribute: true, autoWrap: false, minScale: 0.8, hyphenation: "fr", direction: "rtl", padding: 4, keepSize: true, pointText: false,
   });
+  assert.strictEqual(client.buildSmartPasteRequest({ ...state, smartPasteAutoWrap: true }, null).request.settings.autoWrap, true);
   assert.strictEqual(client.buildSmartPasteRequest({ ...state, smartPasteDistribute: false }, null).lineIndexes.length, 1);
   assert.strictEqual(client.buildSmartPasteRequest({ ...state, smartPasteHyphenation: "off" }, null).request.settings.hyphenation, "off");
   // A style recorded by an earlier paste never beats the selected style
@@ -173,6 +175,16 @@ const baseState = () => ({
   assert.strictEqual(classicCalls.length, 1);
   assert.ok(dispatched.some((action) => action.type === "showNotice" && /does not fit/.test(action.text)));
   assert.ok(dispatched.some((action) => action.type === "nextLine"));
+
+  // An unreadable outline still pastes once through the classic host path.
+  dispatched.length = 0;
+  classicCalls.length = 0;
+  hostReplies = { ...hostReplies, smartPaste: JSON.stringify({ ok: false, code: "shape" }) };
+  assert.strictEqual(await client.smartPasteInSelection(getState, dispatch, {}), true);
+  assert.strictEqual(classicCalls.length, 1);
+  assert.strictEqual(classicCalls[0][0], "Première");
+  assert.ok(dispatched.some((action) => action.type === "showNotice" && /outline could not be read/.test(action.text)));
+  assert.strictEqual(dispatched.filter((action) => action.type === "nextLine").length, 1);
 
   // No selection: only a notice, no classic paste
   classicCalls.length = 0;

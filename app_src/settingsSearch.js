@@ -46,6 +46,7 @@ const SECTIONS = [
       { title: "settingsTextItemKindLabel", also: ["settingsTextItemKindBox", "settingsTextItemKindPoint"], keywords: "paragraph paragraphe" },
       { title: "settingsSmartPasteLabel", hint: "settingsSmartPasteHelp", keywords: "intelligent auto" },
       { title: "settingsSmartPasteDistributeLabel", hint: "settingsSmartPasteDistributeHelp", parent: "settingsSmartPasteLabel", keywords: "double triple" },
+      { title: "settingsSmartPasteAutoWrapLabel", hint: "settingsSmartPasteAutoWrapHelp", parent: "settingsSmartPasteLabel", keywords: "wrap paragraph line breaks retour ligne caixa quebra" },
       { title: "settingsSmartPasteAutoCleanLabel", hint: "settingsSmartPasteAutoCleanHelp", parent: "settingsSmartPasteLabel", keywords: "cleaning nettoyage nettoyer effacer erase" },
       { title: "settingsSmartPasteMinScaleLabel", hint: "settingsSmartPasteMinScaleHelp", parent: "settingsSmartPasteLabel", keywords: "shrink reduire" },
       {

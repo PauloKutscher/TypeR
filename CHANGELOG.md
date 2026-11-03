@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.0.3 — PauloKutscher fork
+
+- Add an optional Smart Paste text-box wrapping mode. It keeps the original text without solver-inserted line breaks, while retaining automatic white text on black bubbles, connected-bubble distribution, rich formatting and Auto clean. It is off by default; existing profiles retain contour-based layout.
+- Add ×1.5 to the punctuation-only size multiplier and preserve fractional values when editing, exporting and importing styles.
+- Fix the Windows shortcut-module download URL to use this fork's `v`-prefixed release tags.
+- Fix direction handling shared by preset application, TextShapeR and classic paste fallback, and normalize imported caps-off styles before sending them to Photoshop.
+- Recognize and numerically compare four-part release versions in the updater. This release uses 3.0.3 so existing 3.0.2 clients can discover it.
+
 ## 3.0.2 — PauloKutscher fork (rebuild)
 
 - Keep pasted text inside the selected folder, including empty and nested folders, in UXP and CEP. Raise it before the folder's first child rather than moving it to the document root.

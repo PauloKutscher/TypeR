@@ -1863,7 +1863,7 @@ function _applyRichTextRanges(textParams, textRuns, textLength) {
 }
 
 function _bakeDirection(paragraphRanges, direction) {
-  for (let p = 0; p < oldLayerText.paragraphStyleRange.length; p++) {
+  for (let p = 0; p < paragraphRanges.length; p++) {
     const paragraphRange = paragraphRanges[p] || {};
     const bakedStyle = paragraphRange.paragraphStyle || {};
     _setParagraphDirection(bakedStyle, direction);
@@ -4032,10 +4032,11 @@ module.exports = {
     play, get, modal, suspendHistory, jamText, _hostState, _getLayerStroke, _getLayerText, _setTextContentsOnly,
     // smart paste (uxp-src/host/smartPaste.js)
     _makeTextLayer, _applyMiddleEast, _changeToBoxText, _changeToPointText, _setLayerStroke, _getActiveLayerId,
+    _placeLayerInRect,
     _layerIsTextLayer, _getTextLayerSize, _getFontList,
     _getCurrentTextLayerBounds, _getCurrentSelectionBounds, _getActiveHistoryIndex,
     // pure helpers, compared with host.js by scripts/testUxpHost.js
-    _getHostDefaultStyle, _getHostDefaultStroke, _ensureStyle, _overrideStyleTextSize, _resolveStylePointText,
+    _getHostDefaultStyle, _getHostDefaultStroke, _ensureStyle, _overrideStyleTextSize, _resolveStylePointText, _bakeDirection, _stripDirection,
     _isPunctuationOnlyText, _scaleStyleForPunctuationOnlyText, _punctuationOnlyBoxDimensions,
     _getAdaptiveSelectionOpenRadius, _calculateSelectionDimensions, _clampAdjustAmount,
     _getAdjustedSelectionBoundsFallback, _buildBoundsShapeRows, _normalizeShapeSampleCount, _buildMaskShapeRows,

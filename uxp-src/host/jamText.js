@@ -105,7 +105,8 @@ function restoreDesc(desc, typeUnit, hintUnit) {
   const restored = {};
   for (const key in desc) {
     if (!Object.prototype.hasOwnProperty.call(desc, key)) continue;
-    const value = desc[key];
+    // The editor's caps-off value is null; Photoshop requires a named enum.
+    const value = key === "fontCaps" && desc[key] === null ? "normal" : desc[key];
     let typed;
     if (key === "bookKey") typed = { _rawData: value };
     else if (BOOLEAN_KEYS.has(key) || STRING_KEYS.has(key)) typed = value;
