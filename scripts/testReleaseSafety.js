@@ -15,6 +15,11 @@ files['CSXS/manifest.xml'] = Buffer.from('<ExtensionManifest ExtensionBundleId="
 files['app/legacy.chunk.123.js'] = Buffer.from('lazy chunk');
 files['app/package.sha256'] = Buffer.from(Object.keys(files).sort().map(name => hash(files[name]) + '  ' + name).join('\n') + '\n');
 try {
+  const fourPart = { ...files };
+  fourPart['CSXS/manifest.xml'] = Buffer.from(decode(files['CSXS/manifest.xml']).replace(/3\.0\.0/g, '3.0.3.1'));
+  fourPart['app/package.sha256'] = Buffer.from(Object.keys(fourPart).filter(name => name !== 'app/package.sha256').sort().map(name => hash(fourPart[name]) + '  ' + name).join('\n') + '\n');
+  assert.deepStrictEqual(validateReleasePackage(fourPart, hash, decode, 'v3.0.3.1'), fourPart);
+  assert.throws(() => validateReleasePackage(fourPart, hash, decode, '3.0.3'), /version mismatch/);
   assert.deepStrictEqual(validateReleasePackage(files, hash, decode, 'v3.0.0'), files);
   assert.throws(() => validateReleasePackage(files, hash, decode, '3.1.0'), /version mismatch/);
   const missing = { ...files }; delete missing['app/legacy.chunk.123.js'];

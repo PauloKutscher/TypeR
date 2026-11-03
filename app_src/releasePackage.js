@@ -21,7 +21,7 @@ export const validateReleasePackage = (entries, hash, decode, expectedVersion) =
     if (!files[name] || !files[name].length) throw new Error('Incomplete package: ' + name);
   });
   const manifest = decode(files['CSXS/manifest.xml']);
-  const version = /<Extension\s+Id="typer"\s+Version="(\d+\.\d+\.\d+)"\s*\/>/.exec(manifest);
+  const version = /<Extension\s+Id="typer"\s+Version="(\d+\.\d+\.\d+(?:\.\d+)?)"\s*\/>/.exec(manifest);
   if (!version || !/ExtensionBundleId="com\.scanr\.typer"/.test(manifest) || !manifest.includes('ExtensionBundleVersion="' + version[1] + '"')) throw new Error('Invalid TypeR identity or version');
   if (expectedVersion && version[1] !== String(expectedVersion).replace(/^v/, '')) throw new Error('Release version mismatch');
   const listed = {};
