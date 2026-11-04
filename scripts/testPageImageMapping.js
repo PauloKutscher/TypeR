@@ -59,3 +59,29 @@ assert.strictEqual(
 );
 
 console.log("page image mapping tests passed");
+
+// Script page 33 is the 33rd selected file, even when that file is numbered 36.
+const offsetPages = Array.from({ length: 36 }, (_, index) => ({ name: `kouchauji_02_${String(index + 4).padStart(3, "0")}.psd` }));
+const byName = createPageImageLookup(offsetPages);
+const byOrder = createPageImageLookup(offsetPages, "order");
+assert.strictEqual(getImageForPage(offsetPages, 33, byName).name, "kouchauji_02_033.psd");
+assert.strictEqual(getImageForPage(offsetPages, 33, byOrder).name, "kouchauji_02_036.psd");
+assert.strictEqual(getImageForPage(pagesWithGap, 21, createPageImageLookup(pagesWithGap, "order")).name, "chap016_023.psd");
+assert.strictEqual(getImageForPage(offsetPages, 37, byOrder), null);
+assert.strictEqual(getImageForPage(offsetPages, 0, byOrder), null);
+assert.strictEqual(getImageForPage([], 1, createPageImageLookup([], "order")), null);
+assert.strictEqual(getImageForPage(duplicatePages, 2, createPageImageLookup(duplicatePages, "order")), duplicatePages[1]);
+
+const loadContext = require("./helpers/loadContext");
+assert.strictEqual(loadContext().initial.pageImageMatchMode, "filename");
+assert.strictEqual(loadContext({ pageImageMatchMode: "order" }).initial.pageImageMatchMode, "order");
+assert.strictEqual(loadContext({ pageImageMatchMode: "invalid" }).initial.pageImageMatchMode, "filename");
+const { reducer, initial, writes } = loadContext();
+let state = reducer(initial, { type: "setPageImageMatchMode", value: "order" });
+assert.strictEqual(state.pageImageMatchMode, "order");
+assert.strictEqual(writes[writes.length - 1][0].pageImageMatchMode, "order");
+state = reducer(state, { type: "import", data: {} });
+assert.strictEqual(state.pageImageMatchMode, "order", "older imports preserve the chosen mode");
+assert.strictEqual(reducer(state, { type: "import", data: { pageImageMatchMode: "filename" } }).pageImageMatchMode, "filename");
+assert.strictEqual(reducer(state, { type: "setPageImageMatchMode", value: "invalid" }).pageImageMatchMode, "filename");
+console.log("page matching mode persistence and offset regressions passed");

@@ -29,6 +29,7 @@ for (const name of ['UXP-Windows.ccx', 'TypeR-UXP.ccx']) {
     assert.strictEqual(manifest.manifestVersion, 5);
     assert(!manifest.addon && !manifest.requiredPermissions.enableAddon);
     assert(entries['native/typer-keys.json']);
+    assert(Buffer.from(entries['native/UXP-Windows.ccx']).equals(fs.readFileSync(path.join(root, 'Releases/UXP-Windows.ccx'))), 'The universal package must carry the same Windows package for offline installation');
     assert(!Object.keys(entries).some(file => file.startsWith('win/')));
     assert(!host.includes('TypeR UXP addon reader v1'));
     assert(/os\.platform\(\) !== "win32" \|\| platformPackageAsked/.test(host), 'TypeR-UXP.ccx must replace itself on Windows');

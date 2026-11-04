@@ -122,6 +122,7 @@ const SettingsModal = React.memo(function SettingsModal() {
     language: state.language,
     direction: state.direction,
     autoClosePSD: state.autoClosePSD,
+    pageImageMatchMode: state.pageImageMatchMode,
     currentFolderTagPriority: state.currentFolderTagPriority,
     resizeTextBoxOnCenter: state.resizeTextBoxOnCenter,
     checkUpdates: state.checkUpdates,
@@ -132,6 +133,7 @@ const SettingsModal = React.memo(function SettingsModal() {
     pasteOnClick: state.pasteOnClick,
     smartPasteDistribute: state.smartPasteDistribute,
     smartPasteAutoWrap: state.smartPasteAutoWrap,
+    smartPasteAutoSize: state.smartPasteAutoSize,
     smartPasteAutoClean: state.smartPasteAutoClean,
     smartPasteMinScale: state.smartPasteMinScale,
     smartPasteHyphenation: state.smartPasteHyphenation,
@@ -170,6 +172,7 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [autoClosePSD, setAutoClosePSD] = React.useState(
     !!context.state.autoClosePSD
   );
+  const [pageImageMatchMode, setPageImageMatchMode] = React.useState(context.state.pageImageMatchMode || "filename");
   const [currentFolderTagPriority, setCurrentFolderTagPriority] = React.useState(
     context.state.currentFolderTagPriority !== false
   );
@@ -194,6 +197,7 @@ const SettingsModal = React.memo(function SettingsModal() {
     context.state.smartPasteDistribute !== false
   );
   const [smartPasteAutoWrap, setSmartPasteAutoWrap] = React.useState(context.state.smartPasteAutoWrap === true);
+  const [smartPasteAutoSize, setSmartPasteAutoSize] = React.useState(context.state.smartPasteAutoSize === true);
   const [smartPasteAutoClean, setSmartPasteAutoClean] = React.useState(
     context.state.smartPasteAutoClean === true
   );
@@ -933,6 +937,9 @@ const SettingsModal = React.memo(function SettingsModal() {
         value: autoClosePSD,
       });
     }
+    if (pageImageMatchMode !== context.state.pageImageMatchMode) {
+      context.dispatch({ type: "setPageImageMatchMode", value: pageImageMatchMode });
+    }
 
     if (currentFolderTagPriority !== context.state.currentFolderTagPriority) {
       context.dispatch({
@@ -981,6 +988,9 @@ const SettingsModal = React.memo(function SettingsModal() {
     }
     if (smartPasteAutoWrap !== (context.state.smartPasteAutoWrap === true)) {
       context.dispatch({ type: "setSmartPasteAutoWrap", value: smartPasteAutoWrap });
+    }
+    if (smartPasteAutoSize !== (context.state.smartPasteAutoSize === true)) {
+      context.dispatch({ type: "setSmartPasteAutoSize", value: smartPasteAutoSize });
     }
     if (smartPasteAutoClean !== (context.state.smartPasteAutoClean === true)) {
       context.dispatch({ type: "setSmartPasteAutoClean", value: smartPasteAutoClean });
@@ -1540,6 +1550,12 @@ const SettingsModal = React.memo(function SettingsModal() {
                       locale.settingsSmartPasteDistributeHelp || "Double or triple bubbles receive the next lines, one per part."
                     )}
                     {renderToggle(
+                      smartPasteAutoSize,
+                      (e) => { setSmartPasteAutoSize(e.target.checked); setEdited(true); },
+                      locale.settingsSmartPasteAutoSizeLabel,
+                      locale.settingsSmartPasteAutoSizeHelp
+                    )}
+                    {renderToggle(
                       smartPasteAutoWrap,
                       changeSmartPasteAutoWrap,
                       locale.settingsSmartPasteAutoWrapLabel || "Wrap automatically in a text box",
@@ -1705,6 +1721,16 @@ const SettingsModal = React.memo(function SettingsModal() {
             </div>
             <div className="settings-group">
               <div className="settings-group-title">{locale.settingsGroupPages || "Pages"}</div>
+              <div className="field">
+                <div className="field-label">{locale.settingsPageImageMatchLabel}</div>
+                <div className="field-input">
+                  <select value={pageImageMatchMode} className="topcoat-textarea" onChange={(e) => { setPageImageMatchMode(e.target.value); setEdited(true); }}>
+                    <option value="filename">{locale.settingsPageImageMatchFilename}</option>
+                    <option value="order">{locale.settingsPageImageMatchOrder}</option>
+                  </select>
+                </div>
+                <div className="field-descr">{locale.settingsPageImageMatchHint}</div>
+              </div>
               <div className="settings-checkbox-grid">
                 {renderToggle(
                   resetLineCounterOnPage,

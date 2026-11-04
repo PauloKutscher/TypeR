@@ -22,6 +22,7 @@ const ExportModal = React.memo(function ExportModal() {
     defaultStyleId: state.defaultStyleId,
     language: state.language,
     autoClosePSD: state.autoClosePSD,
+    pageImageMatchMode: state.pageImageMatchMode,
     currentFolderTagPriority: state.currentFolderTagPriority,
     pastePointText: state.pastePointText,
     smartPaste: state.smartPaste,
@@ -29,6 +30,7 @@ const ExportModal = React.memo(function ExportModal() {
     smartPasteAutoClean: state.smartPasteAutoClean,
     smartPasteDistribute: state.smartPasteDistribute,
     smartPasteAutoWrap: state.smartPasteAutoWrap,
+    smartPasteAutoSize: state.smartPasteAutoSize,
     smartPasteMinScale: state.smartPasteMinScale,
     smartPasteHyphenation: state.smartPasteHyphenation,
     refontRules: state.refontRules,
@@ -163,6 +165,7 @@ const ExportModal = React.memo(function ExportModal() {
       data.defaultStyleId = exportSource.defaultStyleId;
       data.language = exportSource.language;
       data.autoClosePSD = exportSource.autoClosePSD;
+      data.pageImageMatchMode = exportSource.pageImageMatchMode;
       data.currentFolderTagPriority = exportSource.currentFolderTagPriority;
       data.pastePointText = !!exportSource.pastePointText;
       // Smart paste preferences; undefined values (older profiles) are
@@ -172,6 +175,7 @@ const ExportModal = React.memo(function ExportModal() {
       data.smartPasteAutoClean = exportSource.smartPasteAutoClean;
       data.smartPasteDistribute = exportSource.smartPasteDistribute;
       data.smartPasteAutoWrap = exportSource.smartPasteAutoWrap;
+      data.smartPasteAutoSize = exportSource.smartPasteAutoSize;
       data.smartPasteMinScale = exportSource.smartPasteMinScale;
       data.smartPasteHyphenation = exportSource.smartPasteHyphenation;
       data.refontRules = exportSource.refontRules;

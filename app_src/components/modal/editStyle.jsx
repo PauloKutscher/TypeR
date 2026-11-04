@@ -364,6 +364,11 @@ const EditStyleModal = React.memo(function EditStyleModal() {
             </div>
             <div className="field hostBrdTopContrast">
               <div className="field-label">{locale.editStyleStrokeLabel}</div>
+              <label className="field-label">
+                <input type="checkbox" checked={stroke.smart !== false} onChange={(e) => { setStroke({ ...stroke, smart: e.target.checked }); setEdited(true); }} />
+                {locale.editStyleSmartStrokeLabel}
+              </label>
+              <div className="field-descr">{locale.editStyleSmartStrokeHint}</div>
               <div className="field-input">
                 <div className="style-edit-stroke">
                   <input

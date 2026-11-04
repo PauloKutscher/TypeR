@@ -167,4 +167,18 @@ for (const alreadyFirst of [false, true]) {
     }
   }
   console.log('Text layer stack: UXP/CEP folders, root order, clipping, backgrounds and multi-bubble Auto clean regressions passed');
+  const sim = createStack('folder', false, false);
+  Object.assign(sim.port._internals, { modal: async (name, fn) => fn({}), suspendHistory: (context, name, fn) => fn(), _applyMiddleEast() {} });
+  const load = createLoader({ photoshop: sim.ps, './photoshop': sim.port });
+  const smart = load('uxp-src/host/smartPaste.js');
+  const refs = load('app_src/oneClick/autoFontSize.js');
+  const prepared = { documentId: sim.doc.id, pointText: true, autoSizeReference: { key: 'commit-test', ratio: 1.2 },
+    sessions: [{ plan: { cleanPolygon: polygon }, text: { params, pad: 0 } }] };
+  const make = sim.port._internals._makeTextLayer;
+  sim.port._internals._makeTextLayer = () => { throw new Error('failed text creation'); };
+  await assert.rejects(smart._internals.commitSessions(prepared), /failed text creation/);
+  assert.strictEqual(refs.readAutoSizeReference('commit-test'), null, 'a failed UXP commit never seeds the page size');
+  sim.port._internals._makeTextLayer = make;
+  await smart._internals.commitSessions(prepared);
+  assert.strictEqual(refs.readAutoSizeReference('commit-test'), 1.2, 'a successful UXP commit records the page size');
 })().catch(error => { console.error(error); process.exitCode = 1; });

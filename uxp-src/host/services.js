@@ -382,6 +382,23 @@ function installUpdatePackage(base64, expectedVersion, options = {}) {
   return updateInstallation;
 }
 
+async function installBundledPlatformPackage() {
+  if (!isWindows()) throw new Error("The Windows package is only needed on Windows");
+  const plugin = await lfs.getPluginFolder();
+  const entry = await plugin.getEntry("native/UXP-Windows.ccx");
+  const bytes = new Uint8Array(await entry.read({ format: uxp.storage.formats.binary }));
+  const version = await readManifestVersion();
+  if (!version) throw new Error("Missing installed TypeR version");
+  const manifest = validatePackage(bytes, version, PLUGIN_ID);
+  if (!manifest.addon || manifest.addon.name !== "typer-keys.uxpaddon" || !manifest.requiredPermissions || manifest.requiredPermissions.enableAddon !== true) {
+    throw new Error("Missing Windows keyboard addon");
+  }
+  const addon = unzipSync(bytes, { filter: (file) => file.name === "win/x64/typer-keys.uxpaddon" })["win/x64/typer-keys.uxpaddon"];
+  if (!addon || !addon.length) throw new Error("Missing Windows keyboard addon binary");
+  // Keep offline installs independent of GitHub and Creative Cloud's installer.
+  return installUpdatePackage(bytesToBase64(bytes), version, { forceManual: true });
+}
+
 async function runUpdateInstallation(base64, expectedVersion, options) {
   const bytes = base64ToBytes(base64);
   const manifest = validatePackage(bytes, expectedVersion, PLUGIN_ID);
@@ -535,6 +552,7 @@ module.exports = {
     fetchUrl,
     installFonts: (fontFiles) => installFonts(fontFiles, buildWindowsRegistrationScript),
     installUpdatePackage,
+    installBundledPlatformPackage,
     pluginVersion: () => readManifestVersion(),
     practicePagePath,
   },

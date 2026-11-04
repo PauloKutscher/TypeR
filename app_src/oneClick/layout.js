@@ -12,6 +12,7 @@ import { compileGraph, composeText, probesForGraph } from "./textGraph";
 import { measureEdges } from "./measureSpec";
 import { solve, solverInternals } from "./solver";
 import { box, clipToSide, simplify } from "./geometry";
+import { recommendFontSize } from "./autoFontSize";
 
 export class NoPlacementError extends Error {
   constructor(message) {
@@ -310,7 +311,19 @@ export const planText = async (plan, payload, context) => {
     const cache = initial.cache;
     const estimated = estimateLineMetrics(graph, probes, spaces, cache);
     const stylePx = (graph.baseSize * dpi) / 72;
-    const maxPx = policy.maxPx > 0 ? policy.maxPx : policy.smallest ? stylePx * (policy.minScale || 0.75) : stylePx;
+    let maxPx = policy.maxPx > 0 ? policy.maxPx : policy.smallest ? stylePx * (policy.minScale || 0.75) : stylePx;
+    let autoSizes = null;
+    if (policy.autoSize && !policy.smallest) {
+      const words = graph.variants[0].edges.filter(edge => edge.to === edge.from + 1);
+      const advance = words.reduce((sum, edge) => {
+        const metric = cache.get(edge.key);
+        return sum + (metric ? Math.max(0, metric.right - metric.left) : 0);
+      }, Math.max(0, words.length - 1) * 0.3);
+      autoSizes = recommendFontSize({ stylePx, minScale: policy.minScale || 0.75, polygon: plan.cleanPolygon,
+        width: plan.selection.width, height: plan.selection.height, advance,
+        leading: Math.max(1, ...words.map(edge => edge.leading || 1.2)), referenceRatio: policy.referenceRatio });
+      maxPx = autoSizes.max;
+    }
     // Native measurements outlive a pass: later sizes reuse them
     const known = new Map();
     const fitAt = async (size) => {
@@ -332,6 +345,19 @@ export const planText = async (plan, payload, context) => {
     const exact = await fitAt(maxPx);
     if (exact) return { graph, pass: exact, tier: "exact" };
     if (!tiers.includes("range")) return null;
+    if (autoSizes) {
+      // Bounded search reuses the same native metrics; tiny bubbles may go below
+      // the page reference, down to the existing minimum-size preference.
+      let low = autoSizes.min, high = maxPx;
+      let best = await fitAt(low);
+      if (!best) return null;
+      for (let i = 0; i < 5 && high - low > Math.max(0.1, maxPx * 0.01); i++) {
+        const middle = (low + high) / 2;
+        const pass = await fitAt(middle);
+        if (pass) { best = pass; low = middle; } else high = middle;
+      }
+      return { graph, pass: best, tier: "range" };
+    }
     // The largest size that fits: step down 2% at a time, then halve the
     // last step down to half a percent. Shrinking the least keeps the sizes
     // of a page consistent, so a better silhouette never buys a smaller size.

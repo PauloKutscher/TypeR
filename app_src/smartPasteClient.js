@@ -10,6 +10,7 @@ import {
 import { getScaledStyle, resolveStylePointText } from "./textLayerPayload";
 import { parsePageMarker } from "./pageMarker";
 import { prepareSmartPaste } from "./oneClick/smartPaste";
+import { rememberAutoSizeReference } from "./oneClick/autoFontSize";
 import { captureSource, fillFromHistograms, triggerClick } from "./oneClick/bubblePlan";
 import { applyRefont, refontTextStyle } from "./oneClick/refont";
 import { resolveHyphenationLanguage } from "./oneClick/hyphenation";
@@ -81,6 +82,14 @@ export const buildSmartPasteRequest = (state, trigger, options = {}) => {
   const from = typeof options.lineIndex === "number" ? { ...state, currentLineIndex: options.lineIndex } : state;
   const picked = nextPasteLines(from, wanted);
   if (!picked.length) return null;
+  let autoSizePage;
+  if (state.smartPasteAutoSize === true) {
+    let marker = 0;
+    for (let i = from.currentLineIndex; i >= 0; i--) {
+      if (from.lines[i] && parsePageMarker(from.lines[i].rawText)) { marker = i; break; }
+    }
+    autoSizePage = JSON.stringify([state.currentTabId || "", marker]);
+  }
   const rules = refontRulesFor(state);
   // The first line takes the selected style. The next ones take their script
   // prefix, a "//" continuation the style of the line before it, any other
@@ -112,6 +121,8 @@ export const buildSmartPasteRequest = (state, trigger, options = {}) => {
         autoClean: !!state.smartPasteAutoClean,
         distribute: state.smartPasteDistribute !== false,
         autoWrap: state.smartPasteAutoWrap === true,
+        autoSize: state.smartPasteAutoSize === true,
+        ...(autoSizePage !== undefined ? { autoSizePage } : {}),
         minScale: state.smartPasteMinScale > 0 ? state.smartPasteMinScale : 0.75,
         hyphenation: resolveHyphenationLanguage(state.smartPasteHyphenation || "auto", uiLanguage(state), (state.lines || []).map((line) => line.text).join("\n")),
         direction: state.direction,
@@ -172,6 +183,7 @@ export const runSmartPaste = async (request) => {
     const raw = await evalHost("smartPasteCommit(" + JSON.stringify(prepared) + ")");
     const done = safeJsonParse(raw, { error: "commit" });
     if (done.error) return { ok: false, code: done.error, message: done.message };
+    if (Array.isArray(done.layerIds) && done.layerIds.length) rememberAutoSizeReference(prepared);
     return {
       ok: true,
       consumed: prepared.consumed,

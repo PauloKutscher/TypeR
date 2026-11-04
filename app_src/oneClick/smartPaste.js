@@ -23,6 +23,8 @@ import { chambersFor } from "./connected";
 import { planBubbleText, planChamberText, NoPlacementError } from "./layout";
 import { breakPointsFor } from "./hyphenation";
 import { clearGeometryCaches } from "./geometry";
+import { applySmartStroke } from "./smartStroke";
+import { autoSizePageKey, readAutoSizeReference } from "./autoFontSize";
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -135,6 +137,9 @@ export const prepareSmartPaste = async (request, adapter) => {
   if (!input) throw new SmartPasteError("noSelection");
   input.direction = settings.direction;
   const page = { width: input.width, height: input.height, resolution: input.resolution };
+  const autoSizeKey = settings.autoSize === true ? autoSizePageKey(input.documentId, settings.autoSizePage) : null;
+  let referenceRatio = readAutoSizeReference(autoSizeKey);
+  let autoSizeReference = null;
   let plan;
   let subpaths = null;
   if (input.openPlan) {
@@ -157,16 +162,19 @@ export const prepareSmartPaste = async (request, adapter) => {
   const breakPoints = breakPointsFor(settings.hyphenation || "off");
   const sessions = [];
   for (let i = 0; i < chambers.length; i++) {
-    const chamber = chambers[i];
+    let chamber = chambers[i];
     const line = lines[i];
     const picked = styleForKind(line, chamber.kind, request.roleStyles, chamber.source);
     if (!validStyle(picked.style)) throw new SmartPasteError("style", "The style has no text settings");
     const pageStyle = resolveStyleSizeForPage(clone(picked.style), page.width);
     const keepsActiveSize = settings.keepSize && input.activeTextSize > 0;
-    const style = keepsActiveSize ? pageStyle : scaleStyleForPunctuationOnlyText(pageStyle, line.text);
+    let style = keepsActiveSize ? pageStyle : scaleStyleForPunctuationOnlyText(pageStyle, line.text);
     if (keepsActiveSize) overrideSize(style, input.activeTextSize);
     // Enlarged punctuation may shrink back as far as the style's own size can
     const enlargedBy = style === pageStyle ? 1 : parseFloat(style.punctuationOnlyScale);
+    const autoSize = settings.autoSize === true && !settings.keepSize && !isPunctuationOnlyText(line.text);
+    const consistent = !picked.role && picked.style.bubbleType !== "shout" && picked.style.bubbleType !== "narration";
+    ({ style, plan: chamber } = applySmartStroke(style, input, chamber));
     const payload = {
       text: line.text,
       richTextRuns: line.richTextRuns || null,
@@ -181,7 +189,8 @@ export const prepareSmartPaste = async (request, adapter) => {
       useAtlas: !!adapter.useAtlas,
       resolveRunStyle: adapter.resolveRunStyle,
       breakPoints,
-      sizePolicy: { minScale: (settings.minScale > 0 ? settings.minScale : 0.75) / enlargedBy, fixed: !!settings.keepSize },
+      sizePolicy: { minScale: (settings.minScale > 0 ? settings.minScale : 0.75) / enlargedBy, fixed: !!settings.keepSize,
+        autoSize, referenceRatio: consistent ? referenceRatio : null },
     };
     let text;
     try {
@@ -212,6 +221,11 @@ export const prepareSmartPaste = async (request, adapter) => {
       role: picked.role,
       layerName: line.text.replace(/[\r\n]+/g, " ").substring(0, 100),
     });
+    if (autoSize && consistent && !referenceRatio && autoSizeKey) {
+      const baseSize = style.textProps.layerText.textStyleRange[0].textStyle.size * page.resolution / 72;
+      referenceRatio = Math.max(0.9, Math.min(1.35, text.size / baseSize));
+      autoSizeReference = { key: autoSizeKey, ratio: referenceRatio };
+    }
   }
   return {
     documentId: input.documentId,
@@ -221,5 +235,6 @@ export const prepareSmartPaste = async (request, adapter) => {
     sessions,
     consumed: sessions.length,
     cleanupSkipped: plan.cleanupSkipped || null,
+    autoSizeReference,
   };
 };

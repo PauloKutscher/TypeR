@@ -1,5 +1,6 @@
 import { validateImportData, repairFolderHierarchy, mergeImportedStyles } from "./librarySerialization";
 import { parsePageMarker } from "./pageMarker";
+import { normalizePageImageMatchMode } from "./pageImageMapping";
 import React from "react";
 import PropTypes from "prop-types";
 import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, getUpdateTestConfig, clearUpdateTestConfig, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, nativeAlert } from "./utils";
@@ -85,6 +86,7 @@ const storeFields = [
   "ignoreTags",
   "defaultStyleId",
   "autoClosePSD",
+  "pageImageMatchMode",
   "checkUpdates",
   "autoUpdate",
   "currentFolderTagPriority",
@@ -101,6 +103,7 @@ const storeFields = [
   "smartPasteAutoClean",
   "smartPasteDistribute",
   "smartPasteAutoWrap",
+  "smartPasteAutoSize",
   "smartPasteMinScale",
   "smartPasteHyphenation",
   "refontRules",
@@ -291,6 +294,7 @@ const initialState = {
   styleSizeStep: 1,
   resetLineCounterOnPage: storage.data?.resetLineCounterOnPage !== false,
   ...storage.data,
+  pageImageMatchMode: normalizePageImageMatchMode(storage.data?.pageImageMatchMode),
   textShapeRUsageCount: Math.min(
     TEXT_SHAPER_LEARN_TIP_THRESHOLD,
     Math.max(0, Math.floor(Number(storage.data?.textShapeRUsageCount) || 0))
@@ -321,6 +325,7 @@ const initialState = {
   smartPasteAutoClean: storage.data?.smartPasteAutoClean === true,
   smartPasteDistribute: storage.data?.smartPasteDistribute !== false,
   smartPasteAutoWrap: storage.data?.smartPasteAutoWrap === true,
+  smartPasteAutoSize: storage.data?.smartPasteAutoSize === true,
   smartPasteMinScale: normalizeSmartPasteMinScale(storage.data?.smartPasteMinScale),
   smartPasteHyphenation: normalizeSmartPasteHyphenation(storage.data?.smartPasteHyphenation),
   refontRules: normalizeRefontRules(storage.data?.refontRules),
@@ -459,6 +464,9 @@ const baseReducer = (state, action) => {
       if ("autoCenterMode" in action.data) {
         newState.autoCenterMode = normalizeAutoCenterMode(action.data.autoCenterMode);
       }
+      if ("pageImageMatchMode" in action.data) {
+        newState.pageImageMatchMode = normalizePageImageMatchMode(action.data.pageImageMatchMode);
+      }
       if ("smartPaste" in action.data) newState.smartPaste = action.data.smartPaste !== false;
       if ("pasteOnClick" in action.data) newState.pasteOnClick = action.data.pasteOnClick === true;
       if (newState.multiBubbleMode && newState.pasteOnClick) newState.pasteOnClick = false;
@@ -470,6 +478,9 @@ const baseReducer = (state, action) => {
       }
       if ("smartPasteAutoWrap" in action.data) {
         newState.smartPasteAutoWrap = action.data.smartPasteAutoWrap === true;
+      }
+      if ("smartPasteAutoSize" in action.data) {
+        newState.smartPasteAutoSize = action.data.smartPasteAutoSize === true;
       }
       if ("smartPasteMinScale" in action.data) {
         newState.smartPasteMinScale = normalizeSmartPasteMinScale(action.data.smartPasteMinScale);
@@ -1001,6 +1012,11 @@ const baseReducer = (state, action) => {
     break;
   }
 
+  case "setPageImageMatchMode": {
+    newState.pageImageMatchMode = normalizePageImageMatchMode(action.value);
+    break;
+  }
+
   case "setCheckUpdates": {
     newState.checkUpdates = !!action.value;
     break;
@@ -1078,6 +1094,11 @@ const baseReducer = (state, action) => {
 
     case "setSmartPasteAutoWrap": {
       newState.smartPasteAutoWrap = !!action.value;
+      break;
+    }
+
+    case "setSmartPasteAutoSize": {
+      newState.smartPasteAutoSize = !!action.value;
       break;
     }
 

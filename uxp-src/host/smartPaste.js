@@ -11,6 +11,7 @@
 const ps = require("photoshop");
 const photoshop = require("./photoshop");
 const { prepareSmartPaste } = require("../../app_src/oneClick/smartPaste");
+const { rememberAutoSizeReference } = require("../../app_src/oneClick/autoFontSize");
 const { fillFromMask, triggerClick, captureSource } = require("../../app_src/oneClick/bubblePlan");
 const { solverInternals } = require("../../app_src/oneClick/solver");
 const openBubble = require("../../app_src/oneClick/openBubble");
@@ -448,6 +449,7 @@ async function commitSessions(prepared) {
     }
   }));
   const historyAfter = doc.activeHistoryState && doc.activeHistoryState.id;
+  rememberAutoSizeReference(prepared);
   return { layerIds, history: { documentId: doc.id, before: historyBefore, after: historyAfter } };
 }
 

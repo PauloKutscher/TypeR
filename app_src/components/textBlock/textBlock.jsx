@@ -151,6 +151,7 @@ const TextBlock = React.memo(function TextBlock() {
     ignoreTags: state.ignoreTags,
     lines: state.lines,
     images: state.images,
+    pageImageMatchMode: state.pageImageMatchMode,
     autoClosePSD: state.autoClosePSD,
   }));
   const direction = context.state.direction || "ltr";
@@ -171,8 +172,8 @@ const TextBlock = React.memo(function TextBlock() {
   const [viewport, setViewport] = React.useState({ top: 0, height: 600 });
   const scrollFrameRef = React.useRef(null);
   const pageImageLookup = React.useMemo(
-    () => createPageImageLookup(context.state.images),
-    [context.state.images]
+    () => createPageImageLookup(context.state.images, context.state.pageImageMatchMode),
+    [context.state.images, context.state.pageImageMatchMode]
   );
 
   // Fix: only resize when text changes, not on every render

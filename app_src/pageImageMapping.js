@@ -13,7 +13,10 @@ export const getImagePageNumber = (image) => {
   return Number.isSafeInteger(pageNumber) && pageNumber > 0 ? pageNumber : null;
 };
 
-export const createPageImageLookup = (images = []) => {
+export const normalizePageImageMatchMode = (mode) => mode === "order" ? "order" : "filename";
+
+export const createPageImageLookup = (images = [], mode = "filename") => {
+  if (mode === "order") return new Map(images.map((image, index) => [index + 1, image]));
   const candidates = new Map();
 
   images.forEach((image) => {

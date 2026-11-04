@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.0.3.3 — PauloKutscher fork
+
+- Bundle the matching Windows native package inside the universal CCX. Opening it directly on Windows now prepares the keyboard addon offline instead of downloading an unpublished release; restart Photoshop to load it.
+- Add opt-in automatic font sizing (Beta). Estimate from measured speech and bubble geometry, prove fit with the existing solver, and keep comparable styles near the first successful paste on each page. Keep size, punctuation presets and the existing minimum-size preference retain priority.
+- Add page/PSD matching by filename number or linked file order. Filename matching remains the default; the preference persists and is exported with settings.
+- Add smart stroke to presets, enabled by default with per-preset opt-out. Light backgrounds suppress the stroke, dark backgrounds use white text without a stroke, and mixed or uncertain backgrounds keep the configured stroke. Missing strokes are supported.
+- Reuse captured pixels and histograms with bounded sampling and tolerant tone thresholds. Auto clean thresholds remain unchanged.
+
 ## 3.0.3.2 — PauloKutscher fork
 
 - Fix Windows offline installation rejecting four-part UXP and CEP versions. Add native installation regressions for both editions.

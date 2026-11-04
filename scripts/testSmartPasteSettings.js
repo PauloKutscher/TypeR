@@ -14,6 +14,7 @@ const { serializeStyle, validateImportData } = load("app_src/librarySerializatio
   assert.strictEqual(initial.smartPasteAutoClean, false);
   assert.strictEqual(initial.smartPasteDistribute, true);
   assert.strictEqual(initial.smartPasteAutoWrap, false, "existing profiles keep contour-based line breaks");
+  assert.strictEqual(initial.smartPasteAutoSize, false, "Beta sizing is never enabled automatically");
   assert.strictEqual(initial.smartPasteMinScale, 0.75);
   assert.strictEqual(initial.smartPasteHyphenation, "auto");
   assert.deepStrictEqual(initial.refontRules, []);
@@ -137,6 +138,12 @@ for (const bad of ["FR", "de", 1, null, true, { mode: "fr" }, "toString"]) {
 
   assert.strictEqual(reducer(initial, { type: "setSmartPasteAutoClean", value: true }).smartPasteAutoClean, true);
   assert.strictEqual(reducer(initial, { type: "setSmartPasteDistribute", value: false }).smartPasteDistribute, false);
+  assert.strictEqual(loadContext({ smartPasteAutoSize: true }).initial.smartPasteAutoSize, true);
+  assert.strictEqual(loadContext({ smartPasteAutoSize: "true" }).initial.smartPasteAutoSize, false);
+  state = reducer(initial, { type: "setSmartPasteAutoSize", value: true });
+  assert.strictEqual(writes[writes.length - 1][0].smartPasteAutoSize, true);
+  assert.strictEqual(reducer(state, { type: "import", data: {} }).smartPasteAutoSize, true);
+  assert.strictEqual(reducer(state, { type: "import", data: { smartPasteAutoSize: false } }).smartPasteAutoSize, false);
   state = reducer(initial, { type: "setSmartPasteAutoWrap", value: true });
   assert.strictEqual(state.smartPasteAutoWrap, true);
   assert.strictEqual(lastWrite().smartPasteAutoWrap, true);

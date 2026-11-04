@@ -104,6 +104,15 @@ function packageCcx(manifest) {
     else if (!/(^|\/)\.DS_Store$|^host-test\.js$|\.map$/.test(relative)) files[relative] = fs.readFileSync(absolute);
   };
   walk("");
+  if (macBuild && !process.argv.includes('--dev')) {
+    const windowsPackage = fs.readFileSync(path.join(root, 'Releases/UXP-Windows.ccx'));
+    const windowsManifest = JSON.parse(Buffer.from(unzipSync(windowsPackage, { filter: (entry) => entry.name === 'manifest.json' })['manifest.json']).toString('utf8'));
+    if (windowsManifest.id !== manifest.id || windowsManifest.version !== manifest.version || !windowsManifest.addon || !windowsManifest.requiredPermissions.enableAddon) {
+      throw new Error('Build the Windows UXP package of this version before packaging TypeR-UXP.ccx');
+    }
+    // Older clients install this universal package on Windows, including offline.
+    files['native/UXP-Windows.ccx'] = windowsPackage;
+  }
   const nativeFiles = macBuild ? ["native/typer-keys.json"] : ["win/x64/typer-keys.uxpaddon"];
   ["manifest.json", "index.html", "host.js", "web/index.html", "web/index.js", "locale/messages.properties", ...nativeFiles].forEach((name) => {
     if (!files[name]) throw new Error("Incomplete UXP build: " + name);

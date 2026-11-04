@@ -47,6 +47,7 @@ const SECTIONS = [
       { title: "settingsSmartPasteLabel", hint: "settingsSmartPasteHelp", keywords: "intelligent auto" },
       { title: "settingsSmartPasteDistributeLabel", hint: "settingsSmartPasteDistributeHelp", parent: "settingsSmartPasteLabel", keywords: "double triple" },
       { title: "settingsSmartPasteAutoWrapLabel", hint: "settingsSmartPasteAutoWrapHelp", parent: "settingsSmartPasteLabel", keywords: "wrap paragraph line breaks retour ligne caixa quebra" },
+      { title: "settingsSmartPasteAutoSizeLabel", hint: "settingsSmartPasteAutoSizeHelp", parent: "settingsSmartPasteLabel", keywords: "beta automatic font size page consistency tamanho fonte automatico pagina" },
       { title: "settingsSmartPasteAutoCleanLabel", hint: "settingsSmartPasteAutoCleanHelp", parent: "settingsSmartPasteLabel", keywords: "cleaning nettoyage nettoyer effacer erase" },
       { title: "settingsSmartPasteMinScaleLabel", hint: "settingsSmartPasteMinScaleHelp", parent: "settingsSmartPasteLabel", keywords: "shrink reduire" },
       {
@@ -103,6 +104,7 @@ const SECTIONS = [
     tab: "script",
     group: "settingsGroupPages",
     entries: [
+      { title: "settingsPageImageMatchLabel", hint: "settingsPageImageMatchHint", also: ["settingsPageImageMatchFilename", "settingsPageImageMatchOrder"], keywords: "sync psd filename folder order pagina pasta nome ordem" },
       { title: "settingsResetLineCounterOnPageLabel", hint: "settingsResetLineCounterOnPageHint", keywords: "numero numerotation number" },
       { title: "settingsAutoClosePsdLabel", hint: "settingsAutoClosePsdHint", keywords: "fermer close psd" },
     ],

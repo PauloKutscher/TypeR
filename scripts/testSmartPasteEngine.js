@@ -107,7 +107,7 @@ const style = (id, size, font = "AnimeAce") => ({
     },
     typeUnit: "pixelsUnit",
   },
-  stroke: { enabled: true, size: 3, color: { r: 255, g: 255, b: 255 } },
+  stroke: { enabled: true, size: 3, color: { r: 255, g: 255, b: 255 }, smart: false },
 });
 
 const page = { width: 1200, height: 1700, resolution: 72 };
@@ -189,6 +189,39 @@ const linesInside = (session) => {
   assert.strictEqual(shrunk.sessions[0].text.tier, "range");
   linesInside(shrunk.sessions[0]);
 
+  // Beta is opt-in; preparing a paste must not seed a page before commit.
+  const autoRefs = load("app_src/oneClick/autoFontSize.js");
+  autoRefs.clearAutoSizeReferences();
+  const betaSettings = { autoSize: true, autoSizePage: "chapter/page-1", minScale: 0.7, hyphenation: "off" };
+  const betaRequest = (text, settings = betaSettings) => ({ trigger: { source: "wand" }, lines: [line(text)], roleStyles: {}, settings });
+  const betaFirst = await prepareSmartPaste(betaRequest("Bonjour, comment vas-tu ?"), adapterFor(ovalInput));
+  assert(betaFirst.sessions[0].text.size > 24 && betaFirst.sessions[0].text.size <= 36, "Beta may grow the preset size within its safety bound");
+  linesInside(betaFirst.sessions[0]);
+  assert(betaFirst.autoSizeReference);
+  assert.strictEqual(autoRefs.readAutoSizeReference(betaFirst.autoSizeReference.key), null, "failed or uncommitted pastes never establish a baseline");
+  autoRefs.rememberAutoSizeReference(betaFirst);
+  const betaNext = await prepareSmartPaste(betaRequest("Bonjour !"), adapterFor(ovalInput));
+  assert(Math.abs(betaNext.sessions[0].text.size / betaFirst.sessions[0].text.size - 1) < 0.1, "later comparable speech stays close to the first size");
+  const betaSmall = await prepareSmartPaste(betaRequest("Attends-moi devant la porte du magasin."), adapterFor(smallInput));
+  assert(betaSmall.sessions[0].text.size < betaNext.sessions[0].text.size * 0.9, "a small bubble may go below the page consistency band");
+  assert(betaSmall.sessions[0].text.size >= 24*0.7-1e-6);
+  linesInside(betaSmall.sessions[0]);
+  const betaOther = await prepareSmartPaste(betaRequest("Bonjour !", { ...betaSettings, autoSizePage: "chapter/page-2" }), adapterFor(ovalInput));
+  assert(betaOther.autoSizeReference, "another page establishes its own baseline");
+  const betaKept = await prepareSmartPaste(betaRequest("Bonjour !", { ...betaSettings, keepSize: true }), adapterFor({ ...ovalInput, activeTextSize: 30 }));
+  assert.strictEqual(betaKept.sessions[0].text.size, 30, "Keep size takes priority over Beta");
+  assert.strictEqual(betaKept.autoSizeReference, null);
+  const betaPunctuation = await prepareSmartPaste({ ...betaRequest("?!"), lines: [line("?!", { ...style("pause", 24), punctuationOnlyScale: 1.5 })] }, adapterFor(ovalInput));
+  assert.strictEqual(betaPunctuation.sessions[0].text.size, 36, "Beta preserves the punctuation multiplier");
+  assert.strictEqual(betaPunctuation.autoSizeReference, null, "punctuation never establishes the page baseline");
+  const betaTitle = await prepareSmartPaste({ ...betaRequest("Attention !"), lines: [line("Attention !", { ...style("title", 40), bubbleType: "shout" })] }, adapterFor(ovalInput));
+  assert.strictEqual(betaTitle.autoSizeReference, null, "a marked shout/title style never establishes a dialogue baseline");
+  const offRequest = betaRequest("Bonjour !", {});
+  const offA = await prepareSmartPaste(offRequest, adapterFor(ovalInput));
+  const offB = await prepareSmartPaste({ ...offRequest, settings: { autoSize: false } }, adapterFor(ovalInput));
+  assert.deepStrictEqual(offA, offB, "disabled Beta preserves the existing output exactly");
+  autoRefs.clearAutoSizeReferences();
+
   // Too much text for a tiny bubble: no placement (the panel falls back)
   const tiny = ellipseNodes(300, 300, 45, 35);
   const tinyInput = { source: "wand", click: { x: 300, y: 300 }, selectionBounds: boundsOf(geometry.flatten(tiny)), rawPath: pathOf([tiny]), fill: white };
@@ -251,6 +284,33 @@ const linesInside = (session) => {
   }, adapterFor({ ...ovalInput, fill: black }));
   assert.deepStrictEqual(dark.sessions[0].text.params.layerText.textStyleRange[0].textStyle.color, { red: 255, green: 255, blue: 255 });
   assert.strictEqual(dark.sessions[0].text.stroke, null);
+  const adaptiveStyle = style("adaptive", 24);
+  delete adaptiveStyle.stroke.smart;
+  for (const [fill, expectedStroke, expectedWhite] of [
+    [{ fill: 255, rgb: { red: 228, green: 230, blue: 232 } }, false, false],
+    [{ fill: 0, rgb: { red: 35, green: 38, blue: 40 } }, false, true],
+    [null, true, false],
+  ]) {
+    const result = await prepareSmartPaste({ trigger: { source: "wand" }, lines: [line("Bonjour.", adaptiveStyle)], roleStyles: {}, settings: {} }, adapterFor({ ...ovalInput, fill }));
+    assert.strictEqual(!!result.sessions[0].text.stroke, expectedStroke);
+    if (expectedWhite) assert.deepStrictEqual(result.sessions[0].text.params.layerText.textStyleRange[0].textStyle.color, { red: 255, green: 255, blue: 255 });
+  }
+  const noStroke = { ...adaptiveStyle, stroke: undefined };
+  const noStrokeResult = await prepareSmartPaste({ trigger: { source: "wand" }, lines: [line("Bonjour.", noStroke)], roleStyles: {}, settings: {} }, adapterFor(ovalInput));
+  assert.strictEqual(noStrokeResult.sessions[0].text.stroke, null);
+  assert.strictEqual(adaptiveStyle.stroke.enabled, true, "automatic decisions never modify the saved preset");
+  const measurementCounts = [];
+  for (const chosen of [adaptiveStyle, { ...adaptiveStyle, stroke: { ...adaptiveStyle.stroke, smart: false } }]) {
+    const adapter = adapterFor(ovalInput);
+    const measure = adapter.measure, capture = adapter.capture;
+    let calls = 0, captures = 0;
+    adapter.measure = (...args) => { calls++; return measure(...args); };
+    adapter.capture = (...args) => { captures++; return capture(...args); };
+    await prepareSmartPaste({ trigger: { source: "wand" }, lines: [line("Bonjour.", chosen)], roleStyles: {}, settings: {} }, adapter);
+    assert.strictEqual(captures, 1, "smart stroke adds no Photoshop capture");
+    measurementCounts.push(calls);
+  }
+  assert.strictEqual(measurementCounts[0], measurementCounts[1], "smart stroke adds no native font measurement");
   const autoText = "This translation keeps its original words without inserted line breaks.";
   const automatic = await prepareSmartPaste({
     trigger: { source: "wand" }, lines: [line(autoText)], roleStyles: {},

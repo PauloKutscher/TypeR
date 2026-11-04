@@ -28,7 +28,101 @@ const loadKeysHelper = (platform) => {
   return loaded.exports;
 };
 
+async function checkOfflineSwap() {
+  const run = async ({ needed = true, fail = false, testUrl = null } = {}) => {
+    const calls = [];
+    let pending;
+    global.window = { typerUXP: {
+      flushStorage: async () => { calls.push("flush"); },
+      request: async (name) => {
+        calls.push(name);
+        if (name === "needsPlatformPackage") return needed;
+        if (fail) throw new Error("disk unavailable");
+        return { ok: true, method: "manual" };
+      },
+    } };
+    const load = require("./helpers/loadAppModule")({
+      react: { useEffect: (effect) => { pending = effect(); } },
+      "./utils": {
+        getUpdateTestConfig: () => testUrl ? { platformPackageUrl: testUrl } : null,
+        downloadAndInstallUpdate: async (url, progress, complete, error, options) => {
+          assert.strictEqual(url, testUrl, "An offline build must never download its Windows module");
+          calls.push(["download", url, options.expectedVersion]);
+          complete({ reloading: false });
+        },
+        locale: { updateAutoInstalled: "Restart {version}", uxpWindowsPackageFailed: "failed" },
+        nativeAlert: (message) => { calls.push(["alert", message]); },
+      },
+    });
+    load("app_src/uxpPlatformPackage.js").useUxpPlatformPackage();
+    await pending;
+    await new Promise((resolve) => setImmediate(resolve));
+    delete global.window;
+    return calls;
+  };
+  const version = require("../package.json").version;
+  assert.deepStrictEqual(await run(), ["needsPlatformPackage", "flush", "installBundledPlatformPackage", ["alert", "Restart " + version]]);
+  assert.deepStrictEqual(await run({ needed: false }), ["needsPlatformPackage"], "Windows native and macOS packages keep running");
+  assert.deepStrictEqual(await run({ fail: true }), ["needsPlatformPackage", "flush", "installBundledPlatformPackage", ["alert", "failed"]]);
+  assert.deepStrictEqual(await run({ testUrl: "http://localhost/package.ccx" }), [["download", "http://localhost/package.ccx", version], ["alert", "Restart " + version]], "Keep the explicit update-test override");
+}
+
+async function checkBundledHostPackage() {
+  const version = "3.0.3.3";
+  const manifest = { id: "com.scanr.typer", name: "TypeR", version, manifestVersion: 6,
+    addon: { name: "typer-keys.uxpaddon" }, requiredPermissions: { enableAddon: true }, host: { app: "PS", minVersion: "26.0.0" } };
+  const pack = (overrides = {}, binary = true) => zipSync({
+    "manifest.json": strToU8(JSON.stringify({ ...manifest, ...overrides })),
+    ...(binary ? { "win/x64/typer-keys.uxpaddon": strToU8("native addon") } : {}),
+  });
+  let bundled = pack();
+  let registry = JSON.stringify({ plugins: [{ pluginId: "other", path: "other-plugin" }] });
+  const written = new Map();
+  const plugin = { nativePath: "External/com.scanr.typer_" + version,
+    getEntry: async (name) => ({ read: async ({ format }) => {
+      if (name === "manifest.json") return JSON.stringify({ ...manifest, manifestVersion: 5 });
+      assert.strictEqual(name, "native/UXP-Windows.ccx");
+      assert.strictEqual(format, "binary");
+      return bundled;
+    } }),
+  };
+  const load = require("./helpers/loadAppModule")({
+    os: { platform: () => "win32" },
+    uxp: { storage: { localFileSystem: { getPluginFolder: async () => plugin }, formats: { utf8: "utf8", binary: "binary" } } },
+    "./jsx": { systemCall: () => { throw new Error("The offline swap must not start Creative Cloud or a shell"); } },
+    "./files": {
+      getPluginInstallPaths: async () => ({ pluginsFolder: "External", registry: "PS.json" }),
+      basename: (name) => name.split("/").pop(), joinPath: (...parts) => parts.join("/"),
+      exists: async (name) => name === "PS.json", readText: async () => registry,
+      removeTree: async (name) => { assert.notStrictEqual(name, plugin.nativePath, "Preserve the running plugin"); },
+      writeBinary: async (name, bytes) => { written.set(name, Buffer.from(bytes)); },
+      rename: async () => {}, writeTextAtomic: async (name, text) => { registry = text; },
+    },
+  });
+  const { installBundledPlatformPackage } = load("uxp-src/host/services.js").requests;
+  assert.deepStrictEqual(await installBundledPlatformPackage(), { ok: true, method: "manual" });
+  assert.strictEqual(registeredPluginFolder(registry), "com.scanr.typer_" + version + ".win");
+  assert.strictEqual(JSON.parse(registry).plugins[0].pluginId, "other", "Keep other plugins registered");
+  assert(written.get("External/com.scanr.typer_" + version + ".win.installing/win/x64/typer-keys.uxpaddon").equals(Buffer.from("native addon")));
+  const originalRegistry = registry;
+  written.clear();
+  for (const [bytes, error] of [
+    [pack({ version: "3.0.3.2" }), /version mismatch/],
+    [pack({ id: "other" }), /identity/],
+    [pack({ requiredPermissions: { enableAddon: false } }), /keyboard addon/],
+    [pack({}, false), /addon binary/],
+    [strToU8("corrupt"), /Invalid update size/],
+  ]) {
+    bundled = bytes;
+    await assert.rejects(installBundledPlatformPackage(), error);
+    assert.strictEqual(registry, originalRegistry, "Invalid bundles must not change registration");
+    assert.strictEqual(written.size, 0, "Invalid bundles must not write files");
+  }
+}
+
 async function main() {
+  await checkOfflineSwap();
+  await checkBundledHostPackage();
   const onWindows = loadKeysHelper("win32");
   assert.strictEqual(await onWindows.start(() => {}), false, "No macOS reader on Windows");
   assert.strictEqual(onWindows.needsPlatformPackage(), true);
@@ -96,6 +190,6 @@ async function main() {
   const other = await install("com.scanr.typer_3.0.0");
   assert.strictEqual(registeredPluginFolder(other.registry), "com.scanr.typer_3.0.1", "Another version keeps the usual name");
 
-  console.log("UXP platform package: no reader on Windows, single swap, old reader removal and same-version install passed");
+  console.log("UXP platform package: offline swap, bundle validation, single swap, old reader removal and same-version install passed");
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });
