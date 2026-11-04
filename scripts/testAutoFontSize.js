@@ -1,13 +1,22 @@
 const assert = require('assert');
-const { recommendFontSize, autoSizePageKey, readAutoSizeReference, rememberAutoSizeReference, clearAutoSizeReferences } = require('./helpers/loadAppModule')()('app_src/oneClick/autoFontSize.js');
+const { recommendFontSize, normalizeAutoSizeVariation, autoSizePageKey, readAutoSizeReference, rememberAutoSizeReference, clearAutoSizeReferences } = require('./helpers/loadAppModule')()('app_src/oneClick/autoFontSize.js');
 const base = { stylePx: 24, minScale: 0.75, polygon: [[0,0],[300,0],[300,200],[0,200]], width: 300, height: 200, advance: 20, leading: 1.2 };
 const short = recommendFontSize(base);
 const long = recommendFontSize({ ...base, advance: 100 });
 assert(short.max > long.max, 'longer speech receives a smaller recommendation');
 assert(short.max > 24 && short.max <= 36, 'growth is bounded relative to the preset');
 assert(long.max >= 18, 'existing configured minimum is preserved');
-const anchored = recommendFontSize({ ...base, referenceRatio: 1.1 });
-assert(anchored.max >= 24*1.1*0.95 && anchored.max <= 24*1.1*1.05);
+const anchored = recommendFontSize({ ...base, advance: 5, referenceRatio: 1.1 });
+assert(Math.abs(anchored.max - 24*1.1*1.12) < 1e-9, 'the default page variation is 12%');
+assert.strictEqual(recommendFontSize({ ...base, advance: 5, referenceRatio: 1.1, autoSizeVariation: 0 }).max, 24*1.1, 'zero variation keeps the reference recommendation');
+assert(Math.abs(recommendFontSize({ ...base, advance: 5, referenceRatio: 1.1, autoSizeVariation: 0.05 }).max - 24*1.1*1.05) < 1e-9, 'a configured 5% restores the previous range');
+const low = recommendFontSize({ ...base, advance: 1000, referenceRatio: 1.1 });
+assert(Math.abs(low.max - 24*1.1*0.88) < 1e-9, 'default lower bound is 12% below the reference');
+const wide = recommendFontSize({ ...base, referenceRatio: 1.1, autoSizeVariation: 1 });
+assert.strictEqual(wide.max, short.max, '100% variation still respects preset size limits');
+for (const [value, expected] of [[undefined, 0.12], [null, 0.12], ['', 0.12], ['bad', 0.12], [true, 0.12], [NaN, 0.12], [Infinity, 0.12], [0, 0], [0.12, 0.12], ['0.2', 0.2], [-1, 0], [2, 1]]) {
+  assert.strictEqual(normalizeAutoSizeVariation(value), expected, String(value));
+}
 const scaled = recommendFontSize({ ...base, stylePx: 48, width: 600, height: 400, polygon: base.polygon.map(([x,y])=>[x*2,y*2]) });
 assert(Math.abs(scaled.max-short.max*2) < 1e-6, 'proportional document/DPI changes keep the visual scale');
 clearAutoSizeReferences();

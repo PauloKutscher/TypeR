@@ -10,7 +10,7 @@ import {
 import { getScaledStyle, resolveStylePointText } from "./textLayerPayload";
 import { parsePageMarker } from "./pageMarker";
 import { prepareSmartPaste } from "./oneClick/smartPaste";
-import { rememberAutoSizeReference } from "./oneClick/autoFontSize";
+import { rememberAutoSizeReference, normalizeAutoSizeVariation } from "./oneClick/autoFontSize";
 import { captureSource, fillFromHistograms, triggerClick } from "./oneClick/bubblePlan";
 import { applyRefont, refontTextStyle } from "./oneClick/refont";
 import { resolveHyphenationLanguage } from "./oneClick/hyphenation";
@@ -122,6 +122,7 @@ export const buildSmartPasteRequest = (state, trigger, options = {}) => {
         distribute: state.smartPasteDistribute !== false,
         autoWrap: state.smartPasteAutoWrap === true,
         autoSize: state.smartPasteAutoSize === true,
+        autoSizeVariation: normalizeAutoSizeVariation(state.smartPasteAutoSizeVariation),
         ...(autoSizePage !== undefined ? { autoSizePage } : {}),
         minScale: state.smartPasteMinScale > 0 ? state.smartPasteMinScale : 0.75,
         hyphenation: resolveHyphenationLanguage(state.smartPasteHyphenation || "auto", uiLanguage(state), (state.lines || []).map((line) => line.text).join("\n")),

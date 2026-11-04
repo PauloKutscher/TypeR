@@ -108,11 +108,14 @@ const baseState = () => ({
   assert.strictEqual(request.lines[1].styleLocked, true, "a prefix style is locked");
   assert.strictEqual(request.lines[1].style.id, "s");
   assert.deepStrictEqual(request.settings, {
-    autoClean: true, distribute: true, autoWrap: false, autoSize: false, minScale: 0.8, hyphenation: "fr", direction: "rtl", padding: 4, keepSize: true, pointText: false,
+    autoClean: true, distribute: true, autoWrap: false, autoSize: false, autoSizeVariation: 0.12, minScale: 0.8, hyphenation: "fr", direction: "rtl", padding: 4, keepSize: true, pointText: false,
   });
   assert.strictEqual(client.buildSmartPasteRequest({ ...state, smartPasteAutoWrap: true }, null).request.settings.autoWrap, true);
   const betaPage = client.buildSmartPasteRequest({ ...state, smartPasteAutoSize: true, currentTabId: "tab-a" }, null).request.settings;
   assert.strictEqual(betaPage.autoSize, true);
+  assert.strictEqual(betaPage.autoSizeVariation, 0.12);
+  assert.strictEqual(client.buildSmartPasteRequest({ ...state, smartPasteAutoSizeVariation: 0 }, null).request.settings.autoSizeVariation, 0);
+  assert.strictEqual(client.buildSmartPasteRequest({ ...state, smartPasteAutoSizeVariation: 0.25 }, null).request.settings.autoSizeVariation, 0.25);
   assert.notStrictEqual(betaPage.autoSizePage, client.buildSmartPasteRequest({ ...state, smartPasteAutoSize: true, currentTabId: "tab-b" }, null).request.settings.autoSizePage);
   const nextPage = client.buildSmartPasteRequest({ ...state, smartPasteAutoSize: true, currentTabId: "tab-a", currentLineIndex: 6 }, null).request.settings;
   assert.notStrictEqual(betaPage.autoSizePage, nextPage.autoSizePage);

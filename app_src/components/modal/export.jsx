@@ -31,6 +31,7 @@ const ExportModal = React.memo(function ExportModal() {
     smartPasteDistribute: state.smartPasteDistribute,
     smartPasteAutoWrap: state.smartPasteAutoWrap,
     smartPasteAutoSize: state.smartPasteAutoSize,
+    smartPasteAutoSizeVariation: state.smartPasteAutoSizeVariation,
     smartPasteMinScale: state.smartPasteMinScale,
     smartPasteHyphenation: state.smartPasteHyphenation,
     refontRules: state.refontRules,
@@ -176,6 +177,7 @@ const ExportModal = React.memo(function ExportModal() {
       data.smartPasteDistribute = exportSource.smartPasteDistribute;
       data.smartPasteAutoWrap = exportSource.smartPasteAutoWrap;
       data.smartPasteAutoSize = exportSource.smartPasteAutoSize;
+      data.smartPasteAutoSizeVariation = exportSource.smartPasteAutoSizeVariation;
       data.smartPasteMinScale = exportSource.smartPasteMinScale;
       data.smartPasteHyphenation = exportSource.smartPasteHyphenation;
       data.refontRules = exportSource.refontRules;

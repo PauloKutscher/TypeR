@@ -201,11 +201,17 @@ const linesInside = (session) => {
   assert.strictEqual(autoRefs.readAutoSizeReference(betaFirst.autoSizeReference.key), null, "failed or uncommitted pastes never establish a baseline");
   autoRefs.rememberAutoSizeReference(betaFirst);
   const betaNext = await prepareSmartPaste(betaRequest("Bonjour !"), adapterFor(ovalInput));
-  assert(Math.abs(betaNext.sessions[0].text.size / betaFirst.sessions[0].text.size - 1) < 0.1, "later comparable speech stays close to the first size");
+  assert(Math.abs(betaNext.sessions[0].text.size / betaFirst.sessions[0].text.size - 1) <= 0.12, "later comparable speech stays within the default variation");
+  const betaStrict = await prepareSmartPaste(betaRequest("Bonjour !", { ...betaSettings, autoSizeVariation: 0 }), adapterFor(ovalInput));
+  const betaNarrow = await prepareSmartPaste(betaRequest("Bonjour !", { ...betaSettings, autoSizeVariation: 0.05 }), adapterFor(ovalInput));
+  assert(betaStrict.sessions[0].text.size < betaNarrow.sessions[0].text.size && betaNarrow.sessions[0].text.size < betaNext.sessions[0].text.size, "configured variation travels from the request through the shared layout engine");
   const betaSmall = await prepareSmartPaste(betaRequest("Attends-moi devant la porte du magasin."), adapterFor(smallInput));
   assert(betaSmall.sessions[0].text.size < betaNext.sessions[0].text.size * 0.9, "a small bubble may go below the page consistency band");
   assert(betaSmall.sessions[0].text.size >= 24*0.7-1e-6);
   linesInside(betaSmall.sessions[0]);
+  const betaSmallStrict = await prepareSmartPaste(betaRequest("Attends-moi devant la porte du magasin.", { ...betaSettings, autoSizeVariation: 0 }), adapterFor(smallInput));
+  assert(betaSmallStrict.sessions[0].text.size < betaStrict.sessions[0].text.size && betaSmallStrict.sessions[0].text.size >= 24*0.7-1e-6, "a small bubble can shrink below a 0% reference band, respecting the minimum");
+  linesInside(betaSmallStrict.sessions[0]);
   const betaOther = await prepareSmartPaste(betaRequest("Bonjour !", { ...betaSettings, autoSizePage: "chapter/page-2" }), adapterFor(ovalInput));
   assert(betaOther.autoSizeReference, "another page establishes its own baseline");
   const betaKept = await prepareSmartPaste(betaRequest("Bonjour !", { ...betaSettings, keepSize: true }), adapterFor({ ...ovalInput, activeTextSize: 30 }));

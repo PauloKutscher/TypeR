@@ -1,6 +1,7 @@
 import { validateImportData, repairFolderHierarchy, mergeImportedStyles } from "./librarySerialization";
 import { parsePageMarker } from "./pageMarker";
 import { normalizePageImageMatchMode } from "./pageImageMapping";
+import { normalizeAutoSizeVariation } from "./oneClick/autoFontSize";
 import React from "react";
 import PropTypes from "prop-types";
 import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, getUpdateTestConfig, clearUpdateTestConfig, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, nativeAlert } from "./utils";
@@ -104,6 +105,7 @@ const storeFields = [
   "smartPasteDistribute",
   "smartPasteAutoWrap",
   "smartPasteAutoSize",
+  "smartPasteAutoSizeVariation",
   "smartPasteMinScale",
   "smartPasteHyphenation",
   "refontRules",
@@ -326,6 +328,7 @@ const initialState = {
   smartPasteDistribute: storage.data?.smartPasteDistribute !== false,
   smartPasteAutoWrap: storage.data?.smartPasteAutoWrap === true,
   smartPasteAutoSize: storage.data?.smartPasteAutoSize === true,
+  smartPasteAutoSizeVariation: normalizeAutoSizeVariation(storage.data?.smartPasteAutoSizeVariation),
   smartPasteMinScale: normalizeSmartPasteMinScale(storage.data?.smartPasteMinScale),
   smartPasteHyphenation: normalizeSmartPasteHyphenation(storage.data?.smartPasteHyphenation),
   refontRules: normalizeRefontRules(storage.data?.refontRules),
@@ -481,6 +484,9 @@ const baseReducer = (state, action) => {
       }
       if ("smartPasteAutoSize" in action.data) {
         newState.smartPasteAutoSize = action.data.smartPasteAutoSize === true;
+      }
+      if ("smartPasteAutoSizeVariation" in action.data) {
+        newState.smartPasteAutoSizeVariation = normalizeAutoSizeVariation(action.data.smartPasteAutoSizeVariation);
       }
       if ("smartPasteMinScale" in action.data) {
         newState.smartPasteMinScale = normalizeSmartPasteMinScale(action.data.smartPasteMinScale);
@@ -1099,6 +1105,11 @@ const baseReducer = (state, action) => {
 
     case "setSmartPasteAutoSize": {
       newState.smartPasteAutoSize = !!action.value;
+      break;
+    }
+
+    case "setSmartPasteAutoSizeVariation": {
+      newState.smartPasteAutoSizeVariation = normalizeAutoSizeVariation(action.value);
       break;
     }
 

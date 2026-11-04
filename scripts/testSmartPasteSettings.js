@@ -15,6 +15,7 @@ const { serializeStyle, validateImportData } = load("app_src/librarySerializatio
   assert.strictEqual(initial.smartPasteDistribute, true);
   assert.strictEqual(initial.smartPasteAutoWrap, false, "existing profiles keep contour-based line breaks");
   assert.strictEqual(initial.smartPasteAutoSize, false, "Beta sizing is never enabled automatically");
+  assert.strictEqual(initial.smartPasteAutoSizeVariation, 0.12);
   assert.strictEqual(initial.smartPasteMinScale, 0.75);
   assert.strictEqual(initial.smartPasteHyphenation, "auto");
   assert.deepStrictEqual(initial.refontRules, []);
@@ -57,6 +58,21 @@ for (const [stored, expected] of [
 }
 
 // Hyphenation: one of the known modes, otherwise auto
+for (const [stored, expected] of [[0, 0], [0.25, 0.25], [1, 1], [-1, 0], [2, 1], ["0.2", 0.2], ["", 0.12], [null, 0.12], [true, 0.12], ["bad", 0.12]]) {
+  assert.strictEqual(loadContext({ smartPasteAutoSizeVariation: stored }).initial.smartPasteAutoSizeVariation, expected);
+}
+{
+  const { reducer, initial, writes } = loadContext({});
+  const state = reducer(initial, { type: "setSmartPasteAutoSizeVariation", value: 0.2 });
+  assert.strictEqual(state.smartPasteAutoSizeVariation, 0.2);
+  assert.strictEqual(writes[writes.length - 1][0].smartPasteAutoSizeVariation, 0.2);
+  assert.strictEqual(loadContext(writes[writes.length - 1][0]).initial.smartPasteAutoSizeVariation, 0.2, "the preference survives a reload");
+  assert.strictEqual(reducer(state, { type: "import", data: {} }).smartPasteAutoSizeVariation, 0.2);
+  assert.strictEqual(reducer(state, { type: "import", data: { smartPasteAutoSizeVariation: 0 } }).smartPasteAutoSizeVariation, 0);
+  assert.strictEqual(reducer(state, { type: "import", data: { smartPasteAutoSizeVariation: "bad" } }).smartPasteAutoSizeVariation, 0.12);
+  assert.strictEqual(state.smartPasteAutoSize, false, "editing variation never enables Beta");
+}
+
 for (const mode of ["auto", "fr", "en", "off"]) {
   assert.strictEqual(loadContext({ smartPasteHyphenation: mode }).initial.smartPasteHyphenation, mode);
 }

@@ -190,7 +190,7 @@ export const prepareSmartPaste = async (request, adapter) => {
       resolveRunStyle: adapter.resolveRunStyle,
       breakPoints,
       sizePolicy: { minScale: (settings.minScale > 0 ? settings.minScale : 0.75) / enlargedBy, fixed: !!settings.keepSize,
-        autoSize, referenceRatio: consistent ? referenceRatio : null },
+        autoSize, autoSizeVariation: settings.autoSizeVariation, referenceRatio: consistent ? referenceRatio : null },
     };
     let text;
     try {

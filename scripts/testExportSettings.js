@@ -4,6 +4,7 @@ const createLoader = require('./helpers/loadAppModule');
 const preferences = {
   smartPaste: false, pasteOnClick: true, smartPasteAutoClean: true,
   smartPasteDistribute: false, smartPasteMinScale: 0.8, smartPasteHyphenation: 'fr',
+  smartPasteAutoSizeVariation: 0.2,
   refontRules: [{ marker: '!', fontPostScriptName: 'Example' }],
 };
 const profile = { folders: [], styles: [], ...preferences };

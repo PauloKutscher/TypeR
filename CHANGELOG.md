@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.3.4 — PauloKutscher fork
+
+- Increase the automatic font sizing (Beta) page-reference variation from 5% to 12% by default. Add a configurable 0–100% field under Settings → Insertion → Smart paste → Automatic font size (Beta), persisted and exported with settings. Small bubbles may still shrink below this band to fit, respecting the existing minimum text size.
+
 ## 3.0.3.3 — PauloKutscher fork
 
 - Bundle the matching Windows native package inside the universal CCX. Opening it directly on Windows now prepares the keyboard addon offline instead of downloading an unpublished release; restart Photoshop to load it.

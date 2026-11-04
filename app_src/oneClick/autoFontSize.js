@@ -2,15 +2,22 @@ import { area } from "./geometry";
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
+export const normalizeAutoSizeVariation = (value) => {
+  const num = typeof value === "number" ? value
+    : typeof value === "string" && value.trim() !== "" ? Number(value) : NaN;
+  return Number.isFinite(num) ? Math.round(clamp(num, 0, 1) * 100) / 100 : 0.12;
+};
+
 // Estimate once from already measured word advances; the existing solver proves fit.
-export const recommendFontSize = ({ stylePx, minScale, polygon, width, height, advance, leading, referenceRatio }) => {
+export const recommendFontSize = ({ stylePx, minScale, polygon, width, height, advance, leading, referenceRatio, autoSizeVariation }) => {
   const min = Math.max(0.1, stylePx * minScale);
   const room = Math.min(area(polygon), width * height);
   const estimate = Math.sqrt(Math.max(1, room) * 0.30 / Math.max(1, advance * leading));
   let target = clamp(estimate, min, stylePx * 1.5);
   if (referenceRatio > 0) {
     const reference = stylePx * referenceRatio;
-    target = clamp(target, reference * 0.95, reference * 1.05);
+    const variation = normalizeAutoSizeVariation(autoSizeVariation);
+    target = clamp(target, reference * (1 - variation), reference * (1 + variation));
   }
   return { max: clamp(target, min, stylePx * 1.5), min };
 };
