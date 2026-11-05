@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.0.3.5 — PauloKutscher fork
 
 - Merge upstream through `537ab2b`: keyboard recording and mouse buttons, UXP startup recovery, connected-bubble reading order, tagged-style return, Markdown page headings and paste/preview performance fixes. Keep the fork's calibrated centres, page/PSD matching, optional box wrapping, automatic font sizing and four-part updater versions.
 - Use the updated bundled Windows keyboard reader while retaining the universal CCX's offline Windows package. Combine cleared-enumeration validation with the fork's explicit caps-off conversion, and recognize Markdown headings without losing Portuguese page markers.
