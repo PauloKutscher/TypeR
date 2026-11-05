@@ -293,7 +293,7 @@ const linesInside = (session) => {
   const adaptiveStyle = style("adaptive", 24);
   delete adaptiveStyle.stroke.smart;
   for (const [fill, expectedStroke, expectedWhite] of [
-    [{ fill: 255, rgb: { red: 228, green: 230, blue: 232 } }, false, false],
+    [{ fill: 255, rgb: { red: 228, green: 230, blue: 232 } }, true, false],
     [{ fill: 0, rgb: { red: 35, green: 38, blue: 40 } }, false, true],
     [null, true, false],
   ]) {

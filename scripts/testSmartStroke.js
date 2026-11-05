@@ -19,7 +19,11 @@ for (const [value, tone] of [[230,'light'], [35,'dark'], [128,'mixed']]) {
   assert.strictEqual(strokeBackground({ histograms: [hist,hist,hist] }, plan), tone);
 }
 const saved = JSON.stringify(style);
-assert.strictEqual(applySmartStroke(style, pixels(() => 230), plan).style.stroke, null);
+assert.strictEqual(applySmartStroke(style, pixels(() => 230), plan).style.stroke, style.stroke, 'Light backgrounds preserve the configured preset stroke with smart stroke on');
+for (const color of [{ r: 255, g: 255, b: 255 }, { r: 0, g: 0, b: 0 }]) {
+  const preset = { ...style, stroke: { ...style.stroke, color } };
+  assert.strictEqual(applySmartStroke(preset, pixels(() => 230), plan).style, preset, 'White and black preset strokes must both survive on a light background');
+}
 assert.deepStrictEqual(applySmartStroke(style, pixels(() => 40), plan).plan.textColor, rgb(255));
 assert.strictEqual(applySmartStroke(style, pixels(x => x < 120 ? 20 : 230), plan).style.stroke, style.stroke);
 assert.strictEqual(applySmartStroke(style, {}, plan).style, style);

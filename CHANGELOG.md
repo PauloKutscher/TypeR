@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fix smart stroke removing a configured preset stroke on light backgrounds. Preserve the preset's stroke there, matching the disabled option; keep dark-background white text without a stroke, mixed-background handling and presets without strokes unchanged.
+
 ## 3.0.3.4 — PauloKutscher fork
 
 - Increase the automatic font sizing (Beta) page-reference variation from 5% to 12% by default. Add a configurable 0–100% field under Settings → Insertion → Smart paste → Automatic font size (Beta), persisted and exported with settings. Small bubbles may still shrink below this band to fit, respecting the existing minimum text size.
