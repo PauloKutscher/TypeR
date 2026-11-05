@@ -17,6 +17,7 @@ import { resolveHyphenationLanguage } from "./oneClick/hyphenation";
 import { getInterfaceLanguage } from "./interfaceLanguage";
 import { createPasteHistory, lineAfterHistoryMove } from "./oneClick/pasteHistory";
 import { resolveTypeRFontVariant } from "./fontVariantResolver.jsxinc";
+import { notePerfHost } from "./perfDebug";
 
 const isUxp = () => !!(typeof window !== "undefined" && window.typerUXP);
 
@@ -77,6 +78,19 @@ export const lineAfter = (state, index) => {
   return index;
 };
 
+// The script's language is detected over the whole script: once per script,
+// not once per paste
+let hyphenationMemo = null;
+const hyphenationFor = (state) => {
+  const mode = state.smartPasteHyphenation || "auto";
+  const ui = uiLanguage(state);
+  const text = (state.lines || []).map((line) => line.text).join("\n");
+  if (hyphenationMemo && hyphenationMemo.mode === mode && hyphenationMemo.ui === ui && hyphenationMemo.text === text) return hyphenationMemo.language;
+  const language = resolveHyphenationLanguage(mode, ui, text);
+  hyphenationMemo = { mode, ui, text, language };
+  return language;
+};
+
 export const buildSmartPasteRequest = (state, trigger, options = {}) => {
   const wanted = state.smartPasteDistribute === false || options.single ? 1 : 3;
   const from = typeof options.lineIndex === "number" ? { ...state, currentLineIndex: options.lineIndex } : state;
@@ -125,8 +139,9 @@ export const buildSmartPasteRequest = (state, trigger, options = {}) => {
         autoSizeVariation: normalizeAutoSizeVariation(state.smartPasteAutoSizeVariation),
         ...(autoSizePage !== undefined ? { autoSizePage } : {}),
         minScale: state.smartPasteMinScale > 0 ? state.smartPasteMinScale : 0.75,
-        hyphenation: resolveHyphenationLanguage(state.smartPasteHyphenation || "auto", uiLanguage(state), (state.lines || []).map((line) => line.text).join("\n")),
+        hyphenation: hyphenationFor(state),
         direction: state.direction,
+        readingOrder: state.readingOrder === "ltr" ? "ltr" : "rtl",
         padding: state.internalPadding || 0,
         keepSize: options.preserveActiveTextSize === true,
         pointText: resolveStylePointText(state.currentStyle, state.pastePointText),
@@ -136,6 +151,40 @@ export const buildSmartPasteRequest = (state, trigger, options = {}) => {
 };
 
 /* ======================= CEP adapter ======================= */
+
+// The Legacy panel measures through ExtendScript, where an atlas (up to 24
+// lines converted to a shape, its outline read point by point) and single
+// lines (one text update and one bounds read each) cost very differently
+// from one Photoshop to another. The host times every request; once both
+// kinds have been seen, the one that measures a line faster is used. The
+// atlas goes first (the default), then single lines once.
+const measureCosts = { atlas: { ms: 0, lines: 0 }, line: { ms: 0, lines: 0 } };
+export const noteMeasureCosts = (requests, replies) => {
+  for (let i = 0; i < requests.length; i++) {
+    const reply = replies && replies[i];
+    if (!reply || !(reply.ms >= 0)) continue;
+    const atlas = requests[i].kind === "atlas";
+    const lines = atlas ? Number(requests[i].count) || 1 : 1;
+    const entry = measureCosts[atlas ? "atlas" : "line"];
+    entry.ms += reply.ms;
+    entry.lines += lines;
+    notePerfHost(atlas ? "smartPasteMeasure:atlas" : "smartPasteMeasure:line", reply.ms);
+  }
+};
+export const preferAtlas = () => {
+  if (!measureCosts.atlas.lines) return true;
+  if (!measureCosts.line.lines) return false;
+  return measureCosts.atlas.ms / measureCosts.atlas.lines <= measureCosts.line.ms / measureCosts.line.lines;
+};
+export const measurementCosts = () => ({
+  atlas: { ...measureCosts.atlas, perLine: measureCosts.atlas.lines ? measureCosts.atlas.ms / measureCosts.atlas.lines : null },
+  line: { ...measureCosts.line, perLine: measureCosts.line.lines ? measureCosts.line.ms / measureCosts.line.lines : null },
+  atlasPreferred: preferAtlas(),
+});
+export const resetMeasurementCosts = () => {
+  measureCosts.atlas = { ms: 0, lines: 0 };
+  measureCosts.line = { ms: 0, lines: 0 };
+};
 
 const cepAdapter = (request) => ({
   capture: async (trigger) => {
@@ -158,6 +207,7 @@ const cepAdapter = (request) => ({
     const raw = await evalHost("smartPasteMeasure(" + JSON.stringify({ requests: requests.map((r) => ({ params: r.params, kind: r.kind, count: r.count })) }) + ")");
     const replies = safeJsonParse(raw, null);
     if (!Array.isArray(replies)) throw Object.assign(new Error("measure"), { code: "measure" });
+    noteMeasureCosts(requests, replies);
     return replies;
   },
   resolveRunStyle: (base, run) => {
@@ -171,7 +221,9 @@ const cepAdapter = (request) => ({
     }
     return style;
   },
-  useAtlas: true,
+  get useAtlas() { return preferAtlas(); },
+  // Every measurement is an ExtendScript round trip: no exhaustive one
+  leanMeasure: true,
 });
 
 export const runSmartPaste = async (request) => {
@@ -213,7 +265,42 @@ export const styleWithTextColor = (style, textColor) => {
 
 const pasteHistory = createPasteHistory();
 
-export const getHistorySnapshot = async () => safeJsonParse(await evalHost("getHistorySnapshot()", 15000), null);
+// The host reads the history state by state (one get each): it answers
+// "unchanged" when the current state and the count are those of the last
+// reading, and that reading is reused
+let knownHistory = null;
+export const getHistorySnapshot = async () => {
+  const known = knownHistory ? { documentId: knownHistory.documentId, current: knownHistory.current, count: knownHistory.count } : null;
+  const reply = safeJsonParse(await evalHost("getHistorySnapshot(" + JSON.stringify({ known }) + ")", 15000), null);
+  if (!reply || reply.current == null) {
+    knownHistory = null;
+    return reply || null;
+  }
+  if (reply.unchanged) return knownHistory ? knownHistory.snapshot : null;
+  knownHistory = { documentId: reply.documentId, current: reply.current, count: reply.count, snapshot: reply };
+  return reply;
+};
+export const forgetHistorySnapshot = () => { knownHistory = null; };
+
+// A paste is one new history state on the current one (the redo states go):
+// the last reading follows it, so the next check costs no full reading
+export const noteHistoryAfterPaste = (history) => {
+  if (!knownHistory || !history || history.documentId !== knownHistory.documentId ||
+      !(history.count > 0) || history.before == null || history.after == null) {
+    knownHistory = null;
+    return;
+  }
+  const states = Array.isArray(knownHistory.snapshot.states) ? knownHistory.snapshot.states : [];
+  const at = states.indexOf(history.before);
+  const next = at >= 0 ? states.slice(0, at + 1).concat([history.after]) : null;
+  if (!next || next.length !== history.count) {
+    knownHistory = null;
+    return;
+  }
+  const snapshot = { documentId: history.documentId, current: history.after, count: history.count, states: next };
+  knownHistory = { documentId: history.documentId, current: history.after, count: history.count, snapshot };
+};
+export const knownHistorySnapshot = () => (knownHistory ? knownHistory.snapshot : null);
 
 // Move the script line after a history move (latest state through getState)
 export const applyHistorySnapshot = (snapshot, getState, dispatch) => {
@@ -317,6 +404,28 @@ export const withSampleAll = (trigger) => (
   trigger && trigger.source === "wand" ? { ...trigger, options: { ...trigger.options, merged: true } } : trigger
 );
 
+// A manual paste after a Magic Wand click made without "Sample All Layers"
+// while a text layer was active (the one just pasted): the wand read that
+// layer, not the page, and took nearly the whole page. As for paste on click,
+// TypeR turns the option on and selects the click again before pasting.
+// Answers false when the paste must not go on.
+const wandClickWithoutSampleAll = () => {
+  const trigger = lastTrigger && lastTrigger.trigger;
+  return trigger && trigger.source === "wand" && trigger.options && trigger.options.merged === false ? trigger : null;
+};
+export const needsWandReselect = () => !!wandClickWithoutSampleAll();
+export const reselectWandOnPage = async (dispatch) => {
+  const trigger = wandClickWithoutSampleAll();
+  if (!trigger) return true;
+  const sampled = await imposeSampleAll(trigger, dispatch);
+  if (sampled === "skip") return false;
+  if (sampled !== "reselect") return true;
+  const fixed = withSampleAll(trigger);
+  if (!(await replaySelection(fixed, dispatch))) return false;
+  rememberSelectionTrigger(fixed);
+  return true;
+};
+
 const classicPaste = (state, dispatch, options, textColor) => new Promise((resolve) => {
   const line = state.currentLine || { text: "" };
   const style = styleWithTextColor(getScaledStyle(state.currentStyle, state.textScale), textColor);
@@ -342,6 +451,7 @@ const commitSmartResult = (getState, dispatch, state, built, result) => {
   if (result.history && result.history.before != null && result.history.after != null) {
     pasteHistory.register({ ...result.history, lineBefore: consumed[0], lineAfter: nextLineIndex });
   }
+  if (!isUxp()) noteHistoryAfterPaste(result.history);
   if (result.cleanupSkipped && built.request.settings.autoClean) notice(dispatch, locale.smartPasteCleanSkipped, "warning");
 };
 
@@ -499,6 +609,7 @@ export const smartPasteStoredSelections = async (getState, dispatch, options = {
         if (result.history && result.history.before != null && result.history.after != null) {
           pasteHistory.register({ ...result.history, lineBefore: lineIndex, lineAfter: lineAfter(getState(), lineIndex) });
         }
+        if (!isUxp()) noteHistoryAfterPaste(result.history);
       } else {
         if (result && stopsWithoutFallback(result.code)) {
           notice(dispatch, reasonText(result.code), "warning");

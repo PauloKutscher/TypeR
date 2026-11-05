@@ -47,6 +47,7 @@ import { clearTypeRCache, formatCacheBytes, getTypeRCacheInfo } from "../../cepC
 import { DEFAULT_SETTINGS_TAB, normalizeSettingsTab, readSettingsTab, writeSettingsTab } from "../../settingsTab";
 import { buildSettingsSearchIndex, findSettingRow, searchSettings } from "../../settingsSearch";
 import SettingsSearchResults from "./settingsSearchResults";
+import KeyboardDebug from "./keyboardDebug";
 import { FOOTER_MODE_KEYS } from "../../uiLayout";
 import { FOOTER_MODE_ICONS, footerModeLabel } from "../footer/footer";
 
@@ -140,6 +141,7 @@ const SettingsModal = React.memo(function SettingsModal() {
     smartPasteAutoClean: state.smartPasteAutoClean,
     smartPasteMinScale: state.smartPasteMinScale,
     smartPasteHyphenation: state.smartPasteHyphenation,
+    readingOrder: state.readingOrder,
     refontRules: state.refontRules,
     showTips: state.showTips,
     showQuickStyleSize: state.showQuickStyleSize,
@@ -210,6 +212,7 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [smartPasteMinScale, setSmartPasteMinScale] = React.useState(
     () => minScaleToPercent(context.state.smartPasteMinScale)
   );
+  const [readingOrder, setReadingOrder] = React.useState(context.state.readingOrder === "ltr" ? "ltr" : "rtl");
   const [smartPasteHyphenation, setSmartPasteHyphenation] = React.useState(
     context.state.smartPasteHyphenation || "auto"
   );
@@ -625,6 +628,11 @@ const SettingsModal = React.memo(function SettingsModal() {
     setEdited(true);
   };
 
+  const changeReadingOrder = (e) => {
+    setReadingOrder(e.target.value);
+    setEdited(true);
+  };
+
   // Conditional refont rules: edited as a draft, normalized on save (rows
   // with an empty marker are dropped there)
   const updateRefontRule = (index, patch) => {
@@ -1032,6 +1040,9 @@ const SettingsModal = React.memo(function SettingsModal() {
     if (smartPasteHyphenation !== (context.state.smartPasteHyphenation || "auto")) {
       context.dispatch({ type: "setSmartPasteHyphenation", value: smartPasteHyphenation });
     }
+    if (readingOrder !== (context.state.readingOrder === "ltr" ? "ltr" : "rtl")) {
+      context.dispatch({ type: "setReadingOrder", value: readingOrder });
+    }
     const refontRulesToSave = normalizeRefontRules(refontRules);
     if (JSON.stringify(refontRulesToSave) !== JSON.stringify(normalizeRefontRules(context.state.refontRules))) {
       context.dispatch({ type: "setRefontRules", rules: refontRulesToSave });
@@ -1382,6 +1393,7 @@ const SettingsModal = React.memo(function SettingsModal() {
       disabled: !fontViewerAvailable,
       disabledTitle: locale.fontViewerUnavailable,
     },
+    { id: "debug", label: locale.settingsTabDebug, icon: FaKeyboard },
   ];
 
   const searchIndex = React.useMemo(() => buildSettingsSearchIndex({
@@ -1576,6 +1588,18 @@ const SettingsModal = React.memo(function SettingsModal() {
                       locale.settingsSmartPasteDistributeLabel || "Split lines across connected bubbles",
                       locale.settingsSmartPasteDistributeHelp || "Double or triple bubbles receive the next lines, one per part."
                     )}
+                    <div className="field">
+                      <div className="field-label">{locale.settingsReadingOrderLabel || "Reading order"}</div>
+                      <div className="field-input">
+                        <select value={readingOrder} onChange={changeReadingOrder} className="topcoat-textarea">
+                          <option value="rtl">{locale.settingsReadingOrderRtl || "Right to left (manga)"}</option>
+                          <option value="ltr">{locale.settingsReadingOrderLtr || "Left to right (comics, manhwa)"}</option>
+                        </select>
+                      </div>
+                      <div className="field-descr">
+                        {locale.settingsReadingOrderHelp || "Order in which the parts of a double or triple bubble take the lines, also used by Align."}
+                      </div>
+                    </div>
                     {renderToggle(
                       smartPasteAutoSize,
                       (e) => { setSmartPasteAutoSize(e.target.checked); setEdited(true); },
@@ -2592,6 +2616,9 @@ const SettingsModal = React.memo(function SettingsModal() {
 
       case "fontViewer":
         return <FontViewer />;
+
+      case "debug":
+        return <KeyboardDebug />;
 
       default:
         return null;

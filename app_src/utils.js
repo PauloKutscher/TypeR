@@ -866,11 +866,11 @@ const createTextLayersInStoredSelections = (texts, styles, selections, pointText
 // the bubble outlines (alignCapture), the smart paste's neck finder cuts them
 // (oneClick/alignPlan.js) and Align centres each text on its chamber. Any
 // failure there leaves the classic Align, centred on the whole bubble.
-const alignTextLayerToSelection = (resizeTextBox = false, padding = 0, callback = () => {}, direction = "ltr") => {
+const alignTextLayerToSelection = (resizeTextBox = false, padding = 0, callback = () => {}, readingOrder = "rtl") => {
   const align = (capture) => {
     let placements = [];
     try {
-      placements = capture && !capture.error ? planAlignment(capture, direction) : [];
+      placements = capture && !capture.error ? planAlignment(capture, readingOrder) : [];
     } catch (planError) {
       placements = [];
     }
@@ -1057,7 +1057,7 @@ const startForegroundWatcher = () => {
     "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class FW { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport(\"user32.dll\")] public static extern short GetAsyncKeyState(int vk); [DllImport(\"user32.dll\")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra); }';",
     // GetAsyncKeyState's low bit means "pressed since the previous call", so
     // prime it once: otherwise a click made before the panel opened replays here
-    "[void][FW]::GetAsyncKeyState(5); [void][FW]::GetAsyncKeyState(6);",
+    "[void][FW]::GetAsyncKeyState(5); [void][FW]::GetAsyncKeyState(6); [void][FW]::GetAsyncKeyState(0xA6); [void][FW]::GetAsyncKeyState(0xA7);",
     // Windows gives the menu bar the keyboard when ALT is released without
     // another key in between, and a WIN+ALT binding looks exactly like that to
     // Photoshop: the shell keeps the WIN key, so ALT arrives on its own. The
@@ -1091,9 +1091,12 @@ const startForegroundWatcher = () => {
     "if (-not $alt) { $altFixed = $false }",
     "elseif (-not $altFixed -and $n -match 'photoshop' -and ((([FW]::GetAsyncKeyState(0x5B) -band 0x8000) -ne 0) -or (([FW]::GetAsyncKeyState(0x5C) -band 0x8000) -ne 0))) { $altFixed = $true; Send-NoOpKey }",
     // 5 = XBUTTON1 (button4), 6 = XBUTTON2 (button5). The low bit is an edge,
-    // so a click shorter than one tick is still caught and holding never repeats
+    // so a click shorter than one tick is still caught and holding never repeats.
+    // Some mice send their side buttons as the browser's Back and Forward keys
+    // (0xA6, 0xA7) instead: they count as buttons 4 and 5 too, once per press
     "foreach ($b in 5, 6) {",
-    "if (([FW]::GetAsyncKeyState($b) -band 1) -ne 0) {",
+    "$hit = (([FW]::GetAsyncKeyState($b) -band 1) -ne 0); if ((([FW]::GetAsyncKeyState($b + 0xA1) -band 1) -ne 0)) { $hit = $true };",
+    "if ($hit) {",
     "$m = '';",
     "if (([FW]::GetAsyncKeyState(0x5B) -band 0x8000) -ne 0 -or ([FW]::GetAsyncKeyState(0x5C) -band 0x8000) -ne 0) { $m += 'W' }",
     "if (([FW]::GetAsyncKeyState(0x11) -band 0x8000) -ne 0) { $m += 'C' }",

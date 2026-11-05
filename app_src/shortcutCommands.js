@@ -14,7 +14,7 @@ import {
   toggleCleaningLayers,
 } from "./utils";
 import { buildSelectedLayerPayload, buildStoredSelectionPayload, getScaledStyle } from "./textLayerPayload";
-import { canSmartPasteStoredSelections, smartPasteInSelection, smartPasteStoredSelections } from "./smartPasteClient";
+import { canSmartPasteStoredSelections, needsWandReselect, reselectWandOnPage, smartPasteInSelection, smartPasteStoredSelections } from "./smartPasteClient";
 import { isStyleStrokeOn } from "./styleStroke";
 import { isWindowTooShortForTextShapeR } from "./uiLayout";
 
@@ -150,6 +150,15 @@ const pasteInSelection = (ctx, preferredOrder = [], options = {}) => {
       return;
     }
 
+    // With a text layer active, a Magic Wand click without "Sample All
+    // Layers" took the page around that text, not the bubble
+    if (selection && layers.length && !options.selectionChecked && needsWandReselect()) {
+      reselectWandOnPage(ctx.dispatch).then((ready) => {
+        if (ready) pasteInSelection(ctx, preferredOrder, { ...options, selectionChecked: true });
+      });
+      return;
+    }
+
     // Smart paste: the text fitted to the bubble's real shape (falls back
     // to the classic paste below when it cannot)
     if (selection && smartPasteOn(ctx)) {
@@ -241,7 +250,7 @@ const shortcutCommands = [
       ctx.state.resizeTextBoxOnCenter,
       ctx.state.internalPadding || 0,
       undefined,
-      ctx.state.direction
+      ctx.state.readingOrder
     ),
   },
   {
@@ -321,7 +330,7 @@ const shortcutCommands = [
     label: "shortcut_increase",
     defaultKeys: ["CTRL", "ALT", "U"],
     legacyDefaultKeys: [["CTRL", "SHIFT", "PLUS"]],
-    repeatDelay: 300,
+    repeatDelay: 0,
     handler: (ctx) => changeActiveLayerTextSize(ctx.state.textSizeIncrement || 1),
   },
   {
@@ -329,7 +338,7 @@ const shortcutCommands = [
     label: "shortcut_decrease",
     defaultKeys: ["CTRL", "ALT", "D"],
     legacyDefaultKeys: [["CTRL", "SHIFT", "MINUS"]],
-    repeatDelay: 300,
+    repeatDelay: 0,
     handler: (ctx) => changeActiveLayerTextSize(-(ctx.state.textSizeIncrement || 1)),
   },
   {

@@ -10,9 +10,9 @@ import { csInterface, locale, nativeConfirm, setActiveLayerText, setLayerTextFas
 import { useContext } from "../../context";
 import { getScaledStyle } from "../../textLayerPayload";
 import { isDuplicateSelection } from "../../multiBubbleHistory";
-import { getBubbleCacheKey, haveSameLayerSize, findEnclosingBubbleShape } from "../../textShapeRTracking";
+import { getBubbleCacheKey, haveSameLayerSize, findEnclosingBubbleShape, selectionTouchesLayer } from "../../textShapeRTracking";
 import { isShortcutActiveForEvent, pasteInSelection, withShortcutHint } from "../../shortcutCommands";
-import { isSmartPasteSettling, recentSelectionTrigger } from "../../smartPasteClient";
+import { isSmartPasteBusy, isSmartPasteSettling, recentSelectionTrigger } from "../../smartPasteClient";
 import { createFontPreviewRegistry, getFontPreviewFamily } from "../../fontPreview";
 import { notePerfRender } from "../../perfDebug";
 import TextShapeRFitPreview from "../textShapeRFitPreview";
@@ -111,6 +111,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     pastePointText: state.pastePointText,
     internalPadding: state.internalPadding,
     direction: state.direction,
+    readingOrder: state.readingOrder,
     resizeTextBoxOnCenter: state.resizeTextBoxOnCenter,
     textSizeIncrement: state.textSizeIncrement,
     showTips: state.showTips,
@@ -481,6 +482,17 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           setInlineSelectionShape((current) => (current ? null : current));
           return;
         }
+        // The selection of another bubble, the next one to paste into while
+        // the last text is still the active layer: no shape for this text.
+        // The outline read it would start takes seconds on a spiky bubble
+        // (the path is read point by point) and the paste waits behind it.
+        if (!selectionTouchesLayer(selection, inlineLayerBoundsRef.current)) {
+          inlineShapePending.current = false;
+          inlineShapeKey.current = "";
+          clearInlineShapeSettle();
+          setInlineSelectionShape((current) => (current ? null : current));
+          return;
+        }
         // A manual selection always wins over the automatic bubble detection
         const boundsHash = `selection:${getSelectionBoundsHash(selection)}`;
         if (boundsHash === inlineShapeKey.current) {
@@ -802,13 +814,21 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         inlineEventNeedsSource.current = true;
       }
       if (inlineEventDebounce.current) clearTimeout(inlineEventDebounce.current);
-      inlineEventDebounce.current = setTimeout(() => {
+      // A smart paste makes and removes staging layers to measure the text,
+      // and Photoshop reports each as an event: one refresh after the paste,
+      // not one full layer read per measurement
+      const refresh = () => {
+        if (isSmartPasteBusy()) {
+          inlineEventDebounce.current = setTimeout(refresh, 120);
+          return;
+        }
         inlineEventDebounce.current = null;
         const needsSource = inlineEventNeedsSource.current;
         inlineEventNeedsSource.current = false;
         if (needsSource) refreshInlineLayerSource();
         refreshInlineSelectionShape();
-      }, 120);
+      };
+      inlineEventDebounce.current = setTimeout(refresh, 120);
     });
 
     // No focus-triggered refresh: the panel regains focus on every click
@@ -1139,7 +1159,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         resetStoredSelections(true);
       }
       if (ok) context.dispatch({ type: "showFeatureTip", id: "alignWithoutSelection" });
-    }, context.state.direction);
+    }, context.state.readingOrder);
   }, [context.state, resetStoredSelections]);
 
   const handleDecrease = React.useCallback(() => {

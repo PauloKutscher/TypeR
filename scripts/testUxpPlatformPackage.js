@@ -69,11 +69,12 @@ async function checkOfflineSwap() {
 
 async function checkBundledHostPackage() {
   const version = "3.0.3.3";
-  const manifest = { id: "com.scanr.typer", name: "TypeR", version, manifestVersion: 6,
-    addon: { name: "typer-keys.uxpaddon" }, requiredPermissions: { enableAddon: true }, host: { app: "PS", minVersion: "26.0.0" } };
-  const pack = (overrides = {}, binary = true) => zipSync({
+  const manifest = { id: "com.scanr.typer", name: "TypeR", version, manifestVersion: 5,
+    requiredPermissions: {}, host: { app: "PS", minVersion: "26.0.0" } };
+  const reader = fs.readFileSync(path.join(root, "uxp-src/native/typer-keys-win.json"), "utf8");
+  const pack = (overrides = {}, binary = reader) => zipSync({
     "manifest.json": strToU8(JSON.stringify({ ...manifest, ...overrides })),
-    ...(binary ? { "win/x64/typer-keys.uxpaddon": strToU8("native addon") } : {}),
+    ...(binary ? { "native/typer-keys-win.json": strToU8(binary) } : {}),
   });
   let bundled = pack();
   let registry = JSON.stringify({ plugins: [{ pluginId: "other", path: "other-plugin" }] });
@@ -103,14 +104,16 @@ async function checkBundledHostPackage() {
   assert.deepStrictEqual(await installBundledPlatformPackage(), { ok: true, method: "manual" });
   assert.strictEqual(registeredPluginFolder(registry), "com.scanr.typer_" + version + ".win");
   assert.strictEqual(JSON.parse(registry).plugins[0].pluginId, "other", "Keep other plugins registered");
-  assert(written.get("External/com.scanr.typer_" + version + ".win.installing/win/x64/typer-keys.uxpaddon").equals(Buffer.from("native addon")));
+  assert(written.get("External/com.scanr.typer_" + version + ".win.installing/native/typer-keys-win.json").equals(Buffer.from(reader)));
   const originalRegistry = registry;
   written.clear();
   for (const [bytes, error] of [
     [pack({ version: "3.0.3.2" }), /version mismatch/],
     [pack({ id: "other" }), /identity/],
-    [pack({ requiredPermissions: { enableAddon: false } }), /keyboard addon/],
-    [pack({}, false), /addon binary/],
+    [pack({ requiredPermissions: { enableAddon: true } }), /keyboard addon/],
+    [pack({}, false), /keyboard reader/],
+    [pack({}, JSON.stringify({ binary: "", sha256: "bad" })), /Invalid Windows keyboard reader/],
+    [pack({}, JSON.stringify({ binary: "bm90LWFuLWV4ZQ==", sha256: "a".repeat(64) })), /reader binary/],
     [strToU8("corrupt"), /Invalid update size/],
   ]) {
     bundled = bytes;

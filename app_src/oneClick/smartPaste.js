@@ -4,6 +4,7 @@
 //   adapter.measure(requests) -> replies (see measureSpec.js)
 //   adapter.resolveRunStyle(textStyle, run) -> textStyle (optional)
 //   adapter.useAtlas -> boolean
+//   adapter.leanMeasure -> boolean (see layout.js: no exhaustive measurement)
 // The result is a list of paste sessions the host commits in one history
 // state (see commitSmartPaste in each host).
 //
@@ -12,7 +13,7 @@
 //   lines: [{ text, richTextRuns, style, styleLocked }],   // N, N+1, N+2
 //   roleStyles: { shout: style | null, narration: style | null },
 //   settings: { autoClean, distribute, minScale, hyphenation ("fr"|"en"|"off"),
-//               direction, padding, keepSize, pointText, autoWrap, forceSplit },
+//               direction, readingOrder, padding, keepSize, pointText, autoWrap, forceSplit },
 //   forceSplit: split the bubble at its likeliest neck even when it does not
 //   look double (the user clicked it again after a one-line paste)
 // }
@@ -135,7 +136,7 @@ export const prepareSmartPaste = async (request, adapter) => {
   clearGeometryCaches();
   const input = await adapter.capture(request.trigger || { source: "manual" });
   if (!input) throw new SmartPasteError("noSelection");
-  input.direction = settings.direction;
+  input.readingOrder = settings.readingOrder === "ltr" ? "ltr" : "rtl";
   const page = { width: input.width, height: input.height, resolution: input.resolution };
   const autoSizeKey = settings.autoSize === true ? autoSizePageKey(input.documentId, settings.autoSizePage) : null;
   let referenceRatio = readAutoSizeReference(autoSizeKey);
@@ -187,6 +188,7 @@ export const prepareSmartPaste = async (request, adapter) => {
       page,
       measure: adapter.measure,
       useAtlas: !!adapter.useAtlas,
+      leanMeasure: !!adapter.leanMeasure,
       resolveRunStyle: adapter.resolveRunStyle,
       breakPoints,
       sizePolicy: { minScale: (settings.minScale > 0 ? settings.minScale : 0.75) / enlargedBy, fixed: !!settings.keepSize,

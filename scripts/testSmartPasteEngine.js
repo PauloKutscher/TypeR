@@ -12,7 +12,7 @@ const { applyRefont, normalizeRefontRules, refontTextStyle } = load("app_src/one
 const { classifySelectionEvent, parseCepEventData, triggerSourceForTool } = load("app_src/oneClick/selectionEvent.js");
 const { createPasteHistory, lineAfterHistoryMove } = load("app_src/oneClick/pasteHistory.js");
 const { breakPointsFor, resolveHyphenationLanguage } = load("app_src/oneClick/hyphenation.js");
-const { metricFromBounds, atlasMetrics } = load("app_src/oneClick/measureSpec.js");
+const { metricFromBounds, atlasMetrics, clearMetricCache } = load("app_src/oneClick/measureSpec.js");
 
 const px = (value) => ({ _unit: "pixelsUnit", _value: value });
 const point = (xy) => ({ horizontal: px(xy[0]), vertical: px(xy[1]) });
@@ -235,6 +235,43 @@ const linesInside = (session) => {
     trigger: { source: "wand" }, lines: [line("Une phrase beaucoup trop longue pour une si petite bulle de rien du tout.")], roleStyles: {}, settings: { hyphenation: "off" },
   }, adapterFor(tinyInput)), (error) => error.code === "noPlacement");
 
+  // Lean measurement (the Legacy panel): the same placements, without the
+  // exhaustive measurement of every candidate line, and a text too long for
+  // the smallest size is refused before the size ladder
+  const counting = (input) => {
+    // Words measured for the tests above are cached across pastes: a cold start
+    clearMetricCache();
+    const stats = { calls: 0, lines: 0 };
+    const measure = makeMeasure(page);
+    const adapter = {
+      ...adapterFor(input),
+      measure: async (requests) => {
+        stats.calls++;
+        requests.forEach((request) => { stats.lines += request.kind === "atlas" ? request.count : 1; });
+        return measure(requests);
+      },
+    };
+    return { stats, adapter };
+  };
+  const shrinkRequest = { trigger: { source: "wand" }, lines: [line("Attends-moi devant la porte du magasin.")], roleStyles: {}, settings: { hyphenation: "off", minScale: 0.7 } };
+  const full = counting(smallInput);
+  const fullShrink = await prepareSmartPaste(shrinkRequest, full.adapter);
+  const lean = counting(smallInput);
+  const leanShrink = await prepareSmartPaste(shrinkRequest, { ...lean.adapter, leanMeasure: true });
+  assert.strictEqual(leanShrink.sessions[0].text.size, fullShrink.sessions[0].text.size, "the lean search finds the same size");
+  assert.strictEqual(leanShrink.sessions[0].text.params.layerText.textKey, fullShrink.sessions[0].text.params.layerText.textKey, "and the same lines");
+  assert.ok(lean.stats.lines < full.stats.lines, "with fewer lines measured: " + lean.stats.lines + " < " + full.stats.lines);
+  linesInside(leanShrink.sessions[0]);
+  const refused = counting(tinyInput);
+  await assert.rejects(prepareSmartPaste({
+    trigger: { source: "wand" }, lines: [line("Une phrase beaucoup trop longue pour une si petite bulle de rien du tout.")], roleStyles: {}, settings: { hyphenation: "off" },
+  }, { ...refused.adapter, leanMeasure: true }), (error) => error.code === "noPlacement");
+  assert.ok(refused.stats.lines <= 30, "a refusal measures the words, not every candidate line: " + refused.stats.lines);
+  // Minimum size 100%: the style size or nothing, no ladder
+  const noShrink = counting(smallInput);
+  const kept100 = await prepareSmartPaste({ ...shrinkRequest, settings: { hyphenation: "off", minScale: 1 } }, { ...noShrink.adapter, leanMeasure: true });
+  assert.ok(Math.abs(kept100.sessions[0].text.size - 24) < 1e-6, "no shrinking at 100%: " + kept100.sessions[0].text.size);
+
   // The style size fits only in a vertical window between the coarse block
   // centres: the fine retry finds it instead of shrinking the text
   const narrow = ellipseNodes(300, 300, 95, 70);
@@ -443,12 +480,19 @@ const linesInside = (session) => {
     assert.ok(Math.abs(long.text.size - 24 * 0.85) < 0.01, "smallest size " + long.text.size);
     assert.ok(Math.abs((long.text.top + long.text.bottom) / 2 - long.plan.selection.yMid) < 2, "on the chamber's centre");
   }
-  // Without a click the first chamber in reading order gets the line (RTL: right)
-  const rtl = await prepareSmartPaste({
-    trigger: { source: "lasso" }, lines: [line("Droite d'abord."), line("Puis gauche.")], roleStyles: {}, settings: { distribute: true, direction: "rtl" },
+  // Without a click the first chamber in reading order gets the line: the
+  // right one in a manga whatever the text direction, the left one in a comic
+  for (const direction of ["ltr", "rtl"]) {
+    const unclicked = await prepareSmartPaste({
+      trigger: { source: "lasso" }, lines: [line("Droite d'abord."), line("Puis gauche.")], roleStyles: {}, settings: { distribute: true, direction },
+    }, adapterFor({ ...doubleInput, click: null }));
+    assert.strictEqual(unclicked.consumed, 2);
+    assert.ok(unclicked.sessions[0].text.axis > unclicked.sessions[1].text.axis, "manga reading order with " + direction + " text");
+  }
+  const unclickedComic = await prepareSmartPaste({
+    trigger: { source: "lasso" }, lines: [line("Gauche d'abord."), line("Puis droite.")], roleStyles: {}, settings: { distribute: true, readingOrder: "ltr" },
   }, adapterFor({ ...doubleInput, click: null }));
-  assert.strictEqual(rtl.consumed, 2);
-  assert.ok(rtl.sessions[0].text.axis > rtl.sessions[1].text.axis, "RTL reading order");
+  assert.ok(unclickedComic.sessions[0].text.axis < unclickedComic.sessions[1].text.axis, "comic reading order");
 
   // A tall single bubble with a shallow notch on each side (a hand-drawn
   // shout or rectangle) is not a double bubble: its pinch is too shallow
@@ -554,12 +598,24 @@ const linesInside = (session) => {
     const lower = pts.filter((p) => p[1] > 400).sort((a, b) => b[0] - a[0]);
     return upper.concat(lower);
   })();
-  const tripleInput = { source: "wand", click: { x: 300, y: 400 }, selectionBounds: boundsOf(tripleOutline), rawPath: pathOf([polygonNodes(tripleOutline)]), fill: white };
+  // Clicked in the right chamber, the lines follow the manga order, right to
+  // left, even with French (left-to-right) text
+  const tripleInput = { source: "wand", click: { x: 780, y: 400 }, selectionBounds: boundsOf(tripleOutline), rawPath: pathOf([polygonNodes(tripleOutline)]), fill: white };
   const triple = await prepareSmartPaste({
-    trigger: { source: "wand" }, lines: [line("Un."), line("Deux."), line("Trois.")], roleStyles: {}, settings: { distribute: true },
+    trigger: { source: "wand" }, lines: [line("Un."), line("Deux."), line("Trois.")], roleStyles: {}, settings: { distribute: true, direction: "ltr" },
   }, adapterFor(tripleInput));
   assert.strictEqual(triple.consumed, 3, "three chambers");
-  assert.ok(triple.sessions[0].text.axis < triple.sessions[1].text.axis && triple.sessions[1].text.axis < triple.sessions[2].text.axis);
+  assert.ok(triple.sessions[0].text.axis > triple.sessions[1].text.axis && triple.sessions[1].text.axis > triple.sessions[2].text.axis, "right to left");
+  // Clicked in the left chamber: that one first, then the others right to left
+  const tripleFromLeft = await prepareSmartPaste({
+    trigger: { source: "wand" }, lines: [line("Un."), line("Deux."), line("Trois.")], roleStyles: {}, settings: { distribute: true },
+  }, adapterFor({ ...tripleInput, click: { x: 300, y: 400 } }));
+  assert.deepStrictEqual(tripleFromLeft.sessions.map((s) => Math.round(s.plan.selection.xMid / 240)), [1, 3, 2], "clicked chamber, then right, then middle");
+  // A comic or a manhwa reads left to right
+  const comic = await prepareSmartPaste({
+    trigger: { source: "wand" }, lines: [line("Un."), line("Deux."), line("Trois.")], roleStyles: {}, settings: { distribute: true, readingOrder: "ltr" },
+  }, adapterFor({ ...tripleInput, click: { x: 300, y: 400 } }));
+  assert.deepStrictEqual(comic.sessions.map((s) => Math.round(s.plan.selection.xMid / 240)), [1, 2, 3], "comic: left to right");
 
   // Size presets by page width
   const preset = { ...style("p", 20), autoSizeByPageWidth: true, sizePresets: [20, 26], sizePresetMinWidths: [0, 1000], sizePresetDefaultIndex: 0 };

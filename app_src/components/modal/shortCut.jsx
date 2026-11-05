@@ -2,9 +2,12 @@ import React from "react";
 import PropTypes from "prop-types";
 import { FiX } from "react-icons/fi";
 import { locale, getHotkeyPressed } from "../../utils";
+import { createHostShortcutRecorder, parseHostKeys } from "../../shortcutRecorder";
 
 const MODIFIERS = ["WIN", "CTRL", "ALT", "SHIFT"];
-const SPECIAL_KEYS = { "+": "PLUS", "-": "MINUS", "=": "EQUAL", "/": "DIVIDE", "*": "MULTIPLY", " ": "SPACE" };
+// Mice whose side buttons send the browser's Back and Forward keys record them
+// as mouse buttons 4 and 5, which the keyboard readers report the same way
+const SPECIAL_KEYS = { "+": "PLUS", "-": "MINUS", "=": "EQUAL", "/": "DIVIDE", "*": "MULTIPLY", " ": "SPACE", BrowserBack: "MOUSE4", BrowserForward: "MOUSE5" };
 const IGNORED_KEYS = ["Meta", "Control", "Alt", "Shift", "AltGraph", "CapsLock", "Dead", "Process", "Unidentified"];
 const hasMainKey = (keys) => (keys || []).some((key) => !MODIFIERS.includes(String(key).toUpperCase()));
 
@@ -62,24 +65,6 @@ const getLocalKeys = (e) => {
   return keys;
 };
 
-// Same "aWINaCTRLaZa" format as the hotkey poller. The UXP keyboard reader
-// may follow a key with its aliases ("aLEFTaARROWLEFTa"): only the first
-// name of the key is recorded.
-const parseHostKeys = (state) => {
-  if (!state || typeof state !== "string" || state.indexOf("a") !== 0) return [];
-  const keys = state.split("a");
-  keys.shift();
-  keys.pop();
-  let mainKeySeen = false;
-  return keys.filter((key) => {
-    if (!key) return false;
-    if (MODIFIERS.includes(key)) return true;
-    if (mainKeySeen) return false;
-    mainKeySeen = true;
-    return true;
-  });
-};
-
 const Shortcut = (props) => {
   const hostQueryRef = React.useRef(0);
   const inputRef = React.useRef(null);
@@ -92,6 +77,35 @@ const Shortcut = (props) => {
     if (input) input.value = (props.value || []).join(" + ");
     setDisplayKeys(props.value || []);
   }, [props.index, props.value]);
+
+  // Records a combination from the keys the panel received. Read through a
+  // ref: the settings re-render on every change, and the reader's
+  // subscription below must outlive those renders without starting over.
+  const propsRef = React.useRef(props);
+  propsRef.current = props;
+  const recordKeys = (keys) => {
+    const input = inputRef.current;
+    if (input) input.value = keys.join(" + ");
+    setDisplayKeys(keys);
+    propsRef.current.onChange(propsRef.current.index, keys);
+  };
+
+  // New TypeR (UXP): Photoshop keeps every key pressed with Ctrl from the
+  // panel's WebView, so the field also records what the keyboard reader sees
+  // while it has the focus (see shortcutRecorder.js)
+  React.useEffect(() => {
+    const host = typeof window !== "undefined" && window.typerUXP;
+    if (!recording || !host || typeof host.onKeys !== "function") return undefined;
+    const recorder = createHostShortcutRecorder({ modifierOnly: !!props.modifierOnly });
+    const unsubscribe = host.onKeys((state) => {
+      const keys = recorder.update(state);
+      if (!keys || document.activeElement !== inputRef.current) return;
+      // A DOM keydown may still be waiting for the host's key names
+      hostQueryRef.current++;
+      recordKeys(keys);
+    });
+    return unsubscribe;
+  }, [recording, props.modifierOnly]);
 
   const changeShortCut = (e) => {
     e.preventDefault();

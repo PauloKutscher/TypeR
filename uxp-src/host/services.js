@@ -390,11 +390,15 @@ async function installBundledPlatformPackage() {
   const version = await readManifestVersion();
   if (!version) throw new Error("Missing installed TypeR version");
   const manifest = validatePackage(bytes, version, PLUGIN_ID);
-  if (!manifest.addon || manifest.addon.name !== "typer-keys.uxpaddon" || !manifest.requiredPermissions || manifest.requiredPermissions.enableAddon !== true) {
-    throw new Error("Missing Windows keyboard addon");
+  if (manifest.addon || (manifest.requiredPermissions && manifest.requiredPermissions.enableAddon)) {
+    throw new Error("Unexpected Windows keyboard addon");
   }
-  const addon = unzipSync(bytes, { filter: (file) => file.name === "win/x64/typer-keys.uxpaddon" })["win/x64/typer-keys.uxpaddon"];
-  if (!addon || !addon.length) throw new Error("Missing Windows keyboard addon binary");
+  const reader = unzipSync(bytes, { filter: (file) => file.name === "native/typer-keys-win.json" })["native/typer-keys-win.json"];
+  if (!reader || !reader.length) throw new Error("Missing Windows keyboard reader");
+  const packed = JSON.parse(strFromU8(reader));
+  if (typeof packed.binary !== "string" || !/^[a-f0-9]{64}$/i.test(packed.sha256)) throw new Error("Invalid Windows keyboard reader");
+  const binary = base64ToBytes(packed.binary);
+  if (binary[0] !== 0x4D || binary[1] !== 0x5A) throw new Error("Invalid Windows keyboard reader binary");
   // Keep offline installs independent of GitHub and Creative Cloud's installer.
   return installUpdatePackage(bytesToBase64(bytes), version, { forceManual: true });
 }

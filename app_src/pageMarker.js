@@ -12,14 +12,16 @@
 // merely mentions a page in the middle of dialogue ("Page 3 notes") is not a
 // heading, and letting arbitrary trailing text through turned those into page
 // breaks.
-const PAGE_MARKER_PATTERN = /^(?:p[áa]ginas?|pages?|p[áa]gs?|pgs?)\s*[.:#\-–—]?\s*([0-9]+)\s*(?:(?::|[-–—])\s*.*|\.)?$/i;
+const PAGE_MARKER_PATTERN = /^(?:p[áa]ginas?|pages?|p[áa]gs?|pgs?)\s*[.:#\-–—]?\s*([0-9]+)(?:\*+|_+|~~)?\s*(?:(?::|[-–—])\s*.*|\.)?$/i;
+
+const stripEmphasis = (text) => text.replace(/^(?:\*+|_+|~~)\s*/, "").replace(/\s*(?:\*+|_+|~~)$/, "").trim();
 
 // Headings arrive wrapped as often as they arrive bare: "## Page 12",
 // "### Page 12 ###" and "[Page 12]" are all the same marker.
 const stripHeadingWrapper = (text) => {
-  let heading = text.trim().replace(/^#{1,6}\s+/, "").replace(/\s+#+$/, "").trim();
+  let heading = stripEmphasis(text.trim().replace(/^#{1,6}\s+/, "").replace(/\s+#+$/, "").trim());
   if (heading[0] === "[" && heading[heading.length - 1] === "]") {
-    heading = heading.slice(1, -1).trim();
+    heading = stripEmphasis(heading.slice(1, -1).trim());
   }
   return heading;
 };

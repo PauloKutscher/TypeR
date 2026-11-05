@@ -40,6 +40,12 @@ const recognised = {
   "Página 11": 11,
   "página11": 11,
   "Páginas 11": 11,
+  "**Pág. 11**": 11,
+  "## **Página 11**": 11,
+  "[**Pg43**]": 43,
+  "**Págs. 11** - Título": 11,
+  "**Página 11:** Título": 11,
+  "__Pg43__": 43,
 };
 Object.entries(recognised).forEach(([text, page]) => {
   assert.strictEqual(matchPageMarker(text), page, `expected "${text}" to be page ${page}`);
@@ -60,6 +66,8 @@ const rejected = [
   "Pagando 43",
   "Pagar 43",
   "See Page 43",
+  "**Pág. 11** no meio da fala",
+  "**Veja Página 11**",
   "Here!",
   "",
   "   ",

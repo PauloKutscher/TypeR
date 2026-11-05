@@ -9,6 +9,11 @@
 // the title is not displayed as such.
 const SECTIONS = [
   {
+    tab: "debug",
+    group: "keyboardDebugTitle",
+    entries: [{ title: "keyboardDebugTitle", hint: "keyboardDebugHint", keywords: "debug diagnostic clavier touches keyboard keys addon focus" }],
+  },
+  {
     tab: "general",
     group: "settingsLanguageLabel",
     entries: [
@@ -49,6 +54,13 @@ const SECTIONS = [
       { title: "settingsSmartPasteAutoWrapLabel", hint: "settingsSmartPasteAutoWrapHelp", parent: "settingsSmartPasteLabel", keywords: "wrap paragraph line breaks retour ligne caixa quebra" },
       { title: "settingsSmartPasteAutoSizeLabel", hint: "settingsSmartPasteAutoSizeHelp", parent: "settingsSmartPasteLabel", keywords: "beta automatic font size page consistency tamanho fonte automatico pagina" },
       { title: "settingsSmartPasteAutoSizeVariationLabel", hint: "settingsSmartPasteAutoSizeVariationHelp", parent: "settingsSmartPasteAutoSizeLabel", keywords: "variation tolerance percentage first speech variacao percentual tolerancia primeira fala" },
+      {
+        title: "settingsReadingOrderLabel",
+        hint: "settingsReadingOrderHelp",
+        parent: "settingsSmartPasteLabel",
+        also: ["settingsReadingOrderRtl", "settingsReadingOrderLtr"],
+        keywords: "sens lecture ordre manga comic comics manhwa webtoon droite gauche right left double triple",
+      },
       { title: "settingsSmartPasteAutoCleanLabel", hint: "settingsSmartPasteAutoCleanHelp", parent: "settingsSmartPasteLabel", keywords: "cleaning nettoyage nettoyer effacer erase" },
       { title: "settingsSmartPasteMinScaleLabel", hint: "settingsSmartPasteMinScaleHelp", parent: "settingsSmartPasteLabel", keywords: "shrink reduire" },
       {
