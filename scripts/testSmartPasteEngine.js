@@ -352,18 +352,23 @@ const linesInside = (session) => {
   assert.strictEqual(dark.sessions[0].text.stroke, null);
   const adaptiveStyle = style("adaptive", 24);
   delete adaptiveStyle.stroke.smart;
-  for (const [fill, expectedStroke, expectedWhite, preserveOnLight] of [
+  for (const [fill, expectedStroke, expectedWhite, preserveOnLight, invertOnDark] of [
     [{ fill: 255, rgb: { red: 228, green: 230, blue: 232 } }, false, false, undefined],
     [{ fill: 255, rgb: { red: 228, green: 230, blue: 232 } }, true, false, true],
-    [{ fill: 0, rgb: { red: 35, green: 38, blue: 40 } }, false, true, false],
-    [{ fill: 0, rgb: { red: 35, green: 38, blue: 40 } }, false, true, true],
+    [{ fill: 0, rgb: { red: 35, green: 38, blue: 40 } }, true, true, false],
+    [{ fill: 0, rgb: { red: 35, green: 38, blue: 40 } }, true, true, true, true],
+    [{ fill: 0, rgb: { red: 35, green: 38, blue: 40 } }, false, true, true, false],
     [null, true, false, false],
     [null, true, false, true],
   ]) {
-    const preset = { ...adaptiveStyle, stroke: { ...adaptiveStyle.stroke, preserveOnLight } };
+    const preset = { ...adaptiveStyle, stroke: { ...adaptiveStyle.stroke, preserveOnLight, invertOnDark } };
     const result = await prepareSmartPaste({ trigger: { source: "wand" }, lines: [line("Bonjour.", preset)], roleStyles: {}, settings: {} }, adapterFor({ ...ovalInput, fill }));
     assert.strictEqual(!!result.sessions[0].text.stroke, expectedStroke);
     if (expectedWhite) assert.deepStrictEqual(result.sessions[0].text.params.layerText.textStyleRange[0].textStyle.color, { red: 255, green: 255, blue: 255 });
+    if (expectedWhite && expectedStroke) {
+      assert.deepStrictEqual(result.sessions[0].text.stroke.color, { r: 0, g: 0, b: 0 }, 'Recoloring the text preserves the inverted stroke');
+      assert.strictEqual(result.sessions[0].text.stroke.size, preset.stroke.size, 'Inversion preserves the configured stroke size');
+    }
   }
   const noStroke = { ...adaptiveStyle, stroke: undefined };
   const noStrokeResult = await prepareSmartPaste({ trigger: { source: "wand" }, lines: [line("Bonjour.", noStroke)], roleStyles: {}, settings: {} }, adapterFor(ovalInput));

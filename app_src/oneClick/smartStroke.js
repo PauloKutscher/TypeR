@@ -56,8 +56,16 @@ export const applySmartStroke = (style, input, plan) => {
   if (style.stroke && style.stroke.smart === false) return { style, plan };
   const tone = strokeBackground(input, plan);
   const configured = style.stroke && style.stroke.enabled !== false && style.stroke.size > 0;
+  const invertOnDark = tone === "dark" && configured && style.stroke.invertOnDark !== false;
+  let appliedStyle = style;
+  if (tone === "dark") {
+    appliedStyle = { ...style, stroke: invertOnDark ? { ...style.stroke, color: { r: 0, g: 0, b: 0 } } : null };
+  } else if (tone === "light" && style.stroke?.preserveOnLight !== true) {
+    appliedStyle = { ...style, stroke: null };
+  }
   return {
-    style: tone === "dark" || (tone === "light" && style.stroke?.preserveOnLight !== true) ? { ...style, stroke: null } : style,
-    plan: { ...plan, textColor: tone === "dark" ? { red: 255, green: 255, blue: 255 } : tone === "light" || (tone === "mixed" && configured) ? null : plan.textColor },
+    style: appliedStyle,
+    plan: { ...plan, preserveRecoloredStroke: !!invertOnDark,
+      textColor: tone === "dark" ? { red: 255, green: 255, blue: 255 } : tone === "light" || (tone === "mixed" && configured) ? null : plan.textColor },
   };
 };

@@ -336,6 +336,7 @@ export const planText = async (plan, payload, context) => {
     const graph = compileGraph(payload, {
       dpi,
       textColor: plan.textColor,
+      preserveRecoloredStroke: plan.preserveRecoloredStroke,
       resolveRunStyle: context.resolveRunStyle,
       allowHyphen,
       breakPoints: context.breakPoints,

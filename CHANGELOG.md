@@ -4,7 +4,8 @@
 
 ## 3.0.3.6 — PauloKutscher fork
 
-- Make preserving a preset's stroke on light backgrounds an explicit per-preset option, off by default. Smart stroke again removes strokes on light backgrounds unless opted in; mixed and dark backgrounds, disabled Smart stroke and presets without strokes retain their behavior.
+- Make preserving a preset's stroke on light backgrounds an explicit per-preset option, off by default. Smart stroke again removes strokes on light backgrounds unless opted in; mixed backgrounds and disabled Smart stroke retain their behavior.
+- Add per-preset dark-background stroke inversion, on by default: white text keeps the configured stroke in black at its original size. Turning the option off restores white text without a stroke. Missing, disabled and zero-sized strokes are not added.
 - Add an automatic font size (Beta) scale preference from 50–150%, defaulting to 85%. 100% restores the previous recommendation. Preserve the configured minimum, fit checks and page consistency without compounding the scale on later pastes. Beta remains opt-in.
 - Restore the native Windows UXP keyboard addon after Kaspersky reports involving the external TypeR Shortcuts.exe reader. Keep focus recovery, shortcut recording and side-button mappings. The package no longer carries or starts the Windows executable; the addon retires the old reader and removes its files on startup.
 

@@ -326,7 +326,7 @@ export const applyTextColor = (data, color) => {
   return true;
 };
 
-// Build the graph of one translation. options: { dpi, textColor,
+// Build the graph of one translation. options: { dpi, textColor, preserveRecoloredStroke,
 // resolveRunStyle, allowHyphen, breakPoints, maxHyphenVariants }
 export const compileGraph = (input, options) => {
   const dpi = options.dpi;
@@ -335,7 +335,7 @@ export const compileGraph = (input, options) => {
   data.breakPoints = options.breakPoints;
   const recolored = applyTextColor(data, options.textColor);
   // The stroke is applied after the text is placed: never measured
-  const stroke = recolored ? null : data.style.stroke || null;
+  const stroke = recolored && !options.preserveRecoloredStroke ? null : data.style.stroke || null;
   data.style.stroke = null;
   const originalSource = String(data.text || "");
   const originalStyles = characterStyles(data, options.resolveRunStyle);

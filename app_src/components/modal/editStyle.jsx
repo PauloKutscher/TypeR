@@ -375,6 +375,12 @@ const EditStyleModal = React.memo(function EditStyleModal() {
                 {locale.editStylePreserveLightStrokeLabel}
               </label>
               <div className="field-descr">{locale.editStylePreserveLightStrokeHint}</div>
+              <label className="field-label">
+                <input type="checkbox" checked={stroke.invertOnDark !== false} disabled={stroke.smart === false}
+                  onChange={(e) => { setStroke({ ...stroke, invertOnDark: e.target.checked }); setEdited(true); }} />
+                {locale.editStyleInvertDarkStrokeLabel}
+              </label>
+              <div className="field-descr">{locale.editStyleInvertDarkStrokeHint}</div>
               <div className="field-input">
                 <div className="style-edit-stroke">
                   <input
