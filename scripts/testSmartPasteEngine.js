@@ -192,7 +192,7 @@ const linesInside = (session) => {
   // Beta is opt-in; preparing a paste must not seed a page before commit.
   const autoRefs = load("app_src/oneClick/autoFontSize.js");
   autoRefs.clearAutoSizeReferences();
-  const betaSettings = { autoSize: true, autoSizePage: "chapter/page-1", minScale: 0.7, hyphenation: "off" };
+  const betaSettings = { autoSize: true, autoSizePage: "chapter/page-1", minScale: 0.7, hyphenation: "off", autoSizeScale: 1 };
   const betaRequest = (text, settings = betaSettings) => ({ trigger: { source: "wand" }, lines: [line(text)], roleStyles: {}, settings });
   const betaFirst = await prepareSmartPaste(betaRequest("Bonjour, comment vas-tu ?"), adapterFor(ovalInput));
   assert(betaFirst.sessions[0].text.size > 24 && betaFirst.sessions[0].text.size <= 36, "Beta may grow the preset size within its safety bound");
@@ -226,6 +226,29 @@ const linesInside = (session) => {
   const offA = await prepareSmartPaste(offRequest, adapterFor(ovalInput));
   const offB = await prepareSmartPaste({ ...offRequest, settings: { autoSize: false } }, adapterFor(ovalInput));
   assert.deepStrictEqual(offA, offB, "disabled Beta preserves the existing output exactly");
+  const scaledOff = await prepareSmartPaste({ ...offRequest, settings: { autoSize: false, autoSizeScale: 0.5 } }, adapterFor(ovalInput));
+  assert.deepStrictEqual(offA, scaledOff, "the scale has no effect with Beta disabled");
+  const scaledSettings = { ...betaSettings, autoSizePage: "chapter/scaled", autoSizeScale: 0.85, autoSizeVariation: 0 };
+  const scaledFirst = await prepareSmartPaste(betaRequest("Bonjour, comment vas-tu ?", scaledSettings), adapterFor(ovalInput));
+  assert(scaledFirst.sessions[0].text.size < betaFirst.sessions[0].text.size, "85% reduces the first recommendation");
+  assert(Math.abs(scaledFirst.autoSizeReference.ratio - betaFirst.autoSizeReference.ratio) < 1e-6, "the page reference excludes the scale");
+  autoRefs.rememberAutoSizeReference(scaledFirst);
+  const scaledNext = await prepareSmartPaste(betaRequest("Bonjour !", scaledSettings), adapterFor(ovalInput));
+  autoRefs.rememberAutoSizeReference(scaledNext);
+  const scaledAgain = await prepareSmartPaste(betaRequest("Bonjour !", scaledSettings), adapterFor(ovalInput));
+  assert.strictEqual(scaledNext.sessions[0].text.size, scaledAgain.sessions[0].text.size, "the scale never compounds across pastes");
+  assert(Math.abs(scaledNext.sessions[0].text.size - 24 * scaledFirst.autoSizeReference.ratio * 0.85) < 0.01, "the page reference is scaled once");
+  const larger = await prepareSmartPaste(betaRequest("Bonjour !", { ...scaledSettings, autoSizeScale: 1.15 }), adapterFor(ovalInput));
+  assert(larger.sessions[0].text.size > scaledNext.sessions[0].text.size, "changing the preference reuses the unscaled page reference");
+  const defaultScale = await prepareSmartPaste(betaRequest("Bonjour, comment vas-tu ?", { ...scaledSettings, autoSizePage: "chapter/default", autoSizeScale: undefined }), adapterFor(ovalInput));
+  assert.strictEqual(defaultScale.sessions[0].text.size, scaledFirst.sessions[0].text.size, "omitting the preference uses 85%");
+  const scaledSmall = await prepareSmartPaste(betaRequest("Attends-moi devant la porte du magasin.", { ...scaledSettings, autoSizeScale: 0.5 }), adapterFor(smallInput));
+  assert(scaledSmall.sessions[0].text.size >= 24*0.7-1e-6, "50% cannot bypass the configured minimum");
+  for (const prepared of [scaledFirst, scaledNext, larger, scaledSmall]) linesInside(prepared.sessions[0]);
+  const scaledKept = await prepareSmartPaste(betaRequest("Bonjour !", { ...scaledSettings, keepSize: true }), adapterFor({ ...ovalInput, activeTextSize: 30 }));
+  assert.strictEqual(scaledKept.sessions[0].text.size, 30, "Keep size still overrides the scale");
+  const scaledPunctuation = await prepareSmartPaste({ ...betaRequest("?!", scaledSettings), lines: [line("?!", { ...style("punct", 24), punctuationOnlyScale: 1.5 })] }, adapterFor(ovalInput));
+  assert.strictEqual(scaledPunctuation.sessions[0].text.size, 36, "punctuation enlargement still overrides the scale");
   autoRefs.clearAutoSizeReferences();
 
   // Too much text for a tiny bubble: no placement (the panel falls back)
@@ -329,12 +352,16 @@ const linesInside = (session) => {
   assert.strictEqual(dark.sessions[0].text.stroke, null);
   const adaptiveStyle = style("adaptive", 24);
   delete adaptiveStyle.stroke.smart;
-  for (const [fill, expectedStroke, expectedWhite] of [
-    [{ fill: 255, rgb: { red: 228, green: 230, blue: 232 } }, true, false],
-    [{ fill: 0, rgb: { red: 35, green: 38, blue: 40 } }, false, true],
-    [null, true, false],
+  for (const [fill, expectedStroke, expectedWhite, preserveOnLight] of [
+    [{ fill: 255, rgb: { red: 228, green: 230, blue: 232 } }, false, false, undefined],
+    [{ fill: 255, rgb: { red: 228, green: 230, blue: 232 } }, true, false, true],
+    [{ fill: 0, rgb: { red: 35, green: 38, blue: 40 } }, false, true, false],
+    [{ fill: 0, rgb: { red: 35, green: 38, blue: 40 } }, false, true, true],
+    [null, true, false, false],
+    [null, true, false, true],
   ]) {
-    const result = await prepareSmartPaste({ trigger: { source: "wand" }, lines: [line("Bonjour.", adaptiveStyle)], roleStyles: {}, settings: {} }, adapterFor({ ...ovalInput, fill }));
+    const preset = { ...adaptiveStyle, stroke: { ...adaptiveStyle.stroke, preserveOnLight } };
+    const result = await prepareSmartPaste({ trigger: { source: "wand" }, lines: [line("Bonjour.", preset)], roleStyles: {}, settings: {} }, adapterFor({ ...ovalInput, fill }));
     assert.strictEqual(!!result.sessions[0].text.stroke, expectedStroke);
     if (expectedWhite) assert.deepStrictEqual(result.sessions[0].text.params.layerText.textStyleRange[0].textStyle.color, { red: 255, green: 255, blue: 255 });
   }

@@ -141,7 +141,7 @@ function createReader({ loadAddon, setState, schedule = setInterval, cancel = cl
   return { start, stop, diagnostics, access: () => running ? "granted" : loading ? "unknown" : "missing" };
 }
 
-// The reader of 3.0.0 and its files, once updated: it exits within ~1.5 s when
+// The external reader (including 3.0.3.5) exits within ~1.5 s when
 // its owner file changes, and keeps its program busy until then. A failure is
 // tried again at the next start.
 async function removeOldReader(files, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) {

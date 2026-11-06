@@ -362,7 +362,8 @@ export const planText = async (plan, payload, context) => {
       }, Math.max(0, words.length - 1) * 0.3);
       autoSizes = recommendFontSize({ stylePx, minScale: policy.minScale || 0.75, polygon: plan.cleanPolygon,
         width: plan.selection.width, height: plan.selection.height, advance,
-        leading: Math.max(1, ...words.map(edge => edge.leading || 1.2)), referenceRatio: policy.referenceRatio, autoSizeVariation: policy.autoSizeVariation });
+        leading: Math.max(1, ...words.map(edge => edge.leading || 1.2)), referenceRatio: policy.referenceRatio, autoSizeVariation: policy.autoSizeVariation,
+        autoSizeScale: policy.autoSizeScale });
       maxPx = autoSizes.max;
     }
     // Native measurements outlive a pass: later sizes reuse them

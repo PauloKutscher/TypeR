@@ -25,7 +25,7 @@ import { planBubbleText, planChamberText, NoPlacementError } from "./layout";
 import { breakPointsFor } from "./hyphenation";
 import { clearGeometryCaches } from "./geometry";
 import { applySmartStroke } from "./smartStroke";
-import { autoSizePageKey, readAutoSizeReference } from "./autoFontSize";
+import { autoSizePageKey, readAutoSizeReference, normalizeAutoSizeScale } from "./autoFontSize";
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -192,7 +192,8 @@ export const prepareSmartPaste = async (request, adapter) => {
       resolveRunStyle: adapter.resolveRunStyle,
       breakPoints,
       sizePolicy: { minScale: (settings.minScale > 0 ? settings.minScale : 0.75) / enlargedBy, fixed: !!settings.keepSize,
-        autoSize, autoSizeVariation: settings.autoSizeVariation, referenceRatio: consistent ? referenceRatio : null },
+        autoSize, autoSizeVariation: settings.autoSizeVariation, autoSizeScale: settings.autoSizeScale,
+        referenceRatio: consistent ? referenceRatio : null },
     };
     let text;
     try {
@@ -225,7 +226,8 @@ export const prepareSmartPaste = async (request, adapter) => {
     });
     if (autoSize && consistent && !referenceRatio && autoSizeKey) {
       const baseSize = style.textProps.layerText.textStyleRange[0].textStyle.size * page.resolution / 72;
-      referenceRatio = Math.max(0.9, Math.min(1.35, text.size / baseSize));
+      // Store the unscaled reference so later pastes do not compound the preference.
+      referenceRatio = Math.max(0.9, Math.min(1.35, text.size / (baseSize * normalizeAutoSizeScale(settings.autoSizeScale))));
       autoSizeReference = { key: autoSizeKey, ratio: referenceRatio };
     }
   }

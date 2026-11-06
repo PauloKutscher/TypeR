@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+## 3.0.3.6 — PauloKutscher fork
+
+- Make preserving a preset's stroke on light backgrounds an explicit per-preset option, off by default. Smart stroke again removes strokes on light backgrounds unless opted in; mixed and dark backgrounds, disabled Smart stroke and presets without strokes retain their behavior.
+- Add an automatic font size (Beta) scale preference from 50–150%, defaulting to 85%. 100% restores the previous recommendation. Preserve the configured minimum, fit checks and page consistency without compounding the scale on later pastes. Beta remains opt-in.
+- Restore the native Windows UXP keyboard addon after Kaspersky reports involving the external TypeR Shortcuts.exe reader. Keep focus recovery, shortcut recording and side-button mappings. The package no longer carries or starts the Windows executable; the addon retires the old reader and removes its files on startup.
+
 ## 3.0.3.5 — PauloKutscher fork
 
 - Merge upstream through `537ab2b`: keyboard recording and mouse buttons, UXP startup recovery, connected-bubble reading order, tagged-style return, Markdown page headings and paste/preview performance fixes. Keep the fork's calibrated centres, page/PSD matching, optional box wrapping, automatic font sizing and four-part updater versions.

@@ -54,6 +54,7 @@ const SECTIONS = [
       { title: "settingsSmartPasteAutoWrapLabel", hint: "settingsSmartPasteAutoWrapHelp", parent: "settingsSmartPasteLabel", keywords: "wrap paragraph line breaks retour ligne caixa quebra" },
       { title: "settingsSmartPasteAutoSizeLabel", hint: "settingsSmartPasteAutoSizeHelp", parent: "settingsSmartPasteLabel", keywords: "beta automatic font size page consistency tamanho fonte automatico pagina" },
       { title: "settingsSmartPasteAutoSizeVariationLabel", hint: "settingsSmartPasteAutoSizeVariationHelp", parent: "settingsSmartPasteAutoSizeLabel", keywords: "variation tolerance percentage first speech variacao percentual tolerancia primeira fala" },
+      { title: "settingsSmartPasteAutoSizeScaleLabel", hint: "settingsSmartPasteAutoSizeScaleHelp", parent: "settingsSmartPasteAutoSizeLabel", keywords: "font size scale percentage larger smaller tamanho fonte escala percentual maior menor" },
       {
         title: "settingsReadingOrderLabel",
         hint: "settingsReadingOrderHelp",

@@ -6,6 +6,7 @@ come from MD TYPER 1.3.22, a TypeR fork, reused with its author's permission and
 
 ## What the user gets
 
+- **Automatic font size (Beta)** stays off by default. When enabled, its scale preference defaults to 85%, reducing the recommendation by 15%; 100% restores the previous calculation. Adjust it from 50–150% in Settings > Insertion > Smart paste > Automatic font size (Beta). The minimum text size, bubble fit and page consistency still apply; the scale is not applied again on top of the preceding paste's reduced size.
 - **Smart paste** (on by default; Settings > Behavior). Paste, the Paste shortcut and multi-bubble batches:
   - read the selection's outline (work path, 2 px tolerance) and keep the bubble's body, without its tail;
   - keep the style size when the text fits, otherwise shrink it as little as possible (the largest size that fits,
@@ -14,7 +15,7 @@ come from MD TYPER 1.3.22, a TypeR fork, reused with its author's permission and
   - set a line made only of punctuation at the style's punctuation scale (×2 or ×3, off by default); a small bubble
     shrinks it, down to the minimum size of the style's own size;
   - break the lines to follow the bubble's silhouette and centre the ink optically, all lines inside the outline;
-  - write white text without a stroke in a black bubble;
+  - write white text without a stroke in a black bubble; Smart stroke removes the configured stroke on light backgrounds by default and keeps it on mixed backgrounds. Enable **Preserve stroke on light backgrounds** in the preset editor to retain the configured stroke on light backgrounds too. This option is off by default and does not add a missing stroke;
   - use the style marked *Shout* or *Narration* (style editor, "Bubble type") of the current folder for a spiky
     bubble or, on a Magic Wand selection only, a rectangular box (a rectangle marquee or a lasso keeps the line's
     style); a script prefix always wins;

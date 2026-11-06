@@ -20,10 +20,9 @@ for (const name of ['UXP-Windows.ccx', 'TypeR-UXP.ccx']) {
 const uxpPackage = path.join(root, 'Releases', name);
 if (fs.existsSync(uxpPackage)) {
   const ccx = fs.readFileSync(uxpPackage);
-  const uxpFiles = unzipSync(ccx);
-  const uxpManifest = JSON.parse(Buffer.from(uxpFiles['manifest.json']).toString('utf8'));
+  const uxpManifest = JSON.parse(Buffer.from(unzipSync(ccx)['manifest.json']).toString('utf8'));
   if (uxpManifest.id !== 'com.scanr.typer' || uxpManifest.version !== require('../package.json').version) throw new Error('Releases/' + name + ' is not TypeR ' + require('../package.json').version + ': run npm run package:uxp');
-  if (name === 'UXP-Windows.ccx' && (uxpManifest.addon || !uxpFiles['native/typer-keys-win.json'])) throw new Error('Rebuild the Windows UXP package with its keyboard reader');
+  if (name === 'UXP-Windows.ccx' && (!uxpManifest.addon || !uxpManifest.requiredPermissions.enableAddon)) throw new Error('Rebuild the Windows UXP package with its native addon');
   if (name === 'TypeR-UXP.ccx' && uxpManifest.addon) throw new Error('TypeR-UXP.ccx must run on every system: no native addon');
   files[name] = ccx;
 } else if (process.argv.includes('--with-uxp')) {

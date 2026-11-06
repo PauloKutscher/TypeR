@@ -436,7 +436,7 @@ async function evalScript(script) {
 
 /* ========================= requests ========================== */
 
-// The keyboard reader (TypeR Shortcuts.exe, or the addon of its preview package) starts
+// The keyboard reader starts
 // while Photoshop starts, next to the first init: its state goes with every slow init line of the log
 function keyboardAddonState() {
   const state = typeof keysHelper.diagnostics === "function" ? keysHelper.diagnostics() : null;

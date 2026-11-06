@@ -369,6 +369,12 @@ const EditStyleModal = React.memo(function EditStyleModal() {
                 {locale.editStyleSmartStrokeLabel}
               </label>
               <div className="field-descr">{locale.editStyleSmartStrokeHint}</div>
+              <label className="field-label">
+                <input type="checkbox" checked={stroke.preserveOnLight === true} disabled={stroke.smart === false}
+                  onChange={(e) => { setStroke({ ...stroke, preserveOnLight: e.target.checked }); setEdited(true); }} />
+                {locale.editStylePreserveLightStrokeLabel}
+              </label>
+              <div className="field-descr">{locale.editStylePreserveLightStrokeHint}</div>
               <div className="field-input">
                 <div className="style-edit-stroke">
                   <input

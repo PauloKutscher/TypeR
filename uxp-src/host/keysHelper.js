@@ -1,12 +1,6 @@
-// Starts the native keyboard reader (uxp-src/native) and follows its reports.
-// Both readers are small programs shipped base64-encoded (a .ccx may not
-// carry an unsigned executable) and exit with Photoshop; their state file is
-// read every 25 ms. macOS: started through ExtendScript's app.system.
-// Windows: "TypeR Shortcuts.exe", a windowed .NET application started through
-// ExtendScript's File.execute(), as a double click would: app.system goes
-// through cmd.exe, whose console window flashes on screen. It ships only in
-// UXP-Windows.ccx: TypeR-UXP.ccx, which clients up to 3.0.0 also installed on
-// Windows, starts no reader there, and the panel replaces it with that package.
+// Starts the external macOS keyboard reader and follows its reports.
+// Windows uses keysAddon.js. The universal package starts no reader there and
+// replaces itself with the bundled Windows addon package, without a download.
 //
 // The reader writes "<state>|<beat>" and moves the beat at least once a
 // second. A beat that stops means a dead reader: its last state is dropped
@@ -18,7 +12,7 @@ const uxp = require("uxp");
 const fs = require("fs");
 const files = require("./files");
 const keyboard = require("./keyboard");
-const { runJsx, systemCall } = require("./jsx");
+const { systemCall } = require("./jsx");
 
 const POLL_MS = 25;
 // Past this without a new beat, the state on disk is a dead reader's
@@ -143,57 +137,6 @@ async function startMac(folder, statePath) {
   await runSystem(command);
 }
 
-// Named for the Task Manager, which also shows its description and icon
-const WINDOWS_READER = "TypeR Shortcuts.exe";
-
-async function startWindows(folder, statePath) {
-  const packed = JSON.parse(await readPluginFile("native/typer-keys-win.json"));
-  const binaryPath = files.joinPath(folder, WINDOWS_READER);
-  const bytes = base64ToBytes(packed.binary);
-  let current = null;
-  try {
-    current = await files.readBinary(binaryPath);
-  } catch (error) {}
-  const same = current && current.length === bytes.length && current.every((value, index) => value === bytes[index]);
-  if (!same) await replaceWindowsReader(binaryPath, statePath, bytes, current !== null);
-  // The reader takes its state file from its own folder: File.execute()
-  // passes no argument
-  if (statePath !== files.joinPath(folder, "state")) throw new Error("Unexpected keyboard state path");
-  // A reader still running stops by itself once the new one has started
-  // (the ".owner" file in typer-keys.cs)
-  const result = await runJsx(
-    "var reader = new File(" + JSON.stringify(binaryPath) + ");" +
-      " reader.exists ? (reader.execute() ? 'OK' : 'ERR execute failed') : 'ERR missing reader';"
-  );
-  if (String(result || "") !== "OK") throw new Error(result || "Keyboard reader did not start");
-  removeOldWindowsReaders(folder);
-}
-
-// A running reader keeps its .exe locked: an update first asks it to stop
-// (any other ".owner" value makes it exit within ~1.5 s)
-async function replaceWindowsReader(binaryPath, statePath, bytes, existed) {
-  if (existed) await files.writeText(statePath + ".owner", "update");
-  const until = Date.now() + 5000;
-  for (;;) {
-    try {
-      await files.writeBinary(binaryPath, bytes);
-      return;
-    } catch (error) {
-      if (!existed || Date.now() > until) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-  }
-}
-
-// Readers of earlier test builds and the former PowerShell reader
-async function removeOldWindowsReaders(folder) {
-  try {
-    for (const entry of await files.listFolder(folder)) {
-      if (/^typer-keys(-[0-9a-f]+\.exe|\.ps1)$/i.test(entry.name)) await files.remove(files.joinPath(folder, entry.name));
-    }
-  } catch (error) {}
-}
-
 function readState(path) {
   try {
     return String(fs.readFileSync(path, { encoding: "utf-8" }) || "").trim();
@@ -205,16 +148,13 @@ function readState(path) {
 // True once per run of the plugin: a panel reload must not install it again
 let platformPackageAsked = false;
 function needsPlatformPackage() {
-  if (os.platform() !== "win32" || WINDOWS_PACKAGE || platformPackageAsked) return false;
+  if (os.platform() !== "win32" || platformPackageAsked) return false;
   platformPackageAsked = true;
   return true;
 }
 
-// Set at build time: only UXP-Windows.ccx carries the Windows reader
-const WINDOWS_PACKAGE = typeof TYPER_WINDOWS_READER !== "undefined" && TYPER_WINDOWS_READER;
-
 async function start(onMouseLine, onFocusStolen) {
-  if (os.platform() === "win32" && !WINDOWS_PACKAGE) return false;
+  if (os.platform() === "win32") return false;
   mouseListener = onMouseLine || null;
   focusListener = onFocusStolen || null;
   if (started) return true;
@@ -241,8 +181,7 @@ async function start(onMouseLine, onFocusStolen) {
     watchdog.state.starting = true;
     let ok = false;
     try {
-      if (os.platform() === "win32") await startWindows(folder, statePath);
-      else await startMac(folder, statePath);
+      await startMac(folder, statePath);
       ok = true;
     } catch (error) {
       readerError = (error && error.message) || String(error);

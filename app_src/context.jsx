@@ -1,7 +1,7 @@
 import { validateImportData, repairFolderHierarchy, mergeImportedStyles } from "./librarySerialization";
 import { parsePageMarker } from "./pageMarker";
 import { normalizePageImageMatchMode } from "./pageImageMapping";
-import { normalizeAutoSizeVariation } from "./oneClick/autoFontSize";
+import { normalizeAutoSizeVariation, normalizeAutoSizeScale } from "./oneClick/autoFontSize";
 import React from "react";
 import PropTypes from "prop-types";
 import { locale, readStorage, writeToStorage, scrollToLine, scrollToStyle, getUpdateTestConfig, clearUpdateTestConfig, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, nativeAlert } from "./utils";
@@ -107,6 +107,7 @@ const storeFields = [
   "smartPasteAutoWrap",
   "smartPasteAutoSize",
   "smartPasteAutoSizeVariation",
+  "smartPasteAutoSizeScale",
   "smartPasteMinScale",
   "smartPasteHyphenation",
   "refontRules",
@@ -334,6 +335,7 @@ const initialState = {
   smartPasteAutoWrap: storage.data?.smartPasteAutoWrap === true,
   smartPasteAutoSize: storage.data?.smartPasteAutoSize === true,
   smartPasteAutoSizeVariation: normalizeAutoSizeVariation(storage.data?.smartPasteAutoSizeVariation),
+  smartPasteAutoSizeScale: normalizeAutoSizeScale(storage.data?.smartPasteAutoSizeScale),
   smartPasteMinScale: normalizeSmartPasteMinScale(storage.data?.smartPasteMinScale),
   smartPasteHyphenation: normalizeSmartPasteHyphenation(storage.data?.smartPasteHyphenation),
   // How the page reads, for the parts of a double or triple bubble: manga
@@ -495,6 +497,9 @@ const baseReducer = (state, action) => {
       }
       if ("smartPasteAutoSizeVariation" in action.data) {
         newState.smartPasteAutoSizeVariation = normalizeAutoSizeVariation(action.data.smartPasteAutoSizeVariation);
+      }
+      if ("smartPasteAutoSizeScale" in action.data) {
+        newState.smartPasteAutoSizeScale = normalizeAutoSizeScale(action.data.smartPasteAutoSizeScale);
       }
       if ("smartPasteMinScale" in action.data) {
         newState.smartPasteMinScale = normalizeSmartPasteMinScale(action.data.smartPasteMinScale);
@@ -1126,6 +1131,11 @@ const baseReducer = (state, action) => {
 
     case "setSmartPasteAutoSizeVariation": {
       newState.smartPasteAutoSizeVariation = normalizeAutoSizeVariation(action.value);
+      break;
+    }
+
+    case "setSmartPasteAutoSizeScale": {
+      newState.smartPasteAutoSizeScale = normalizeAutoSizeScale(action.value);
       break;
     }
 

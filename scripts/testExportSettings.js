@@ -5,6 +5,7 @@ const preferences = {
   smartPaste: false, pasteOnClick: true, smartPasteAutoClean: true,
   smartPasteDistribute: false, smartPasteMinScale: 0.8, smartPasteHyphenation: 'fr',
   smartPasteAutoSizeVariation: 0.2,
+  smartPasteAutoSizeScale: 0.9,
   refontRules: [{ marker: '!', fontPostScriptName: 'Example' }],
 };
 const profile = { folders: [], styles: [], ...preferences };

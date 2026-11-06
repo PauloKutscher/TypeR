@@ -57,7 +57,7 @@ export const applySmartStroke = (style, input, plan) => {
   const tone = strokeBackground(input, plan);
   const configured = style.stroke && style.stroke.enabled !== false && style.stroke.size > 0;
   return {
-    style: tone === "dark" ? { ...style, stroke: null } : style,
+    style: tone === "dark" || (tone === "light" && style.stroke?.preserveOnLight !== true) ? { ...style, stroke: null } : style,
     plan: { ...plan, textColor: tone === "dark" ? { red: 255, green: 255, blue: 255 } : tone === "light" || (tone === "mixed" && configured) ? null : plan.textColor },
   };
 };

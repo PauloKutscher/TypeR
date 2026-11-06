@@ -16,6 +16,7 @@ const { serializeStyle, validateImportData } = load("app_src/librarySerializatio
   assert.strictEqual(initial.smartPasteAutoWrap, false, "existing profiles keep contour-based line breaks");
   assert.strictEqual(initial.smartPasteAutoSize, false, "Beta sizing is never enabled automatically");
   assert.strictEqual(initial.smartPasteAutoSizeVariation, 0.12);
+  assert.strictEqual(initial.smartPasteAutoSizeScale, 0.85);
   assert.strictEqual(initial.smartPasteMinScale, 0.75);
   assert.strictEqual(initial.smartPasteHyphenation, "auto");
   assert.deepStrictEqual(initial.refontRules, []);
@@ -71,6 +72,21 @@ for (const [stored, expected] of [[0, 0], [0.25, 0.25], [1, 1], [-1, 0], [2, 1],
   assert.strictEqual(reducer(state, { type: "import", data: { smartPasteAutoSizeVariation: 0 } }).smartPasteAutoSizeVariation, 0);
   assert.strictEqual(reducer(state, { type: "import", data: { smartPasteAutoSizeVariation: "bad" } }).smartPasteAutoSizeVariation, 0.12);
   assert.strictEqual(state.smartPasteAutoSize, false, "editing variation never enables Beta");
+}
+
+for (const [stored, expected] of [[0.5, 0.5], [1, 1], [1.5, 1.5], [0, 0.5], [2, 1.5], ["0.9", 0.9], ["", 0.85], [null, 0.85], [true, 0.85], ["bad", 0.85]]) {
+  assert.strictEqual(loadContext({ smartPasteAutoSizeScale: stored }).initial.smartPasteAutoSizeScale, expected);
+}
+{
+  const { reducer, initial, writes } = loadContext({});
+  const state = reducer(initial, { type: "setSmartPasteAutoSizeScale", value: 0.9 });
+  assert.strictEqual(state.smartPasteAutoSizeScale, 0.9);
+  assert.strictEqual(writes[writes.length - 1][0].smartPasteAutoSizeScale, 0.9);
+  assert.strictEqual(loadContext(writes[writes.length - 1][0]).initial.smartPasteAutoSizeScale, 0.9, "scale survives a reload");
+  assert.strictEqual(reducer(state, { type: "import", data: {} }).smartPasteAutoSizeScale, 0.9);
+  assert.strictEqual(reducer(state, { type: "import", data: { smartPasteAutoSizeScale: 1 } }).smartPasteAutoSizeScale, 1);
+  assert.strictEqual(reducer(state, { type: "import", data: { smartPasteAutoSizeScale: "bad" } }).smartPasteAutoSizeScale, 0.85);
+  assert.strictEqual(state.smartPasteAutoSize, false, "editing scale never enables Beta");
 }
 
 for (const mode of ["auto", "fr", "en", "off"]) {

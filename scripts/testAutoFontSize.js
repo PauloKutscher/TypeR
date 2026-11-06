@@ -1,6 +1,6 @@
 const assert = require('assert');
-const { recommendFontSize, normalizeAutoSizeVariation, autoSizePageKey, readAutoSizeReference, rememberAutoSizeReference, clearAutoSizeReferences } = require('./helpers/loadAppModule')()('app_src/oneClick/autoFontSize.js');
-const base = { stylePx: 24, minScale: 0.75, polygon: [[0,0],[300,0],[300,200],[0,200]], width: 300, height: 200, advance: 20, leading: 1.2 };
+const { recommendFontSize, normalizeAutoSizeVariation, normalizeAutoSizeScale, autoSizePageKey, readAutoSizeReference, rememberAutoSizeReference, clearAutoSizeReferences } = require('./helpers/loadAppModule')()('app_src/oneClick/autoFontSize.js');
+const base = { stylePx: 24, minScale: 0.75, polygon: [[0,0],[300,0],[300,200],[0,200]], width: 300, height: 200, advance: 20, leading: 1.2, autoSizeScale: 1 };
 const short = recommendFontSize(base);
 const long = recommendFontSize({ ...base, advance: 100 });
 assert(short.max > long.max, 'longer speech receives a smaller recommendation');
@@ -19,6 +19,14 @@ for (const [value, expected] of [[undefined, 0.12], [null, 0.12], ['', 0.12], ['
 }
 const scaled = recommendFontSize({ ...base, stylePx: 48, width: 600, height: 400, polygon: base.polygon.map(([x,y])=>[x*2,y*2]) });
 assert(Math.abs(scaled.max-short.max*2) < 1e-6, 'proportional document/DPI changes keep the visual scale');
+for (const [value, expected] of [[undefined, 0.85], [null, 0.85], ['', 0.85], ['bad', 0.85], [true, 0.85], [NaN, 0.85], [Infinity, 0.85], [0, 0.5], ['0.85', 0.85], [1, 1], [2, 1.5]]) {
+  assert.strictEqual(normalizeAutoSizeScale(value), expected, 'scale ' + String(value));
+}
+assert.strictEqual(recommendFontSize({ ...base, autoSizeScale: undefined }).max, short.max * 0.85, 'new and existing profiles default to 85%');
+assert.strictEqual(recommendFontSize({ ...base, autoSizeScale: 1.15 }).max, short.max * 1.15, 'larger recommendations scale proportionally');
+assert.strictEqual(recommendFontSize({ ...base, autoSizeScale: 0.5 }).max, 18, 'smaller preferences respect the existing minimum');
+assert.strictEqual(recommendFontSize({ ...base, advance: 1, autoSizeScale: 1.5 }).max, 36, 'larger preferences keep the preset safety bound');
+assert.strictEqual(recommendFontSize({ ...base, advance: 5, referenceRatio: 1.1, autoSizeVariation: 0, autoSizeScale: 0.85 }).max, 24*1.1*0.85, 'the preference scales the page reference once');
 clearAutoSizeReferences();
 const key = autoSizePageKey(7,'page-1');
 assert.strictEqual(readAutoSizeReference(key), null);

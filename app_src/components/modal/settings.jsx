@@ -11,7 +11,7 @@ import { reloadApp, backupStorage, locale, baseLocale, nativeAlert, nativeConfir
 import { readUxpMigrationState } from "../../uxpMigration";
 import { openKeyboardAccessSettings, readKeyboardAccess } from "../../keyboardAccess";
 import { useContext, defaultUiLayout, normalizeUiLayout, normalizeSmartPasteMinScale } from "../../context";
-import { normalizeAutoSizeVariation } from "../../oneClick/autoFontSize";
+import { normalizeAutoSizeVariation, normalizeAutoSizeScale } from "../../oneClick/autoFontSize";
 import { normalizeRefontRules } from "../../oneClick/refont";
 import { sanitizeTextShapeRTuning } from "../../textShapeR";
 import {
@@ -95,6 +95,7 @@ const REFONT_MARKER_MAX_LENGTH = 8;
 // The smart paste minimum size is edited in percent of the style size
 const minScaleToPercent = (value) => String(Math.round(normalizeSmartPasteMinScale(value) * 100));
 const autoSizeVariationToPercent = (value) => String(Math.round(normalizeAutoSizeVariation(value) * 100));
+const autoSizeScaleToPercent = (value) => String(Math.round(normalizeAutoSizeScale(value) * 100));
 // Shortcuts tab: commands grouped by what they act on. A command missing
 // here still shows, in the last group, so a new one is never hidden.
 const SHORTCUT_GROUPS = [
@@ -138,6 +139,7 @@ const SettingsModal = React.memo(function SettingsModal() {
     smartPasteAutoWrap: state.smartPasteAutoWrap,
     smartPasteAutoSize: state.smartPasteAutoSize,
     smartPasteAutoSizeVariation: state.smartPasteAutoSizeVariation,
+    smartPasteAutoSizeScale: state.smartPasteAutoSizeScale,
     smartPasteAutoClean: state.smartPasteAutoClean,
     smartPasteMinScale: state.smartPasteMinScale,
     smartPasteHyphenation: state.smartPasteHyphenation,
@@ -205,6 +207,9 @@ const SettingsModal = React.memo(function SettingsModal() {
   const [smartPasteAutoSize, setSmartPasteAutoSize] = React.useState(context.state.smartPasteAutoSize === true);
   const [smartPasteAutoSizeVariation, setSmartPasteAutoSizeVariation] = React.useState(
     () => autoSizeVariationToPercent(context.state.smartPasteAutoSizeVariation)
+  );
+  const [smartPasteAutoSizeScale, setSmartPasteAutoSizeScale] = React.useState(
+    () => autoSizeScaleToPercent(context.state.smartPasteAutoSizeScale)
   );
   const [smartPasteAutoClean, setSmartPasteAutoClean] = React.useState(
     context.state.smartPasteAutoClean === true
@@ -590,6 +595,20 @@ const SettingsModal = React.memo(function SettingsModal() {
   const changeSmartPasteAutoClean = (e) => {
     setSmartPasteAutoClean(e.target.checked);
     setEdited(true);
+  };
+
+  const changeSmartPasteAutoSizeScale = (e) => {
+    const value = e.target.value;
+    if (value === "" || /^\d{1,3}$/.test(value)) {
+      setSmartPasteAutoSizeScale(value);
+      setEdited(true);
+    }
+  };
+  const resetSmartPasteAutoSizeScale = () => {
+    const percent = parseInt(smartPasteAutoSizeScale, 10);
+    setSmartPasteAutoSizeScale(autoSizeScaleToPercent(
+      Number.isFinite(percent) ? percent / 100 : context.state.smartPasteAutoSizeScale
+    ));
   };
 
   const changeSmartPasteAutoSizeVariation = (e) => {
@@ -1019,6 +1038,13 @@ const SettingsModal = React.memo(function SettingsModal() {
     }
     if (smartPasteAutoSize !== (context.state.smartPasteAutoSize === true)) {
       context.dispatch({ type: "setSmartPasteAutoSize", value: smartPasteAutoSize });
+    }
+    const scalePercent = parseInt(smartPasteAutoSizeScale, 10);
+    if (Number.isFinite(scalePercent)) {
+      const scale = normalizeAutoSizeScale(scalePercent / 100);
+      if (scale !== context.state.smartPasteAutoSizeScale) {
+        context.dispatch({ type: "setSmartPasteAutoSizeScale", value: scale });
+      }
     }
     const variationPercent = parseInt(smartPasteAutoSizeVariation, 10);
     if (Number.isFinite(variationPercent)) {
@@ -1605,6 +1631,19 @@ const SettingsModal = React.memo(function SettingsModal() {
                       (e) => { setSmartPasteAutoSize(e.target.checked); setEdited(true); },
                       locale.settingsSmartPasteAutoSizeLabel,
                       locale.settingsSmartPasteAutoSizeHelp,
+                      <>
+                      <div className="field">
+                        <div className="field-label">{locale.settingsSmartPasteAutoSizeScaleLabel}</div>
+                        <div className="field-input">
+                          <input type="number" min="50" max="150" step="1"
+                            aria-label={locale.settingsSmartPasteAutoSizeScaleLabel}
+                            value={smartPasteAutoSizeScale}
+                            onChange={changeSmartPasteAutoSizeScale}
+                            onBlur={resetSmartPasteAutoSizeScale}
+                            className="topcoat-text-input--large" />
+                        </div>
+                        <div className="field-descr">{locale.settingsSmartPasteAutoSizeScaleHelp}</div>
+                      </div>
                       <div className="field">
                         <div className="field-label">{locale.settingsSmartPasteAutoSizeVariationLabel}</div>
                         <div className="field-input">
@@ -1617,6 +1656,7 @@ const SettingsModal = React.memo(function SettingsModal() {
                         </div>
                         <div className="field-descr">{locale.settingsSmartPasteAutoSizeVariationHelp}</div>
                       </div>
+                      </>
                     )}
                     {renderToggle(
                       smartPasteAutoWrap,
