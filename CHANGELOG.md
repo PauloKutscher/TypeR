@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 3.0.3.7 — PauloKutscher fork
+
 - Merge upstream `6f2e380`: add an in-panel fallback for refused or unavailable UXP WebViews and WebP import in UXP. Preserve the fork's native Windows keyboard addon and offline Windows package swap; omit the upstream DLL patch after Kaspersky detected and deleted its script during integration.
 - Restore visible, clickable smart-stroke checkboxes in the preset editor, keeping their saved values and defaults.
 
