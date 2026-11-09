@@ -364,21 +364,24 @@ const EditStyleModal = React.memo(function EditStyleModal() {
             </div>
             <div className="field hostBrdTopContrast">
               <div className="field-label">{locale.editStyleStrokeLabel}</div>
-              <label className="field-label">
+              <label className="topcoat-checkbox style-edit-auto-size-toggle">
                 <input type="checkbox" checked={stroke.smart !== false} onChange={(e) => { setStroke({ ...stroke, smart: e.target.checked }); setEdited(true); }} />
-                {locale.editStyleSmartStrokeLabel}
+                <div className="topcoat-checkbox__checkmark"></div>
+                <span>{locale.editStyleSmartStrokeLabel}</span>
               </label>
               <div className="field-descr">{locale.editStyleSmartStrokeHint}</div>
-              <label className="field-label">
+              <label className={"topcoat-checkbox style-edit-auto-size-toggle" + (stroke.smart === false ? " m-disabled" : "")}>
                 <input type="checkbox" checked={stroke.preserveOnLight === true} disabled={stroke.smart === false}
                   onChange={(e) => { setStroke({ ...stroke, preserveOnLight: e.target.checked }); setEdited(true); }} />
-                {locale.editStylePreserveLightStrokeLabel}
+                <div className="topcoat-checkbox__checkmark"></div>
+                <span>{locale.editStylePreserveLightStrokeLabel}</span>
               </label>
               <div className="field-descr">{locale.editStylePreserveLightStrokeHint}</div>
-              <label className="field-label">
+              <label className={"topcoat-checkbox style-edit-auto-size-toggle" + (stroke.smart === false ? " m-disabled" : "")}>
                 <input type="checkbox" checked={stroke.invertOnDark !== false} disabled={stroke.smart === false}
                   onChange={(e) => { setStroke({ ...stroke, invertOnDark: e.target.checked }); setEdited(true); }} />
-                {locale.editStyleInvertDarkStrokeLabel}
+                <div className="topcoat-checkbox__checkmark"></div>
+                <span>{locale.editStyleInvertDarkStrokeLabel}</span>
               </label>
               <div className="field-descr">{locale.editStyleInvertDarkStrokeHint}</div>
               <div className="field-input">
