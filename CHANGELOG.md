@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Merge upstream `6f2e380`: add an in-panel fallback for refused or unavailable UXP WebViews and WebP import in UXP. Preserve the fork's native Windows keyboard addon and offline Windows package swap; omit the upstream DLL patch after Kaspersky detected and deleted its script during integration.
+- Restore visible, clickable smart-stroke checkboxes in the preset editor, keeping their saved values and defaults.
+
 ## 3.0.3.6 — PauloKutscher fork
 
 - Make preserving a preset's stroke on light backgrounds an explicit per-preset option, off by default. Smart stroke again removes strokes on light backgrounds unless opted in; mixed backgrounds and disabled Smart stroke retain their behavior.
@@ -53,6 +56,7 @@
 
 ## 3.0.2
 
+- The new TypeR opens even when Photoshop refuses it a WebView ("TypeR could not display its interface. No response from the WebView", `start=false, stop=false, bridge=false`). Photoshop 2026 (UXP 9.3) refuses every plugin's WebView when no Adobe user is signed in (Feature Restricted Licensing, offline or modified installations: "webViewDataStorage_ is not available" in its UXP log), and also when it has no WebView2 runtime it can start. TypeR then runs in the panel itself, without a WebView, within seconds of the refusal (at most 15 s when nothing else tells it): the same panel, script, styles, paste, settings and shortcuts. Differences in that mode: the script is edited in a plain field shown on click (the coloured lines come back when it closes), fields are drawn by Photoshop, and a few icons look slightly different. See `docs/uxp-webview-refused.md`.
 - Windows: the new TypeR reads the keyboard with TypeR Shortcuts.exe again, the small program of 3.0.0 that Microsoft cleared of Defender's detection, instead of the native addon of 3.0.1. It also gives the focus back when a Photoshop tooltip takes it, and reads the Back and Forward keys of some mice.
 - Fix the text pasted with Auto clean landing under the `TypeR Clean` layer, hidden by its fill, since 3.0.1: the text is made above the clean layer again, in the user's folder when that folder sits above it, and a new text is brought to the front of its folder with Photoshop's own command instead of a computed layer index (which also raised a Photoshop error on some documents).
 - The new TypeR no longer hides its WebView when it has not answered after 15 s: Photoshop 27.7 can take much longer to start it, and a hidden WebView never loads. The notice says TypeR keeps waiting, and the panel opens by itself when the WebView starts.
