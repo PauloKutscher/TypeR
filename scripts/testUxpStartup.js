@@ -130,6 +130,7 @@ function hostHarness({ readWebViewFolders, uxpLog = '', readLog, platform = 'win
   // The application in the panel's own DOM (inPanel.js): its starts, the
   // channel the host gave the last one and what the host delivered
   const inPanelStarts = [];
+  const repairKinds = [];
   const errors = [];
   let marker = "";
   const delivered = [];
@@ -165,6 +166,8 @@ function hostHarness({ readWebViewFolders, uxpLog = '', readLog, platform = 'win
     uxp: { host: { version: '27.0', uiLocale: 'fr_FR' }, versions: { uxp: '8.0' }, entrypoints: { setup: value => { lifecycle = value; } }, shell: { openExternal: async url => { opened.push(url); } } },
     os: { platform: () => platform, release: () => '10.0', homedir: () => 'C:\\Users\\ana' },
     './panelStart': Object.assign({}, require('../uxp-src/host/panelStart'), readWebViewFolders ? { readWebViewFolders } : {}),
+    './webViewRepair': { createWebViewRepair: () => ({ start: async kind => { repairKinds.push(kind); return true; } }) },
+    './saveRepairDocuments': { saveRepairDocuments: async () => true },
     fs: { readdir: async () => [] },
     './photoshop': { methods: {} }, './smartPaste': { methods: {} },
     './files': {
@@ -190,7 +193,7 @@ function hostHarness({ readWebViewFolders, uxpLog = '', readLog, platform = 'win
     clearTimeout: id => hostTimers.delete(id),
     document: { getElementById: id => nodes[id] || null, createElement: () => element(''), body: { appendChild: node => { nodes[node.id] = node; } } }
   });
-  return { nodes, timers, hostTimers, resetDom, nativeWindow, opened, panel: lifecycle.panels.typer, inPanelStarts, delivered,
+  return { nodes, timers, hostTimers, resetDom, nativeWindow, opened, panel: lifecycle.panels.typer, inPanelStarts, delivered, repairKinds,
     receive: message => inPanelStarts[inPanelStarts.length - 1].receive(message),
     inPanelReason: () => errors.filter(line => line.includes('running in the panel itself')).pop() || '', get calls() { return calls; }, get flushes() { return flushes; }, finishOldRequest: () => finishOldRequest('old result') };
 }
@@ -211,8 +214,9 @@ function hostHarness({ readWebViewFolders, uxpLog = '', readLog, platform = 'win
   assert.strictEqual(noRuntime.inPanelStarts.length, 0, 'a refusal written before the WebView was asked for does not count');
   for (const tick of [...noRuntime.timers.values()]) tick();
   await settle();
-  assert.strictEqual(noRuntime.inPanelStarts.length, 1, 'no WebView after 15 s: the application runs in the panel');
-  assert.match(noRuntime.inPanelReason(), /Failed to create WebView for plugin: com\.scanr\.typer/);
+  assert.strictEqual(noRuntime.inPanelStarts.length, 1, 'no WebView after 30 s: the application runs in the panel');
+  assert.deepStrictEqual(noRuntime.repairKinds, [], 'runtime failure or stale refusal must not patch Photoshop');
+  assert.match(noRuntime.inPanelReason(), /No response from the WebView/);
   assert.strictEqual(noRuntime.nodes['typer-view'], undefined, 'the refused WebView is removed');
   assert.notStrictEqual(noRuntime.nodes['typer-recovery'].style.display, 'block', 'no failure notice: TypeR works');
   await noRuntime.panel.destroy();
@@ -228,6 +232,7 @@ function hostHarness({ readWebViewFolders, uxpLog = '', readLog, platform = 'win
   for (const tick of [...refused.hostTimers.values()]) await tick();
   await settle();
   assert.strictEqual(refused.inPanelStarts.length, 1, 'the refusal switches to the panel once');
+  assert.deepStrictEqual(refused.repairKinds, [], 'repair waits until the fallback app is usable');
   assert.match(refused.inPanelReason(), /webViewDataStorage_ is not available/);
   assert.strictEqual(refused.timers.size, 1, 'only the in-panel start deadline is left');
   // The application's messages reach the host's requests, the replies go back
@@ -238,7 +243,7 @@ function hostHarness({ readWebViewFolders, uxpLog = '', readLog, platform = 'win
   assert.strictEqual(refused.calls, 1, 'a request runs once');
   assert.strictEqual(JSON.stringify(refused.delivered.filter(message => message.type === 'reply')), JSON.stringify([{ type: 'reply', id: 1, result: 1 }]));
   refused.receive({ type: 'appReady' });
-  assert.deepStrictEqual(refused.repairKinds, ['storage'], 'a confirmed refusal and a usable fallback start repair');
+  assert.deepStrictEqual(refused.repairKinds, [], 'starting the native fallback preserves the fork’s explicit repair policy');
   assert.strictEqual(refused.nodes['typer-status'].style.display, 'none');
   assert.strictEqual(refused.timers.size, 0);
   refused.panel.hide();

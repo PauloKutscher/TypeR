@@ -47,6 +47,8 @@ LAB_RESULT = "";
     identity: LAB.identity || null
   };
 
+  var forkTrace = LAB.traceGeometry && typeof _splitOutlineAtCusps === "function";
+
   /* Bench-only wrappers: observe the production geometry without changing it. */
   var geometryTrace = null;
   var cleanLayersHidden = 0;
@@ -169,7 +171,7 @@ LAB_RESULT = "";
 
 
   function beginGeometryTrace(pass) {
-    if (LAB.traceGeometry) {
+    if (forkTrace) {
       geometryTrace = { version: 2, pass: pass, outlines: [], acquisitions: [], probes: [], partition: null, exceptions: [] };
       acquisitionRefs = [];
       lastWand = null;
@@ -211,7 +213,7 @@ LAB_RESULT = "";
     return current;
   }
 
-  if (LAB.traceGeometry) {
+  if (forkTrace) {
     var originalWandAt = _wandAt;
     _wandAt = function (x, y, tolerance) {
       var value = originalWandAt(x, y, tolerance);
@@ -333,6 +335,34 @@ LAB_RESULT = "";
       if (geometryTrace) geometryTrace.partition = replay;
       return centre;
     };
+  }
+
+  function measuredAlignment(options, row, pass) {
+    if (!LAB.panelExchange) return alignTextLayerToSelection(options);
+    var raw = alignCapture();
+    var capture = jamJSON.parse(raw);
+    row[pass] = { captureError: capture ? capture.error || null : "empty", placements: 0 };
+    if (capture && !capture.error) {
+      var temporary = new File(LAB.panelExchange + "/align-request.tmp");
+      if (!temporary.open("w")) throw new Error("Cannot write alignment request");
+      temporary.encoding = "UTF-8";
+      temporary.write(raw);
+      temporary.close();
+      if (!temporary.rename("align-request.json")) throw new Error("Cannot publish alignment request");
+      var response = new File(LAB.panelExchange + "/align-response.json");
+      var deadline = new Date().getTime() + 30000;
+      while (!response.exists && new Date().getTime() < deadline) $.sleep(20);
+      if (!response.open("r")) throw new Error("Alignment planner did not answer");
+      response.encoding = "UTF-8";
+      var plan = jamJSON.parse(response.read());
+      response.close();
+      response.remove();
+      if (plan.error) throw new Error("Alignment planner: " + plan.error);
+      options.documentId = capture.documentId;
+      options.placements = plan.placements;
+      row[pass].placements = plan.placements.length;
+    }
+    return alignTextLayerToSelection(options);
   }
 
   function note(where, err) {
@@ -912,7 +942,9 @@ LAB_RESULT = "";
         try { row.region.shapeLayerBounds = _findShapeLayerBoundsBelowTextLayer(); } catch (e) { row.region.shapeLayerBounds = null; }
 
         try {
-          _createBalloonWandSelection(report.options.wandTolerance);
+          if (typeof _createBalloonWandSelection === "function") {
+            _createBalloonWandSelection(report.options.wandTolerance);
+          }
           row.region.wandRaw = _getCurrentSelectionBounds() || null;
           if (row.region.wandRaw) {
             try { row.region.openRadius = _getAdaptiveSelectionOpenRadius(row.region.wandRaw); } catch (e) { row.region.openRadius = null; }
@@ -998,12 +1030,12 @@ LAB_RESULT = "";
         }
 
         // The real engine, same entry point the panel calls.
-        row.align.result = alignTextLayerToSelection({
+        row.align.result = measuredAlignment({
           resizeTextBox: report.options.resize,
           padding: report.options.padding,
           phantomOffsetX: phantomOffsetX
-        });
-        if (LAB.traceGeometry) row.region.geometry = finishGeometryTrace();
+        }, row.align, "plan");
+        if (forkTrace) row.region.geometry = finishGeometryTrace();
 
         // Why the engine split the region between its texts, or why it did not.
         // Without this a case that silently kept the old target is
@@ -1064,12 +1096,12 @@ LAB_RESULT = "";
             if (live2 && LAB.phantomRatio) phantom2 = LAB.phantomRatio * live2.width;
             doc.activeLayer = layer;
           }
-          row.align.result2 = alignTextLayerToSelection({
+          row.align.result2 = measuredAlignment({
             resizeTextBox: report.options.resize,
             padding: report.options.padding,
             phantomOffsetX: phantom2
-          });
-          if (LAB.traceGeometry) row.region.geometry2 = finishGeometryTrace();
+          }, row.align, "plan2");
+          if (forkTrace) row.region.geometry2 = finishGeometryTrace();
           var inkA2 = inkBounds(doc, layer);
           row.after2 = { ink: inkA2.bounds, metric: _getCurrentTextLayerBounds() };
           if (row.after.ink && row.after2.ink) {
@@ -1077,7 +1109,7 @@ LAB_RESULT = "";
             row.delta.repeatY = row.after2.ink.yMid - row.after.ink.yMid;
           }
         } catch (repeatErr) {
-          if (LAB.traceGeometry && geometryTrace) row.region.geometry2 = finishGeometryTrace();
+          if (forkTrace && geometryTrace) row.region.geometry2 = finishGeometryTrace();
           note("secondAlign[" + n + "]", repeatErr);
         }
 
@@ -1095,7 +1127,7 @@ LAB_RESULT = "";
           note("restoreAfterAlign[" + n + "]", e);
         }
       } catch (layerErr) {
-        if (LAB.traceGeometry && geometryTrace) row.region.geometryError = finishGeometryTrace();
+        if (forkTrace && geometryTrace) row.region.geometryError = finishGeometryTrace();
         note("layer[" + n + "]", layerErr);
         row.skipped = row.skipped || "error";
       }
@@ -1122,7 +1154,7 @@ LAB_RESULT = "";
 
   try { app.preferences.rulerUnits = oldUnits; } catch (e) {}
   try { app.displayDialogs = oldDialogs; } catch (e) {}
-  if (LAB.traceGeometry) {
+  if (forkTrace) {
     _wandAt = originalWandAt;
     _narrowSelectionToTextNeighbourhood = originalNarrow;
     _modifySelectionBounds = originalModifySelectionBounds;

@@ -1,4 +1,4 @@
-﻿<#
+<#
   runMeasure.ps1 — drives Photoshop through COM to measure how the real TypeR
   centering moves text inside balloons.
 
@@ -32,6 +32,10 @@ param(
   [switch]$LiveSelection,
   [double]$PhantomRatio = 0,
   [string]$HostJsx = "",
+  [string]$PanelRoot = "",
+  [string]$ForkPanelRoot = "",
+  [ValidateSet("full", "single", "guarded", "optical", "product")][string]$PanelMode = "full",
+  [ValidateSet("ltr", "rtl")][string]$ReadingOrder = "rtl",
   [switch]$TraceGeometry,
   [switch]$RefreezeGroundTruth,
   [switch]$CaptureRawOutline,
@@ -78,7 +82,7 @@ if ((Test-Path -LiteralPath $outDir) -and @(Get-ChildItem -LiteralPath $outDir -
 $hostJsx = if ($HostJsx) {
   if ([System.IO.Path]::IsPathRooted($HostJsx)) { $HostJsx } else { Join-Path $Root $HostJsx }
 } else { Join-Path $Root "app\host.jsx" }
-$harness = Join-Path $Root "scripts\lab\measureCentering.jsx"
+$harness = Join-Path $PSScriptRoot "measureCentering.jsx"
 $hostHashBefore = (Get-FileHash -Algorithm SHA1 -LiteralPath $hostJsx).Hash
 $harnessHashBefore = (Get-FileHash -Algorithm SHA1 -LiteralPath $harness).Hash
 $sourceHashBefore = (Get-FileHash -Algorithm SHA1 -LiteralPath (Join-Path $Root 'app_src\host.js')).Hash
@@ -146,6 +150,20 @@ New-Item -ItemType Directory -Force -Path $pageDir | Out-Null
 $runStarted = Get-Date
 $pageTimings = @()
 $failed = $false
+$panelExchange = ''
+$panelWorker = $null
+if ($PanelRoot) {
+  $PanelRoot = (Resolve-Path -LiteralPath $PanelRoot).Path
+  $panelExchange = (New-Item -ItemType Directory -Path (Join-Path $runDir 'align-exchange')).FullName
+  $workerArguments = @()
+  if ($ForkPanelRoot) { $workerArguments += '"' + (Resolve-Path -LiteralPath $ForkPanelRoot).Path + '"' }
+  $worker = Join-Path $PSScriptRoot 'alignmentWorker.js'
+  $panelWorker = Start-Process -FilePath (Get-Command node -CommandType Application | Select-Object -First 1).Source -ArgumentList (@(
+    '"' + $worker + '"', '"' + $panelExchange + '"', '"' + $PanelRoot + '"', $ReadingOrder, $PanelMode
+  ) + $workerArguments) -WindowStyle Hidden -RedirectStandardError (Join-Path $runDir 'align-worker.log') -PassThru
+}
+
+try {
 
 foreach ($f in $files) {
   $inputHash = (Get-FileHash -Algorithm SHA1 -LiteralPath $f.FullName).Hash
@@ -171,10 +189,11 @@ var LAB = {
   indices: $indicesLiteral,
   identity: { head: "$engineHead", sourceSha1: "$sourceHashBefore", hostSha1: "$hostHashBefore", harnessSha1: "$harnessHashBefore", inputSha1: "$inputHash" },
   phantomRatio: $phantomLiteral,
+  panelExchange: "$(To-JsxPath $panelExchange)",
   scatter: "$Scatter"
 };
 `$.evalFile(new File("$(To-JsxPath $hostJsx)"));
-LAB.identity.loadedPartition = String(_splitOutlineAtCusps);
+LAB.identity.loadedPartition = typeof _splitOutlineAtCusps === "function" ? String(_splitOutlineAtCusps) : null;
 `$.evalFile(new File("$(To-JsxPath $harness)"));
 LAB_RESULT;
 "@
@@ -189,6 +208,10 @@ LAB_RESULT;
   $pageTimings += [ordered]@{ file = $f.Name; inputSha1 = $inputHash; seconds = $secs; memoryBefore = $memoryBefore; memoryAfter = $memoryAfter; result = $result }
   Write-Output ("[" + $f.Name + "] " + $result + " (" + $secs + "s)")
   if ($result -notmatch '^OK layers=\d+ errors=0$') { $failed = $true; break }
+}
+
+} finally {
+  if ($panelWorker -and !$panelWorker.HasExited) { Stop-Process -Id $panelWorker.Id }
 }
 
 $groundTruthAfterJson = Snapshot-Json (Get-GroundTruthSnapshot $Root)

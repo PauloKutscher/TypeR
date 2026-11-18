@@ -8,7 +8,6 @@ import "./lib/CSInterface";
 import { parseMarkdownRuns, convertHtmlToMarkdown } from "./markdownConvert";
 import { resolveStylePointText } from "./textLayerPayload";
 import { planAlignment } from "./oneClick/alignPlan";
-import { keepPastedTexts } from "./oneClick/pasteTargets";
 import { noteTourEvent } from "./tourEvents";
 import { findNewerReleases, pickUpdateDownloadUrl } from "./updateLogic";
 import { withWatcherKey } from "./hotkeyState";
@@ -764,6 +763,7 @@ const scanTextShapeRTraining = (path, callback = () => {}) => {
 const getSelectionChanged = (callback = () => {}, onModeReset = () => {}) => {
   csInterface.evalScript("getSelectionChanged()", (result) => {
     const data = safeJsonParse(result);
+    if (data.selectionModeReset) onModeReset();
     if (data.documentChanged) {
       callback(data);
     } else if (Date.now() < selectionResultsSuppressedUntil || data.noChange || data.error) {
@@ -780,7 +780,7 @@ const getSelectionChanged = (callback = () => {}, onModeReset = () => {}) => {
       // The host saw one selection grow around the previous one (Shift-add):
       // no bounds are usable, the panel should only warn the user
       ignoreClearedUntilSelection = false;
-      callback({ multipleSelections: true });
+      callback(data.selectionModeReset ? { multipleSelections: true, selectionModeReset: true } : { multipleSelections: true });
     } else if (typeof data.width !== "number") {
       callback(null);
     } else {
@@ -892,8 +892,6 @@ const alignTextLayerToSelection = (resizeTextBox = false, padding = 0, callback 
     let placements = [];
     try {
       placements = capture && !capture.error ? planAlignment(capture, readingOrder) : [];
-      // A text the smart paste just centred stays on that centre
-      placements = capture && !capture.error ? keepPastedTexts(capture, placements, !!resizeTextBox) : placements;
     } catch (planError) {
       placements = [];
     }
@@ -1373,4 +1371,4 @@ const scanPsdFonts = (path, callback) => {
   );
 };
 
-export { flushStorageForReload, reloadApp, trackHostAction, msSinceHostAction, safeJsonParse, buildRichTextPayload, alignTextLayersToDoubleBubble, backupStorage, csInterface, locale, baseLocale, openUrl, readStorage, writeToStorage, flushStorageWrite, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, getTypeRSelectionSnapshot, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isHostActionPending, notePanelActivity, isPanelIdle, notePanelInteraction, isPanelInteracting, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, getCurrentSelectionShape, isPhotoshopSelectionOnlyEvent, logTextShapeRTraining, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, scanTextShapeRTraining, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, toggleCleaningLayers, getHotkeyPressed, onMouseShortcut, startForegroundWatcher, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, getUpdateTestConfig, clearUpdateTestConfig, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };
+export { flushStorageForReload, reloadApp, trackHostAction, msSinceHostAction, safeJsonParse, buildRichTextPayload, alignTextLayersToDoubleBubble, backupStorage, csInterface, locale, baseLocale, openUrl, readStorage, writeToStorage, flushStorageWrite, retryStorageSave, deleteStorageFile, nativeAlert, nativeConfirm, getUserFonts, refreshUserFonts, getActiveLayerText, getSelectedTextLayers, getTypeRSelectionSnapshot, setActiveLayerText, setSelectedTextLayers, setLayerTextFast, getCurrentSelection, getSelectionBoundsHash, addPhotoshopEventListener, hasReceivedPhotoshopEvents, isPhotoshopSelectEvent, isPhotoshopMoveEvent, isHostActionPending, notePanelActivity, isPanelIdle, notePanelInteraction, isPanelInteracting, startSelectionMonitoring, stopSelectionMonitoring, getSelectionChanged, getCurrentSelectionShape, isPhotoshopSelectionOnlyEvent, logTextShapeRTraining, deselectDocument, undoLastTextChange, getActiveLayerRenderedText, getAllLayersRenderedTexts, scanTextShapeRTraining, createTextLayerInSelection, createTextLayersInStoredSelections, alignTextLayerToSelection, changeActiveLayerTextSize, toggleCleaningLayers, getHotkeyPressed, onMouseShortcut, startForegroundWatcher, resizeTextArea, scrollToLine, scrollToStyle, rgbToHex, getStyleObject, getDefaultStyle, getDefaultStroke, openFile, scanPsdFonts, getUpdateTestConfig, clearUpdateTestConfig, checkUpdate, prefetchUpdateZip, downloadAndInstallUpdate, convertHtmlToMarkdown, parseMarkdownRuns };

@@ -309,7 +309,7 @@ const HOST_HELPERS = [
   // auto-centre, double bubble, size +/- and TextShapeR live size
   "_rectFrom", "_rectOverlap", "_unionRect", "_usableBubble", "_bubbleCandidateValid", "_probePoints", "_probeMargin", "_pickBubble",
   "_splitBubble", "_autoCenterEnabled", "_doubleBubbleEntriesValid", "_transformScale", "_displayedTextSize", "_displayedStyleValue",
-  "_scaleTextShape", "_textResizePlan", "_appliedSizeRatio", "_keepLiveTextSize", "_alignPlacementMap",
+  "_scaleTextStyleRanges", "_scaleTextShape", "_textResizePlan", "_appliedSizeRatio", "_keepLiveTextSize", "_alignPlacementMap",
 ];
 const host = new Function(hostSource + "\nreturn {" + HOST_HELPERS.join(", ") + "};")();
 
@@ -466,27 +466,19 @@ const raiseCalls = [];
 const raisePort = loadPortModule(stackPhotoshop((command) => {
   raiseCalls.push(command);
   if (command._obj === "get" && command._target[0]._property === "group") return { group: true };
-  if (command._obj === "get" && command._target[0]._property === "itemIndex") return { itemIndex: command._target[1]._id === cleanLayer.id ? 9 : 3 };
   return {};
-}, [cleanLayer, { id: 2, name: "Page", kind: "pixel" }]))._internals;
+}))._internals;
 raisePort._raiseNewTextLayer();
-assert.deepStrictEqual(raiseCalls.map((command) => command._obj), ["get", "ungroup", "get", "get", "move"], "a clipped text under the clean layer is released, then raised");
-assert.deepStrictEqual(raiseCalls[4].to, { _ref: "layer", _enum: "ordinal", _value: "front" }, "the raise is Photoshop's Bring to Front");
-assert.deepStrictEqual(raiseCalls[4]._target, [{ _ref: "layer", _enum: "ordinal", _value: "targetEnum" }]);
+assert.deepStrictEqual(raiseCalls.map((command) => command._obj), ["get", "ungroup", "move"], "a clipped text is released, then raised");
+assert.deepStrictEqual(raiseCalls[2].to, { _ref: "layer", _enum: "ordinal", _value: "front" }, "the raise is Photoshop's Bring to Front");
+assert.deepStrictEqual(raiseCalls[2]._target, [{ _ref: "layer", _enum: "ordinal", _value: "targetEnum" }]);
 const plainCalls = [];
 loadPortModule(stackPhotoshop((command) => { plainCalls.push(command._obj); return { group: false }; }))._internals._raiseNewTextLayer();
-assert.deepStrictEqual(plainCalls, ["get"], "without a clean layer, an unclipped text stays above the active layer");
-const belowCalls = [];
-loadPortModule(stackPhotoshop((command) => { belowCalls.push(command._obj); return indexAnswers(12, 9)(command); }, [cleanLayer]))._internals._raiseNewTextLayer();
-assert.deepStrictEqual(belowCalls, ["get", "get", "get"], "a text already above the clean layer is not moved");
-const aboveCalls = [];
-loadPortModule(stackPhotoshop((command) => { aboveCalls.push(command._obj); return indexAnswers(3, 9)(command); }, [cleanLayer]))._internals._raiseNewTextLayer();
-assert.deepStrictEqual(aboveCalls, ["get", "get", "get", "move"], "a text under the clean layer is raised");
+assert.deepStrictEqual(plainCalls, ["get", "move"], "an unclipped text is only raised");
 // A text already in front: Photoshop refuses the move, which must not fail the paste
-const refusing = loadPortModule(stackPhotoshop((command) => (command._obj === "move" ? { _obj: "error", message: "The command \"Move\" is not currently available.", result: 1 } : indexAnswers(3, 9)(command)), [cleanLayer]))._internals;
+const refusing = loadPortModule(stackPhotoshop((command) => (command._obj === "move" ? { _obj: "error", message: "The command \"Move\" is not currently available.", result: 1 } : { group: false })))._internals;
 assert.doesNotThrow(() => refusing._raiseNewTextLayer());
 assert.match(hostSource, /charIDToTypeID\("Frnt"\)/, "host.js brings the new text to the front the same way");
-assert.match(hostSource, /function _cleanLayerAbove\(\)/, "host.js raises a text only when the clean layer is above it");
 assert.doesNotMatch(hostSource, /_topSlotOfStack|putIndex\(charID\.Layer, slot/, "host.js no longer moves a new text by index");
 
 /* -------------- auto-centre and size +/- helpers vs host.js -------------- */

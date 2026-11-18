@@ -162,8 +162,9 @@ function audit(cases, base, cand, baseName, candName) {
     if (base.meta.harnessSha1 && cand.meta.harnessSha1 && base.meta.harnessSha1 !== cand.meta.harnessSha1) {
       fails.push(`o harness mudou entre as corridas (${base.meta.harnessSha1} contra ${cand.meta.harnessSha1})`);
     }
+    if (base.meta.readingOrder && cand.meta.readingOrder && base.meta.readingOrder !== cand.meta.readingOrder) fails.push("ordem de leitura divergente");
     lines.push(`bundle: base ${base.meta.hostSha1 || "?"} · novo ${cand.meta.hostSha1 || "?"}` +
-      (base.meta.hostSha1 && base.meta.hostSha1 === cand.meta.hostSha1 ? "  (o mesmo motor dos dois lados)" : ""));
+      (base.meta.hostSha1 && base.meta.hostSha1 === cand.meta.hostSha1 ? "  (mesmo host JSX)" : ""));
     lines.push(`custo: base ${base.meta.seconds}s · novo ${cand.meta.seconds}s` +
       (base.meta.seconds > 0 ? `  (${(100 * (cand.meta.seconds - base.meta.seconds) / base.meta.seconds).toFixed(1)}%)` : ""));
   } else {

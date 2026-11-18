@@ -128,7 +128,7 @@ try {
     }
 
     Assert-SafeArchive $ArchivePath
-    Expand-Archive -LiteralPath $ArchivePath -DestinationPath $ExtractDir -Force
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($ArchivePath, $ExtractDir)
 
     $PackageRoot = $null
     $ManifestPath = $null

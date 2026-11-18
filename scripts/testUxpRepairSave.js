@@ -76,10 +76,12 @@ async function handshakeTests() {
 (async () => {
   await savingTests();
   await handshakeTests();
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' && require('fs').existsSync(path.join(__dirname, '../installer/repair_uxp_webview_win.ps1'))) {
     const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'testUxpRepairProgress.ps1')], { encoding: 'utf8' });
     assert.strictEqual(result.status, 0, String(result.error || '') + result.stdout + result.stderr);
     process.stdout.write(result.stdout);
+  } else if (process.platform === 'win32') {
+    console.log('SKIP upstream DLL repair progress: the repair script is excluded from the fork package.');
   }
   console.log('Repair save: dirty/untitled documents, cancellation, disk errors, new documents, persistence and session handshake passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -342,3 +342,33 @@ bubble.doc.activeHistoryState = bubble.states[1];
 assert.strictEqual(JSON.parse(bubble.context.getActiveLayerBubbleShape({})).error, "historyBusy");
 assert.strictEqual(bubble.getScanCalls(), 1);
 console.log("Temporary history tests passed (10,000 scans, undo/redo, capacity, failures and bubble integration)");
+
+for (const changed of [false, true]) {
+  const previous = { id: "before", name: "TypeR Smart Paste" };
+  const earlier = { id: "earlier", name: "Earlier edit" };
+  const doc = {
+    id: 42,
+    activeHistoryState: previous,
+    historyStates: [earlier, previous],
+    suspendHistory(name) {
+      if (changed) {
+        const failed = { id: "failed", name };
+        this.historyStates = [previous, failed];
+        this.activeHistoryState = failed;
+      }
+      throw new Error("paste failed");
+    },
+  };
+  const context = {
+    app: { documents: [doc], activeDocument: doc },
+    jamJSON: JSON,
+    _hostState: {},
+    _SMART_HISTORY_NAME: "TypeR Smart Paste",
+    _smartCurrentHistoryKey: () => doc.activeHistoryState.id,
+  };
+  vm.runInNewContext(extract("smartPasteCommit"), context);
+  assert.strictEqual(JSON.parse(context.smartPasteCommit({ documentId: 42 })).error, "commit");
+  assert.strictEqual(doc.activeHistoryState, previous, changed
+    ? "A failed paste at history capacity must roll back"
+    : "A failed paste without a new history state must keep the previous paste");
+}

@@ -25,7 +25,7 @@ assert.ok(/cleared: true/.test(clearedHelperBody), "Cleared selections must be f
 // The marquee reader is `_getSelectionChanged`; `getSelectionChanged` wraps it
 // to tag the answer with the document the selection belongs to.
 const getSelectionChangedSource = hostSource.match(
-  /function _getSelectionChanged\(\) \{[\s\S]*?\r?\n\}/
+  /function _getSelectionChanged\([^)]*\) \{[\s\S]*?\r?\n\}/
 )[0];
 assert.strictEqual(
   (getSelectionChangedSource.match(/_selectionClearedResult\(monitor, shiftPressed\)/g) || []).length,
@@ -40,7 +40,7 @@ assert.ok(
 // --- utils: the cleared state reaches the panel, our own deselects do not ---
 
 const bridgeSource = utilsSource.match(
-  /let selectionResultsSuppressedUntil = 0;[\s\S]*?const getSelectionChanged = \(callback = \(\) => \{\}\) => \{[\s\S]*?\n\};/
+  /let selectionResultsSuppressedUntil = 0;[\s\S]*?const getSelectionChanged = \(callback = \(\) => \{\}[^\n]*\) => \{[\s\S]*?\n\};/
 );
 assert.ok(bridgeSource, "Selection bridge must be extractable from utils.js");
 

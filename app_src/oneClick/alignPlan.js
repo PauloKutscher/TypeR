@@ -17,6 +17,7 @@
 import { buildBubblePlan, isAxisRectangle, subpathsFromDescriptor } from "./bubblePlan";
 import { deriveDoubleSibling, deriveTriplePlans } from "./connected";
 import { clearGeometryCaches, contains, flatten } from "./geometry";
+import { bodyCentre } from "./bodyCentre";
 import { _polygonCentroid, _splitOutlineAtCusps } from "../bubbleGeometry.jsxinc";
 
 const centreOf = (b) => ({ x: (b.left + b.right) / 2, y: (b.top + b.bottom) / 2 });
@@ -119,7 +120,7 @@ const rectOf = (selection) => ({
   yMid: selection.yMid,
 });
 
-export const planAlignment = (capture, readingOrder) => {
+export const planAlignment = (capture, readingOrder, optical = true) => {
   const placements = [];
   if (!capture || !Array.isArray(capture.texts) || !Array.isArray(capture.bubbles)) return placements;
   clearGeometryCaches();
@@ -171,6 +172,18 @@ export const planAlignment = (capture, readingOrder) => {
           centroid.x >= rect.left && centroid.x <= rect.right && centroid.y >= rect.top && centroid.y <= rect.bottom) {
         rect.xMid = centroid.x;
         rect.yMid = centroid.y;
+      }
+      // Keep the fork's chamber and frame; a large disagreement on the centre is ambiguous.
+      if (optical) {
+        const chamber = chambers && chambers[assigned[i]];
+        const outline = chamber ? chamber.cleanPolygon : !split && polygons.length === 1 ? polygons[0] : null;
+        const target = bodyCentre(outline, !!chamber);
+        const limit = Math.min(rect.width, rect.height) * 0.05;
+        if (target && Math.hypot(target.x - rect.xMid, target.y - rect.yMid) <= limit &&
+            target.x >= rect.left && target.x <= rect.right && target.y >= rect.top && target.y <= rect.bottom) {
+          rect.xMid = (rect.xMid + target.x) / 2;
+          rect.yMid = (rect.yMid + target.y) / 2;
+        }
       }
       placed[text.id] = true;
       placements.push({ id: text.id, rect });

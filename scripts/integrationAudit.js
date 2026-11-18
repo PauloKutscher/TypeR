@@ -27,7 +27,7 @@ for (const suite of suites) {
 const output = path.join(root, ".native-build", "integration-audit.json");
 fs.mkdirSync(path.dirname(output), { recursive: true });
 fs.writeFileSync(output, JSON.stringify({
-  branch: "integration/upstream-develop-2026-11-18-candidate",
+  branch: process.env.GITHUB_REF_NAME || null,
   note: "Unit tests only. A passing report is not Photoshop/CEP/UXP runtime validation.",
   platform: process.platform, node: process.version,
   passed: results.filter(r => r.passed).length,

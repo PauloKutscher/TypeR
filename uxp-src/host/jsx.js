@@ -5,18 +5,6 @@
 // script costs a few hundred milliseconds of Photoshop's main thread.
 const ps = require("photoshop");
 const uxp = require("uxp");
-const os = require('os');
-const { createWindowsLauncher } = require('./windowsLauncher');
-// Keep the fork's deliberate removal of automatic WebView repair.
-// This helper is only the UTF-16LE argument encoder used by JSX subprocess calls.
-function encodeCommand(text, encodeBase64) {
-  let bytes = '';
-  for (let i = 0; i < text.length; i++) {
-    const code = text.charCodeAt(i);
-    bytes += String.fromCharCode(code & 255, code >>> 8);
-  }
-  return encodeBase64(bytes);
-}
 
 const lfs = uxp.storage.localFileSystem;
 let counter = 0;
@@ -46,23 +34,10 @@ async function runJsx(code, commandName = "TypeR") {
   }
 }
 
-// Windows commands go through a GUI launcher with CreateNoWindow. Only macOS
-// keeps app.system; File.execute opens the Windows launcher without a shell.
-let windowsLauncher = null;
-function launchWindows(command, options) {
-  if (!windowsLauncher) windowsLauncher = createWindowsLauncher({
-    files: require('./files'), runJsx,
-    packed: typeof TYPER_WINDOWS_LAUNCHER !== 'undefined' ? TYPER_WINDOWS_LAUNCHER : null,
-    decodeBase64: value => atob(value), wait: ms => new Promise(resolve => setTimeout(resolve, ms)),
-  });
-  return windowsLauncher(command, options);
-}
-function systemCall(command, options) {
-  if (os.platform() === 'win32') return launchWindows(command, options);
+// app.system(command): the command runs through /bin/sh (cmd.exe on
+// Windows), whose parent process is Photoshop
+function systemCall(command) {
   return runJsx("app.system(" + JSON.stringify(String(command)) + ");");
 }
-function runPowerShell(command, options) {
-  return launchWindows(encodeCommand(command, value => btoa(value)), Object.assign({}, options, { mode: 'powershell' }));
-}
 
-module.exports = { runJsx, systemCall, runPowerShell };
+module.exports = { runJsx, systemCall };

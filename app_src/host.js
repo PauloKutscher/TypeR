@@ -591,11 +591,26 @@ function _resolveStyleSizeForDocument(style) {
 
   var ranges = style.textProps && style.textProps.layerText && style.textProps.layerText.textStyleRange;
   if (!ranges || !ranges[0] || !ranges[0].textStyle) return style;
-  ranges[0].textStyle.size = selectedSize;
-  if (ranges[0].textStyle.impliedFontSize != null) {
-    ranges[0].textStyle.impliedFontSize = selectedSize;
-  }
+  _scaleTextStyleRanges(ranges, selectedSize);
   return style;
+}
+
+function _scaleTextStyleRanges(ranges, size) {
+  var base = parseFloat(ranges[0].textStyle.size);
+  var scale = base > 0 ? size / base : 1;
+  var fields = ["size", "impliedFontSize", "leading", "impliedLeading", "baselineShift", "impliedBaselineShift"];
+  for (var i = 0; i < ranges.length; i++) {
+    var textStyle = ranges[i] && ranges[i].textStyle;
+    if (!textStyle) continue;
+    for (var j = 0; j < fields.length; j++) {
+      if (typeof textStyle[fields[j]] === "number") textStyle[fields[j]] *= scale;
+    }
+  }
+  // The first run gets the preset itself, not a product off by a rounding
+  ranges[0].textStyle.size = size;
+  if (ranges[0].textStyle.impliedFontSize != null) {
+    ranges[0].textStyle.impliedFontSize = size;
+  }
 }
 
 function _changeToPointText() {
@@ -823,6 +838,15 @@ function _getTextLayerSize() {
     }
   } catch (e) {}
   return _hostState.fallbackTextSize || 20;
+}
+
+// The unit that size is in: Photoshop's own type unit, not a style's
+function _getTextLayerUnit() {
+  try {
+    var unit = jamText.getLayerText().typeUnit;
+    if (_KNOWN_TYPE_UNITS[unit]) return unit;
+  } catch (e) {}
+  return "pointsUnit";
 }
 
 function _convertPixelToPoint(value) {
@@ -1983,6 +2007,36 @@ function _displayedStyleValue(style, key, impliedKey, scale) {
   return Number(style[key]) * scale;
 }
 
+// The size a layer shows, the one to write back to keep it (a layer scaled
+// with Free Transform stores the size it had before). Null without a size.
+function _liveTextSize(textParams) {
+  var layerText = textParams && textParams.layerText;
+  var range = layerText && layerText.textStyleRange && layerText.textStyleRange[0];
+  var style = range && range.textStyle;
+  if (!style) return null;
+  if (style.size === undefined || style.size === null) return null;
+  var shown = _displayedStyleValue(style, "size", "impliedFontSize", _transformScale(layerText));
+  if (isFinite(shown) && shown > 0) return shown;
+  return style.size;
+}
+
+// A layer's own style run as values to write back: the size, leading and
+// baseline shift it shows, not the ones stored before its transform
+function _displayedTextRange(range, layerText) {
+  var copy = _clone(range);
+  var style = copy.textStyle;
+  if (!style) return copy;
+  var scale = _transformScale(layerText);
+  var pairs = [["size", "impliedFontSize"], ["leading", "impliedLeading"], ["baselineShift", "impliedBaselineShift"]];
+  for (var i = 0; i < pairs.length; i++) {
+    var value = style[pairs[i][0]];
+    if (value === undefined || value === null) continue;
+    style[pairs[i][0]] = _displayedStyleValue(style, pairs[i][0], pairs[i][1], scale);
+    delete style[pairs[i][1]];
+  }
+  return copy;
+}
+
 // A box frame scaled with its text. Point text has no frame: null.
 function _scaleTextShape(shape, ratio) {
   if (!shape || shape.textType !== "box" || !shape.bounds) return null;
@@ -2065,12 +2119,16 @@ function _keepLiveTextSize(newTextParams, liveParams, resolution) {
     convert = true;
   }
   var keys = ["size", "leading", "autoLeading"];
+  var scale = _transformScale(liveParams.layerText);
   for (var i = 0; i < ranges.length; i++) {
     var style = ranges[i] && ranges[i].textStyle;
     if (!style) continue;
     for (var k = 0; k < keys.length; k++) {
       var value = live[keys[k]];
       if (value === undefined) continue;
+      // Written values are displayed ones: a scaled layer keeps what it shows
+      if (keys[k] === "size") value = _displayedStyleValue(live, "size", "impliedFontSize", scale);
+      if (keys[k] === "leading" && value !== null) value = _displayedStyleValue(live, "leading", "impliedLeading", scale);
       if (convert && keys[k] !== "autoLeading") {
         value = _pointsToTypeUnit(_typeValueToPoints(Number(value), liveUnit, resolution), targetUnit, resolution);
       }
@@ -3002,7 +3060,7 @@ function _createAndSetLayerText(data, width, height) {
   if (typeof sizeProp !== "number") {
     try {
       var textParams = jamText.getLayerText();
-      _hostState.fallbackTextSize = textParams.layerText.textStyleRange[0].textStyle.size;
+      _hostState.fallbackTextSize = _liveTextSize(textParams);
     } catch (error) {}
     style.textProps.layerText.textStyleRange[0].textStyle.size = _hostState.fallbackTextSize;
   }
@@ -3179,8 +3237,10 @@ function _setActiveLayerText() {
     var targetPoint = _resolveStylePointText(dataStyle, isPoint);
     if (isPoint) _changeToBoxText();
     var oldTextParams = jamText.getLayerText();
-    // A style-only apply has no text of its own: each layer keeps its text
-    dataStyle = _scaleStyleForPunctuationOnlyText(baseStyle, dataText || oldTextParams.layerText.textKey);
+    // A style-only apply has no text of its own: each layer keeps its text.
+    // Each layer works on its own copy: the text ranges, the size and the
+    // anti-aliasing written below must not reach the next selected layer
+    dataStyle = _scaleStyleForPunctuationOnlyText(baseStyle ? _clone(baseStyle) : baseStyle, dataText || oldTextParams.layerText.textKey);
     if (payload.preserveActiveTextSize && dataStyle && oldTextParams.layerText.textStyleRange &&
         oldTextParams.layerText.textStyleRange[0] && oldTextParams.layerText.textStyleRange[0].textStyle) {
       _overrideStyleTextSize(dataStyle, oldTextParams.layerText.textStyleRange[0].textStyle.size);
@@ -3192,7 +3252,7 @@ function _setActiveLayerText() {
           oldTextParams.layerText.textStyleRange &&
           oldTextParams.layerText.textStyleRange[0] &&
           oldTextParams.layerText.textStyleRange[0].textStyle.size != null) {
-        newTextParams.layerText.textStyleRange[0].textStyle.size = oldTextParams.layerText.textStyleRange[0].textStyle.size;
+        newTextParams.layerText.textStyleRange[0].textStyle.size = _liveTextSize(oldTextParams);
       }
       newTextParams.layerText.textKey = _normalizeTextKey(dataText);
       newTextParams.layerText.textStyleRange[0].to = dataText.length;
@@ -3206,7 +3266,7 @@ function _setActiveLayerText() {
         },
       };
       if (oldTextParams.layerText.textStyleRange && oldTextParams.layerText.textStyleRange[0]) {
-        newTextParams.layerText.textStyleRange = [oldTextParams.layerText.textStyleRange[0]];
+        newTextParams.layerText.textStyleRange = [_displayedTextRange(oldTextParams.layerText.textStyleRange[0], oldTextParams.layerText)];
         newTextParams.layerText.textStyleRange[0].to = dataText.length;
       }
       if (oldTextParams.layerText.paragraphStyleRange && oldTextParams.layerText.paragraphStyleRange[0]) {
@@ -4649,6 +4709,24 @@ function logTextShapeRTraining(text) {
 
 // An empty path means the current page, including unsaved edits. A supplied
 // path reuses the open document when present, otherwise opens it without saving.
+// The open documents, by id. Photoshop answers the opening of a file it
+// already has with that document, however its path is written (symbolic
+// link, Unicode form): such a document is the user's and is never closed.
+function _openDocumentIds() {
+  var ids = {};
+  for (var i = 0; i < app.documents.length; i++) {
+    try { ids["id" + app.documents[i].id] = true; } catch (idError) {}
+  }
+  return ids;
+}
+
+function _wasAlreadyOpen(doc, openBefore) {
+  var id = null;
+  try { id = doc.id; } catch (idError) {}
+  if (id === undefined || id === null) return false;
+  return openBefore["id" + id] === true;
+}
+
 function scanTextShapeRTraining(path) {
   var previousDoc = null;
   var source = null;
@@ -4677,11 +4755,15 @@ function scanTextShapeRTraining(path) {
       if (!source) return jamJSON.stringify({ error: "document" });
     }
     app.displayDialogs = DialogModes.NO;
+    if (!source) {
+      var openBefore = _openDocumentIds();
+      var opened = app.open(file);
+      if (_wasAlreadyOpen(opened, openBefore)) source = opened;
+      else workDoc = opened;
+    }
     if (source) {
       app.activeDocument = source;
       workDoc = source.duplicate("TypeR Training Preview", false);
-    } else {
-      workDoc = app.open(file);
     }
     app.activeDocument = workDoc;
     _hostState.textShapeRTraining = { entries: [] };
@@ -5244,6 +5326,17 @@ function _pathAnchorsMatchDom(pathItem, polygons) {
   }
 }
 
+function _controlPolygonLength(a, c1, c2, b) {
+  var points = [a, c1, c2, b];
+  var total = 0;
+  for (var i = 1; i < points.length; i++) {
+    var dx = points[i][0] - points[i - 1][0];
+    var dy = points[i][1] - points[i - 1][1];
+    total += Math.sqrt(dx * dx + dy * dy);
+  }
+  return total;
+}
+
 function _readPathPolygons(pathItem) {
   var polygons = [];
   var subPaths = pathItem.subPathItems;
@@ -5254,14 +5347,40 @@ function _readPathPolygons(pathItem) {
     // On noisy outlines (wand caught screentone) the point count explodes:
     // skip curve flattening there, the anchors alone are dense enough
     var flattenSteps = count > 500 ? 1 : 6;
+    // Every DOM read is a call into Photoshop: each point is read once
+    var anchors = [];
+    var lefts = [];
+    var rights = [];
+    for (var r = 0; r < count; r++) {
+      anchors.push(points[r].anchor);
+      if (flattenSteps > 1) {
+        lefts.push(points[r].leftDirection);
+        rights.push(points[r].rightDirection);
+      } else {
+        lefts.push(anchors[r]);
+        rights.push(anchors[r]);
+      }
+    }
+    // Which of a point's two handles leads to the next point: Photoshop 2026
+    // gives it as leftDirection, its scripting reference as rightDirection.
+    // The right pairing keeps both handles along their own segment, so its
+    // control polygons are the shortest; the wrong one draws loops.
+    var leftLeads = 0;
+    var rightLeads = 0;
+    for (var h = 0; h < count; h++) {
+      var after = (h + 1) % count;
+      leftLeads += _controlPolygonLength(anchors[h], lefts[h], rights[after], anchors[after]);
+      rightLeads += _controlPolygonLength(anchors[h], rights[h], lefts[after], anchors[after]);
+    }
+    var outgoing = leftLeads <= rightLeads ? lefts : rights;
+    var incoming = leftLeads <= rightLeads ? rights : lefts;
     var poly = [];
     for (var i = 0; i < count; i++) {
-      var current = points[i];
-      var next = points[(i + 1) % count];
-      var a = current.anchor;
-      var c1 = current.rightDirection;
-      var c2 = next.leftDirection;
-      var b = next.anchor;
+      var following = (i + 1) % count;
+      var a = anchors[i];
+      var c1 = outgoing[i];
+      var c2 = incoming[following];
+      var b = anchors[following];
       var straight = c1[0] === a[0] && c1[1] === a[1] && c2[0] === b[0] && c2[1] === b[1];
       var steps = straight ? 1 : flattenSteps;
       for (var t = 0; t < steps; t++) {
@@ -6230,14 +6349,51 @@ function getSelectionChanged() {
     monitor.multiWarnBounds = null;
     return jamJSON.stringify({ documentChanged: true, documentKey: documentKey });
   }
-  var result = jamJSON.parse(_getSelectionChanged());
+  var modeReset = _ensureNewSelectionMode();
+  var result = jamJSON.parse(_getSelectionChanged(modeReset));
   result.documentKey = documentKey;
+  if (modeReset) result.selectionModeReset = true;
   var selections = result.multiSelection || [];
   for (var i = 0; i < selections.length; i++) selections[i].documentKey = documentKey;
   return jamJSON.stringify(result);
 }
 
-function _getSelectionChanged() {
+// Multi-bubble stores one selection per click. A selection tool left on "Add
+// to selection" (or Subtract, Intersect) joins every click to the ones before:
+// each bubble was stored as the rectangle around all of them, and the texts
+// landed between the bubbles. Sets the current tool back to "New selection"
+// and answers whether it had to. selectionEnum is the option's key (0 new,
+// 1 add, 2 subtract, 3 intersect): the Magic Wand, the Object Selection tool,
+// the marquees and the lassos have it, the other tools do not.
+function _ensureNewSelectionMode() {
+  try {
+    var applicationClass = charIDToTypeID("capp");
+    var optionsKey = stringIDToTypeID("currentToolOptions");
+    var modeKey = stringIDToTypeID("selectionEnum");
+    var optionsReference = new ActionReference();
+    optionsReference.putProperty(charIDToTypeID("Prpr"), optionsKey);
+    optionsReference.putEnumerated(applicationClass, charID.Ordinal, charID.Target);
+    var current = executeActionGet(optionsReference).getObjectValue(optionsKey);
+    if (!current.hasKey(modeKey) || current.getInteger(modeKey) === 0) return false;
+    var toolReference = new ActionReference();
+    toolReference.putProperty(charIDToTypeID("Prpr"), stringIDToTypeID("tool"));
+    toolReference.putEnumerated(applicationClass, charID.Ordinal, charID.Target);
+    var toolClass = executeActionGet(toolReference).getEnumerationType(stringIDToTypeID("tool"));
+    var tool = new ActionReference();
+    tool.putClass(toolClass);
+    var options = new ActionDescriptor();
+    options.putInteger(modeKey, 0);
+    var desc = new ActionDescriptor();
+    desc.putReference(charID.Null, tool);
+    desc.putObject(charID.To, optionsKey, options);
+    executeAction(charIDToTypeID("setd"), desc, DialogModes.NO);
+    return true;
+  } catch (selectionModeError) {
+    return false;
+  }
+}
+
+function _getSelectionChanged(modeReset) {
   try {
     var monitor = _hostState.selectionMonitor;
     var keyboardState = ScriptUI.environment && ScriptUI.environment.keyboardState;
@@ -6598,43 +6754,6 @@ function openFile(path, autoClose) {
   }
 }
 
-function deleteFolder(folderPath) {
-  try {
-    var folder = new Folder(folderPath);
-    if (folder.exists) {
-      // Recursively delete contents
-      var files = folder.getFiles();
-      for (var i = 0; i < files.length; i++) {
-        if (files[i] instanceof Folder) {
-          deleteFolder(files[i].fsName);
-        } else {
-          files[i].remove();
-        }
-      }
-      folder.remove();
-    }
-    return 'OK';
-  } catch (e) {
-    return 'ERROR: ' + e.message;
-  }
-}
-
-function openFolder(folderPath) {
-  try {
-    var os = $.os.toLowerCase();
-    if (os.indexOf('win') !== -1) {
-      // Windows: open Explorer
-      app.system('explorer "' + folderPath.replace(/\//g, '\\') + '"');
-    } else {
-      // macOS: open Finder
-      app.system('open "' + folderPath + '"');
-    }
-    return 'OK';
-  } catch (e) {
-    return 'ERROR: ' + e.message;
-  }
-}
-
 /**
  * Collect font data from every text layer of a document (recursively).
  * Returns an array of {layerName, antiAlias, typeUnit, paragraphStyle, stroke, runs}.
@@ -6678,9 +6797,10 @@ function _collectDocumentFontData(doc) {
   try {
     hasBackground = getDocProperty(hasBackgroundId).getBoolean(hasBackgroundId);
   } catch (backgroundError) {}
-  // Layer indexes are 0-based when a background layer exists, 1-based otherwise
+  // numberOfLayers leaves the background out: index 0 is the background when
+  // there is one, the other layers are 1..numberOfLayers either way
   var firstIndex = hasBackground ? 0 : 1;
-  var lastIndex = hasBackground ? layerCount - 1 : layerCount;
+  var lastIndex = layerCount;
 
   var saveMeaningfulIds = jamEngine.meaningfulIds;
   var saveParseFriendly = jamEngine.parseFriendly;
@@ -6766,16 +6886,18 @@ function scanPsdFonts(path) {
     if (doc) {
       app.activeDocument = doc;
     } else {
+      var openBefore = _openDocumentIds();
       doc = app.open(file);
+      if (_wasAlreadyOpen(doc, openBefore)) wasOpen = true;
     }
     var layers = _collectDocumentFontData(doc);
     if (!wasOpen) {
       doc.close(SaveOptions.DONOTSAVECHANGES);
-      if (previousDoc) {
-        try {
-          app.activeDocument = previousDoc;
-        } catch (restoreError) {}
-      }
+    }
+    if (previousDoc && (!wasOpen || previousDoc !== doc)) {
+      try {
+        app.activeDocument = previousDoc;
+      } catch (restoreError) {}
     }
     return jamJSON.stringify({ file: file.fsName, layers: layers });
   } catch (scanError) {
@@ -6787,39 +6909,6 @@ function scanPsdFonts(path) {
     return jamJSON.stringify({ error: "scanFailed", file: path, message: scanError && scanError.message ? scanError.message : String(scanError) });
   } finally {
     app.displayDialogs = saveDialogs;
-  }
-}
-
-function makeExecutable(filePath) {
-  try {
-    var os = $.os.toLowerCase();
-    if (os.indexOf('mac') !== -1) {
-      app.system('chmod +x "' + filePath + '"');
-    }
-    return 'OK';
-  } catch (e) {
-    return 'ERROR: ' + e.message;
-  }
-}
-
-function launchInstaller(filePath) {
-  try {
-    var file = new File(filePath);
-    if (!file.exists) {
-      return 'ERROR: file not found';
-    }
-    // execute() opens the file with its default handler: a console window for
-    // .cmd on Windows, Terminal for an executable .command on macOS
-    var launched = file.execute();
-    if (launched) return 'OK';
-    var os = $.os.toLowerCase();
-    if (os.indexOf('mac') !== -1) {
-      app.system('open "' + file.fsName + '"');
-      return 'OK';
-    }
-    return 'ERROR: execute failed';
-  } catch (e) {
-    return 'ERROR: ' + e.message;
   }
 }
 
@@ -7006,6 +7095,23 @@ function _smartSelectionHistograms() {
   }
 }
 
+function _smartPageLeak(bounds, width, height) {
+  if (!bounds || !(width > 0) || !(height > 0)) return false;
+  var sw = bounds.right - bounds.left;
+  var sh = bounds.bottom - bounds.top;
+  if (sw >= width * 0.94 && sh >= Math.min(width * 0.7, height * 0.6)) return true;
+  return sh >= height * 0.96 && sw >= width * 0.6;
+}
+
+function _smartIntersectPolygon(polygon) {
+  var desc = new ActionDescriptor();
+  var reference = new ActionReference();
+  reference.putProperty(charID.Channel, charID.FrameSelect);
+  desc.putReference(charID.Null, reference);
+  desc.putObject(charID.To, charIDToTypeID("Plgn"), _smartPolygonShape(polygon));
+  executeAction(stringIDToTypeID("intersectWith"), desc, DialogModes.NO);
+}
+
 function smartPasteCapture(data) {
   if (!app.documents.length) return jamJSON.stringify({ error: "doc" });
   if (data && data.trigger && data.trigger.documentKey && data.trigger.documentKey !== getTypeRDocumentKey()) return jamJSON.stringify({ error: "doc" });
@@ -7021,15 +7127,36 @@ function smartPasteCapture(data) {
     selectionBounds: { left: selection.left, top: selection.top, right: selection.right, bottom: selection.bottom },
     histograms: [],
     rawPath: null,
-    activeTextSize: null
+    activeTextSize: null,
+    activeTextUnit: null
   };
   if (data && data.keepSize) {
     try {
-      if (_layerIsTextLayer()) result.activeTextSize = _getTextLayerSize();
+      if (_layerIsTextLayer()) {
+        result.activeTextSize = _getTextLayerSize();
+        result.activeTextUnit = _getTextLayerUnit();
+      }
     } catch (sizeError) {}
   }
   var needsPath = !data || !data.trigger || data.trigger.source !== "rectangle";
+  // A click whose selection leaks into the page: its page-wide outline is not
+  // read. The panel asks again with the polygon of a disc around the click
+  // (data.local), and gets the outline of the selection inside it.
+  var local = data && data.local && data.local.length >= 3 ? data.local : null;
+  var trigger = data && data.trigger;
+  // One test a statement. ExtendScript gives && and || the same precedence
+  // and reads them left to right, and the build prints "a || (b && c)"
+  // without its parentheses: "true || false && false" is false there
+  // (scripts/testHostPrecedence.js).
+  var clicked = false;
+  if (trigger && trigger.source === "wand") clicked = typeof trigger.x === "number";
+  if (trigger && trigger.source === "manual" && trigger.lastSource === "wand") clicked = !!trigger.lastClick;
+  if (!local && needsPath && clicked && _smartPageLeak(selection, size.width, size.height)) {
+    result.leak = true;
+    return jamJSON.stringify(result);
+  }
   var read = _withTemporaryHistory("TypeR Read Bubble", function () {
+    if (local) _smartIntersectPolygon(local);
     // Histograms first: making the work path consumes the selection
     var histograms = _smartSelectionHistograms();
     var path = null;
@@ -7077,18 +7204,6 @@ function smartPasteMeasure(data) {
         var params = request.params;
         // The panel compares what an atlas and a single line cost here
         var started = new Date().getTime();
-        if (request.kind === "atlas" && params.typeUnit === "pixelsUnit") {
-          // The shared atlas generator expresses its 256px row advance in
-          // points. JAM honours typeUnit for leading too; pixel styles need
-          // that advance converted back to pixels on non-72dpi documents.
-          params = _clone(params);
-          var ranges = params.layerText.textStyleRange || [];
-          var scale = _getDocumentResolution() / 72;
-          for (var r = 0; r < ranges.length; r++) {
-            var style = ranges[r].textStyle;
-            if (style && typeof style.leading === "number") style.leading *= scale;
-          }
-        }
         var using = jamText.toLayerTextObject(params);
         if (!staging) {
           executeAction(charID.Make, jamEngine.jsonToActionDescriptor({
@@ -7219,6 +7334,43 @@ function _smartMakeText(params) {
   }
 }
 
+function _smartConvertToParagraph() {
+  var before = _currentLayerBox();
+  var size = _currentDisplayedTextPixels();
+  if (!(size > 0)) size = 24;
+  _changeToBoxText();
+  var after = _currentLayerBox();
+  var enlarged = false;
+  if (before && after) {
+    var width = before.width + size * 2;
+    for (var attempt = 0; attempt < 3 &&
+        (Math.abs(before.width - after.width) > 1.5 || Math.abs(before.height - after.height) > 1.5); attempt++) {
+      _setTextBoxSize(width, before.height + size * 2);
+      after = _currentLayerBox();
+      if (!after) break;
+      enlarged = true;
+      width *= 1.5;
+    }
+
+  }
+  // In a frame large enough for every line, a paragraph text may still be a
+  // little wider than the point text with the same lines: "Roman Hanging
+  // Punctuation", on in many styles, lets a hyphen, a comma or a period at
+  // the end of a line hang out of the frame, which moves that line by part of
+  // the mark. That is no re-wrap: a line that wraps adds a line, and the
+  // height changes.
+  var hanging = !!(enlarged && before && after && Math.abs(before.height - after.height) <= 1.5 &&
+    Math.abs(before.width - after.width) <= Math.max(1.5, size * 0.5));
+  // A failed fit must roll the smart commit back and use its classic
+  // fallback, never leave clipped text or silently switch to point text.
+  if (before && !hanging && (!after || Math.abs(before.width - after.width) > 1.5 || Math.abs(before.height - after.height) > 1.5)) {
+    throw new Error("Paragraph text could not preserve the composed lines");
+  }
+  if (before && after && (Math.abs(before.left - after.left) > 0.01 || Math.abs(before.top - after.top) > 0.01)) {
+    _moveLayer(before.left - after.left, before.top - after.top);
+  }
+}
+
 function _smartPlaceText(session, pointText) {
   var params = session.text.params;
   _smartMakeText(params);
@@ -7228,19 +7380,7 @@ function _smartPlaceText(session, pointText) {
   if (session.text.autoWrap) {
     _placeLayerInRect(session.plan.selection, true, session.text.pad);
   } else if (!pointText) {
-    // Paragraph text keeps the composed lines; point text otherwise
-    var before = _currentLayerBox();
-    _changeToBoxText();
-    var after = _currentLayerBox();
-    if (before && after) {
-      if (Math.abs(before.width - after.width) > 1.5 || Math.abs(before.height - after.height) > 1.5) {
-        _changeToPointText();
-        var back = _currentLayerBox();
-        if (back) _moveLayer(before.left - back.left, before.top - back.top);
-      } else if (Math.abs(before.left - after.left) > 0.01 || Math.abs(before.top - after.top) > 0.01) {
-        _moveLayer(before.left - after.left, before.top - after.top);
-      }
-    }
+    _smartConvertToParagraph();
   }
   if (session.text.stroke) _setLayerStroke(session.text.stroke);
   return _getActiveLayerId();
@@ -7306,7 +7446,13 @@ function smartPasteCommit(data) {
     // Undo whatever the failed run left, then let the panel fall back
     try {
       var states = doc.historyStates;
-      if (states.length > count && states[states.length - 1].name === _SMART_HISTORY_NAME) {
+      // A full history does not grow, it drops its oldest state: the current
+      // state tells whether the run left one
+      var added = states.length > count;
+      if (!added && before !== null) {
+        added = String(_smartCurrentHistoryKey()) !== String(before);
+      }
+      if (added && states[states.length - 1].name === _SMART_HISTORY_NAME) {
         doc.activeHistoryState = states[states.length - 2];
       }
     } catch (rollbackError) {}
@@ -7428,6 +7574,36 @@ function ensureWandSampleAll() {
     return jamJSON.stringify({ wasOff: true });
   } catch (sampleAllError) {
     return jamJSON.stringify({ error: "sampleAll" });
+  }
+}
+
+// Photoshop's "Auto-Collapse Iconic Panels" (Preferences > Workspace) closes a
+// panel opened from an icon dock at the next click outside it: TypeR "closed
+// by itself" at every click on the document. Turns the option off and answers
+// whether it was on. autoCollapseDrawers is its key in workspacePreferences;
+// the other options of that preference page keep their values.
+function disableAutoCollapsePanels() {
+  try {
+    var applicationClass = charIDToTypeID("capp");
+    var preferencesKey = stringIDToTypeID("workspacePreferences");
+    var collapseKey = stringIDToTypeID("autoCollapseDrawers");
+    var reference = new ActionReference();
+    reference.putProperty(charIDToTypeID("Prpr"), preferencesKey);
+    reference.putEnumerated(applicationClass, charID.Ordinal, charID.Target);
+    var current = executeActionGet(reference).getObjectValue(preferencesKey);
+    if (!current.hasKey(collapseKey) || !current.getBoolean(collapseKey)) return jamJSON.stringify({ wasOn: false });
+    var target = new ActionReference();
+    target.putProperty(charIDToTypeID("Prpr"), preferencesKey);
+    target.putEnumerated(applicationClass, charID.Ordinal, charID.Target);
+    var preferences = new ActionDescriptor();
+    preferences.putBoolean(collapseKey, false);
+    var desc = new ActionDescriptor();
+    desc.putReference(charID.Null, target);
+    desc.putObject(charID.To, preferencesKey, preferences);
+    executeAction(charIDToTypeID("setd"), desc, DialogModes.NO);
+    return jamJSON.stringify({ wasOn: true });
+  } catch (collapseError) {
+    return jamJSON.stringify({ error: "autoCollapse" });
   }
 }
 

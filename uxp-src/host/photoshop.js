@@ -93,6 +93,9 @@ async function modal(name, fn) {
 
 // doc.suspendHistory(name, fn): one history state for the whole run. With
 // rollback, the run leaves no history state and no document change at all.
+// A run that throws is rolled back too: a smart paste commit that failed
+// halfway left its clean fill and a deselected document, and the classic
+// paste that followed found "No selected area".
 async function suspendHistory(context, name, fn, options = {}) {
   const documentID = activeDocument().id;
   const suspensionID = await context.hostControl.suspendHistory({ documentID, name });
@@ -101,6 +104,9 @@ async function suspendHistory(context, name, fn, options = {}) {
   try {
     result = await fn();
     if (options.shouldCommit) commit = options.shouldCommit(result);
+  } catch (error) {
+    commit = false;
+    throw error;
   } finally {
     await context.hostControl.resumeHistory(suspensionID, commit);
   }
@@ -338,11 +344,26 @@ function _resolveStyleSizeForDocument(style) {
 
   const ranges = style.textProps && style.textProps.layerText && style.textProps.layerText.textStyleRange;
   if (!ranges || !ranges[0] || !ranges[0].textStyle) return style;
-  ranges[0].textStyle.size = selectedSize;
-  if (ranges[0].textStyle.impliedFontSize != null) {
-    ranges[0].textStyle.impliedFontSize = selectedSize;
-  }
+  _scaleTextStyleRanges(ranges, selectedSize);
   return style;
+}
+
+function _scaleTextStyleRanges(ranges, size) {
+  const base = parseFloat(ranges[0].textStyle.size);
+  const scale = base > 0 ? size / base : 1;
+  const fields = ["size", "impliedFontSize", "leading", "impliedLeading", "baselineShift", "impliedBaselineShift"];
+  for (let i = 0; i < ranges.length; i++) {
+    const textStyle = ranges[i] && ranges[i].textStyle;
+    if (!textStyle) continue;
+    for (let j = 0; j < fields.length; j++) {
+      if (typeof textStyle[fields[j]] === "number") textStyle[fields[j]] *= scale;
+    }
+  }
+  // The first run gets the preset itself, not a product off by a rounding
+  ranges[0].textStyle.size = size;
+  if (ranges[0].textStyle.impliedFontSize != null) {
+    ranges[0].textStyle.impliedFontSize = size;
+  }
 }
 
 /* ========================================================= */
@@ -440,16 +461,19 @@ function _setLayerText(layerText) {
 
 function _getTextLayerSize() {
   try {
-    const textParams = _getLayerText();
-    if (textParams && textParams.layerText &&
-        textParams.layerText.textStyleRange &&
-        textParams.layerText.textStyleRange[0] &&
-        textParams.layerText.textStyleRange[0].textStyle &&
-        textParams.layerText.textStyleRange[0].textStyle.size) {
-      return textParams.layerText.textStyleRange[0].textStyle.size;
-    }
+    const size = _liveTextSize(_getLayerText());
+    if (size) return size;
   } catch (e) {}
   return _hostState.fallbackTextSize || 20;
+}
+
+// The unit that size is in: Photoshop's own type unit, not a style's
+function _getTextLayerUnit() {
+  try {
+    const unit = _getLayerText().typeUnit;
+    if (_KNOWN_TYPE_UNITS[unit]) return unit;
+  } catch (e) {}
+  return "pointsUnit";
 }
 
 function _getDocumentResolution() {
@@ -1073,6 +1097,36 @@ function _displayedStyleValue(style, key, impliedKey, scale) {
   return Number(style[key]) * scale;
 }
 
+// The size a layer shows, the one to write back to keep it (a layer scaled
+// with Free Transform stores the size it had before). Null without a size.
+function _liveTextSize(textParams) {
+  const layerText = textParams && textParams.layerText;
+  const range = layerText && layerText.textStyleRange && layerText.textStyleRange[0];
+  const style = range && range.textStyle;
+  if (!style) return null;
+  if (style.size === undefined || style.size === null) return null;
+  const shown = _displayedStyleValue(style, "size", "impliedFontSize", _transformScale(layerText));
+  if (isFinite(shown) && shown > 0) return shown;
+  return style.size;
+}
+
+// A layer's own style run as values to write back: the size, leading and
+// baseline shift it shows, not the ones stored before its transform
+function _displayedTextRange(range, layerText) {
+  const copy = _clone(range);
+  const style = copy.textStyle;
+  if (!style) return copy;
+  const scale = _transformScale(layerText);
+  const pairs = [["size", "impliedFontSize"], ["leading", "impliedLeading"], ["baselineShift", "impliedBaselineShift"]];
+  for (let i = 0; i < pairs.length; i++) {
+    const value = style[pairs[i][0]];
+    if (value === undefined || value === null) continue;
+    style[pairs[i][0]] = _displayedStyleValue(style, pairs[i][0], pairs[i][1], scale);
+    delete style[pairs[i][1]];
+  }
+  return copy;
+}
+
 // A box frame scaled with its text. Point text has no frame: null.
 function _scaleTextShape(shape, ratio) {
   if (!shape || shape.textType !== "box" || !shape.bounds) return null;
@@ -1147,12 +1201,16 @@ function _keepLiveTextSize(newTextParams, liveParams, resolution) {
     convert = true;
   }
   const keys = ["size", "leading", "autoLeading"];
+  const scale = _transformScale(liveParams.layerText);
   for (let i = 0; i < ranges.length; i++) {
     const style = ranges[i] && ranges[i].textStyle;
     if (!style) continue;
     for (let k = 0; k < keys.length; k++) {
       let value = live[keys[k]];
       if (value === undefined) continue;
+      // Written values are displayed ones: a scaled layer keeps what it shows
+      if (keys[k] === "size") value = _displayedStyleValue(live, "size", "impliedFontSize", scale);
+      if (keys[k] === "leading" && value !== null) value = _displayedStyleValue(live, "leading", "impliedLeading", scale);
       if (convert && keys[k] !== "autoLeading") {
         value = _pointsToTypeUnit(_typeValueToPoints(Number(value), liveUnit, resolution), targetUnit, resolution);
       }
@@ -1921,7 +1979,7 @@ function _createAndSetLayerText(data, width, height) {
   if (typeof sizeProp !== "number") {
     try {
       const textParams = _getLayerText();
-      _hostState.fallbackTextSize = textParams.layerText.textStyleRange[0].textStyle.size;
+      _hostState.fallbackTextSize = _liveTextSize(textParams);
     } catch (error) {}
     style.textProps.layerText.textStyleRange[0].textStyle.size = _hostState.fallbackTextSize;
   }
@@ -1957,6 +2015,46 @@ function _createAndSetLayerText(data, width, height) {
   }
   if (data.direction && !directionBaked) {
     _applyTextDirection(data.direction);
+  }
+}
+
+// Keep the requested paragraph type even when Photoshop's automatic box
+// clips or rewraps the already composed lines. Size in displayed pixels,
+// including glyph bearings/leading, then restore the original ink position.
+function _smartConvertToParagraph() {
+  var before = _currentLayerBox();
+  var size = _currentDisplayedTextPixels();
+  if (!(size > 0)) size = 24;
+  _changeToBoxText();
+  var after = _currentLayerBox();
+  var enlarged = false;
+  if (before && after) {
+    var width = before.width + size * 2;
+    for (var attempt = 0; attempt < 3 &&
+        (Math.abs(before.width - after.width) > 1.5 || Math.abs(before.height - after.height) > 1.5); attempt++) {
+      _setTextBoxSize(width, before.height + size * 2);
+      after = _currentLayerBox();
+      if (!after) break;
+      enlarged = true;
+      width *= 1.5;
+    }
+
+  }
+  // In a frame large enough for every line, a paragraph text may still be a
+  // little wider than the point text with the same lines: "Roman Hanging
+  // Punctuation", on in many styles, lets a hyphen, a comma or a period at
+  // the end of a line hang out of the frame, which moves that line by part of
+  // the mark. That is no re-wrap: a line that wraps adds a line, and the
+  // height changes.
+  var hanging = !!(enlarged && before && after && Math.abs(before.height - after.height) <= 1.5 &&
+    Math.abs(before.width - after.width) <= Math.max(1.5, size * 0.5));
+  // A failed fit must roll the smart commit back and use its classic
+  // fallback, never leave clipped text or silently switch to point text.
+  if (before && !hanging && (!after || Math.abs(before.width - after.width) > 1.5 || Math.abs(before.height - after.height) > 1.5)) {
+    throw new Error("Paragraph text could not preserve the composed lines");
+  }
+  if (before && after && (Math.abs(before.left - after.left) > 0.01 || Math.abs(before.top - after.top) > 0.01)) {
+    _moveLayer(before.left - after.left, before.top - after.top);
   }
 }
 
@@ -2054,8 +2152,10 @@ function _setActiveLayerText(payload) {
     const targetPoint = _resolveStylePointText(dataStyle, isPoint);
     if (isPoint) _changeToBoxText();
     const oldTextParams = _getLayerText();
-    // A style-only apply has no text of its own: each layer keeps its text
-    dataStyle = _scaleStyleForPunctuationOnlyText(baseStyle, dataText || oldTextParams.layerText.textKey);
+    // A style-only apply has no text of its own: each layer keeps its text.
+    // Each layer works on its own copy: the text ranges, the size and the
+    // anti-aliasing written below must not reach the next selected layer
+    dataStyle = _scaleStyleForPunctuationOnlyText(baseStyle ? _clone(baseStyle) : baseStyle, dataText || oldTextParams.layerText.textKey);
     if (payload.preserveActiveTextSize && dataStyle && oldTextParams.layerText.textStyleRange &&
         oldTextParams.layerText.textStyleRange[0] && oldTextParams.layerText.textStyleRange[0].textStyle) {
       _overrideStyleTextSize(dataStyle, oldTextParams.layerText.textStyleRange[0].textStyle.size);
@@ -2067,7 +2167,7 @@ function _setActiveLayerText(payload) {
           oldTextParams.layerText.textStyleRange &&
           oldTextParams.layerText.textStyleRange[0] &&
           oldTextParams.layerText.textStyleRange[0].textStyle.size != null) {
-        newTextParams.layerText.textStyleRange[0].textStyle.size = oldTextParams.layerText.textStyleRange[0].textStyle.size;
+        newTextParams.layerText.textStyleRange[0].textStyle.size = _liveTextSize(oldTextParams);
       }
       newTextParams.layerText.textKey = _normalizeTextKey(dataText);
       newTextParams.layerText.textStyleRange[0].to = dataText.length;
@@ -2081,7 +2181,7 @@ function _setActiveLayerText(payload) {
         },
       };
       if (oldTextParams.layerText.textStyleRange && oldTextParams.layerText.textStyleRange[0]) {
-        newTextParams.layerText.textStyleRange = [oldTextParams.layerText.textStyleRange[0]];
+        newTextParams.layerText.textStyleRange = [_displayedTextRange(oldTextParams.layerText.textStyleRange[0], oldTextParams.layerText)];
         newTextParams.layerText.textStyleRange[0].to = dataText.length;
       }
       if (oldTextParams.layerText.paragraphStyleRange && oldTextParams.layerText.paragraphStyleRange[0]) {
@@ -2827,6 +2927,18 @@ function _findOpenDocumentByPath(path) {
   return null;
 }
 
+// The open documents' ids. Photoshop answers the opening of a file it already
+// has with that document, however its path is written (symbolic link, Unicode
+// form): such a document is the user's and is never closed.
+function _openDocumentIds() {
+  const ids = [];
+  const documents = ps.app.documents;
+  for (let index = 0; index < documents.length; index++) {
+    try { ids.push(documents[index].id); } catch (idError) {}
+  }
+  return ids;
+}
+
 function normalizeFsPath(path) {
   let value = String(path || "").replace(/^file:\/\//, "").replace(/^file:/, "");
   if (/^[A-Za-z]:[\\/]/.test(value) || value.indexOf("\\") !== -1) value = value.replace(/\//g, "\\").toLowerCase();
@@ -2877,12 +2989,16 @@ async function scanTextShapeRTraining(path) {
       let workDoc = null;
       try { previousDoc = ps.app.activeDocument; } catch (noDocument) {}
       try {
-        const source = path ? _findOpenDocumentByPath(path) : previousDoc;
+        let source = path ? _findOpenDocumentByPath(path) : previousDoc;
+        if (!source) {
+          const openBefore = _openDocumentIds();
+          const opened = await _openDocument(path);
+          if (openBefore.includes(opened.id)) source = opened;
+          else workDoc = opened;
+        }
         if (source) {
           ps.app.activeDocument = source;
           workDoc = await source.duplicate("TypeR Training Preview", false);
-        } else {
-          workDoc = await _openDocument(path);
         }
         ps.app.activeDocument = workDoc;
         const entries = await suspendHistory(context, "TypeR Read Training", () => _readTextShapeRTrainingLayers(workDoc));
@@ -3579,14 +3695,49 @@ async function getSelectionChanged() {
     _resetSelectionMonitor();
     return JSON.stringify({ documentChanged: true, documentKey });
   }
-  const result = JSON.parse(await _getSelectionChanged());
+  const modeReset = await _ensureNewSelectionMode();
+  const result = JSON.parse(await _getSelectionChanged(modeReset));
   result.documentKey = documentKey;
+  if (modeReset) result.selectionModeReset = true;
   const selections = result.multiSelection || [];
   for (let i = 0; i < selections.length; i++) selections[i].documentKey = documentKey;
   return JSON.stringify(result);
 }
 
-async function _getSelectionChanged() {
+// Turns off Photoshop's "Auto-Collapse Iconic Panels", which closes a panel
+// opened from an icon dock at every click on the document, and answers
+// whether it was on (see host.js)
+async function disableAutoCollapsePanels() {
+  try {
+    const target = [{ _property: "workspacePreferences" }, { _ref: "application", _enum: "ordinal", _value: "targetEnum" }];
+    const current = get(target).workspacePreferences;
+    if (!current || current.autoCollapseDrawers !== true) return JSON.stringify({ wasOn: false });
+    await modal("TypeR", () => play({ _obj: "set", _target: target, to: { _obj: "workspacePreferences", autoCollapseDrawers: false } }));
+    return JSON.stringify({ wasOn: true });
+  } catch (error) {
+    return JSON.stringify({ error: "autoCollapse" });
+  }
+}
+
+// Sets a selection tool left on "Add to selection" (or Subtract, Intersect)
+// back to "New selection" for multi-bubble, and answers whether it had to (see
+// host.js)
+async function _ensureNewSelectionMode() {
+  try {
+    const application = { _ref: "application", _enum: "ordinal", _value: "targetEnum" };
+    const current = get([{ _property: "currentToolOptions" }, application]).currentToolOptions;
+    if (!current || typeof current.selectionEnum !== "number" || current.selectionEnum === 0) return false;
+    const tool = get([{ _property: "tool" }, application]).tool;
+    const toolClass = tool && (tool._enum || tool._value);
+    if (!toolClass) return false;
+    await modal("TypeR", () => play({ _obj: "set", _target: [{ _ref: toolClass }], to: { _obj: "currentToolOptions", selectionEnum: 0 } }));
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+async function _getSelectionChanged(modeReset) {
   try {
     const monitor = _hostState.selectionMonitor;
     const shiftPressed = keyboard.isShiftDown();
@@ -3695,8 +3846,9 @@ async function _getSelectionChanged() {
     }
 
     // Shift-adding a second outline reports a single union rectangle that
-    // still contains the previous bounds: warn instead of capturing it
-    if (shiftPressed && !isSame && monitor.lastBounds && merged.length === 1 &&
+    // still contains the previous bounds: warn instead of capturing it. The
+    // same union comes from a tool that was on "Add to selection" (modeReset)
+    if ((shiftPressed || modeReset) && !isSame && monitor.lastBounds && merged.length === 1 &&
       merged[0].top <= monitor.lastBounds.top + 5 &&
       merged[0].left <= monitor.lastBounds.left + 5 &&
       merged[0].right >= monitor.lastBounds.right - 5 &&
@@ -3890,8 +4042,7 @@ function _collectDocumentFontData() {
   }
   const hasBackground = _documentHasBackgroundLayer();
   // numberOfLayers leaves the background out: index 0 is the background when
-  // there is one, the other layers are 1..numberOfLayers either way (the CEP
-  // host stopped one short and missed the topmost layer of such documents)
+  // there is one, the other layers are 1..numberOfLayers either way
   const firstIndex = hasBackground ? 0 : 1;
   const lastIndex = layerCount;
 
@@ -3942,7 +4093,7 @@ async function scanPsdFonts(path) {
   try {
     return await modal("TypeR", async () => {
       let doc = _findOpenDocumentByPath(path);
-      const wasOpen = !!doc;
+      let wasOpen = !!doc;
       let previousDoc = null;
       try {
         previousDoc = ps.app.activeDocument;
@@ -3951,7 +4102,9 @@ async function scanPsdFonts(path) {
         if (doc) {
           ps.app.activeDocument = doc;
         } else {
+          const openBefore = _openDocumentIds();
           doc = await _openDocument(path);
+          if (openBefore.includes(doc.id)) wasOpen = true;
         }
         const layers = _collectDocumentFontData();
         if (!wasOpen) {
@@ -4021,6 +4174,7 @@ module.exports = {
     undoLastTyperChange,
     getTypeRDocumentKey,
     getSelectionChanged,
+    disableAutoCollapsePanels,
     createTextLayersInStoredSelections,
     openFile,
     scanPsdFonts,
@@ -4029,14 +4183,14 @@ module.exports = {
   // internals, for tests
   setTrace: (fn) => { trace = fn || null; },
   _internals: {
-    play, get, modal, suspendHistory, jamText, _hostState, _getLayerStroke, _getLayerText, _setTextContentsOnly,
+    play, get, modal, suspendHistory, jamText, PhotoshopError, _hostState, _getLayerStroke, _getLayerText, _setTextContentsOnly,
     // smart paste (uxp-src/host/smartPaste.js)
     _makeTextLayer, _applyMiddleEast, _changeToBoxText, _changeToPointText, _setLayerStroke, _getActiveLayerId,
     _placeLayerInRect,
-    _layerIsTextLayer, _getTextLayerSize, _getFontList,
+    _layerIsTextLayer, _getTextLayerSize, _getTextLayerUnit, _getFontList,
     _getCurrentTextLayerBounds, _getCurrentSelectionBounds, _getActiveHistoryIndex,
     // pure helpers, compared with host.js by scripts/testUxpHost.js
-    _getHostDefaultStyle, _getHostDefaultStroke, _ensureStyle, _overrideStyleTextSize, _resolveStylePointText, _bakeDirection, _stripDirection,
+    _getHostDefaultStyle, _getHostDefaultStroke, _ensureStyle, _overrideStyleTextSize, _scaleTextStyleRanges, _resolveStylePointText, _bakeDirection, _stripDirection,
     _isPunctuationOnlyText, _scaleStyleForPunctuationOnlyText, _punctuationOnlyBoxDimensions,
     _getAdaptiveSelectionOpenRadius, _calculateSelectionDimensions, _clampAdjustAmount,
     _getAdjustedSelectionBoundsFallback, _buildBoundsShapeRows, _normalizeShapeSampleCount, _buildMaskShapeRows,
@@ -4047,6 +4201,8 @@ module.exports = {
     _scaleTextShape, _textResizePlan, _appliedSizeRatio, _keepLiveTextSize, _alignPlacementMap,
     // where a new text goes in the layer stack
     _raiseNewTextLayer,
+    // multi-bubble: the selection tool goes back to "New selection"
+    _ensureNewSelectionMode,
     // the auto-centre entry point, run against a simulated Photoshop
     _autoCenterCreated,
   },

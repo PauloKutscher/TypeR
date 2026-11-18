@@ -553,7 +553,16 @@ if [ "$EDITION" = uxp ]; then
     cp "$PACKAGE" "$WORK/TypeR-UXP.ccx"
   else
     printf '  %s\n' "$MSG_UXP_DOWNLOAD"
-    curl -fL --retry 2 --progress-bar -o "$WORK/TypeR-UXP.ccx" "https://github.com/PauloKutscher/TypeR/releases/latest/download/TypeR-UXP.ccx"
+    MSG_UXP_DAMAGED="The downloaded TypeR package does not match its checksum."
+    RELEASE="${TYPER_RELEASE_URL:-https://github.com/PauloKutscher/TypeR/releases/latest/download}"
+    curl -fL --retry 2 --progress-bar -o "$WORK/TypeR-UXP.ccx" "$RELEASE/TypeR-UXP.ccx"
+    # Checked against the release's checksum (older releases have none)
+    if curl -fsSL --retry 2 -o "$WORK/TypeR-UXP.ccx.sha256" "$RELEASE/TypeR-UXP.ccx.sha256"; then
+      if ! (cd "$WORK" && shasum -a 256 -c TypeR-UXP.ccx.sha256 >/dev/null 2>&1); then
+        printf '\n  %s%s%s\n' "$RED" "$MSG_UXP_DAMAGED" "$RESET" >&2
+        exit 1
+      fi
+    fi
   fi
   # A package extracted from a downloaded archive is still marked as downloaded
   xattr -d com.apple.quarantine "$WORK/TypeR-UXP.ccx" 2>/dev/null || true

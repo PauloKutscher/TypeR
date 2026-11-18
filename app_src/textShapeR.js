@@ -3311,4 +3311,4 @@ const recordTextShapeRFeedback = (layerText, options = {}, currentTuning = null)
   };
 };
 
-export { registerTextShapeRPatterns, setTextShapeRInterfaceLanguage, frenchHyphenPoints, generateTextShapeRVariants, generateManualTextShapeRVariant, estimateManualLineCount, getShapeProfileGeometry, setDehyphenationEnabled, setTextShapeRTuning, sanitizeTuning as sanitizeTextShapeRTuning, recordTextShapeRFeedback, retrainTextShapeRRanker, isTextShapeRLineModelStale, refitTextShapeRLineModel, scheduleTextShapeRLineModelRefit, visibleLength, visibleWidth };
+export { setPreserveTextShapeRSpaces, registerTextShapeRPatterns, setTextShapeRInterfaceLanguage, frenchHyphenPoints, generateTextShapeRVariants, generateManualTextShapeRVariant, estimateManualLineCount, getShapeProfileGeometry, setDehyphenationEnabled, setTextShapeRTuning, sanitizeTuning as sanitizeTextShapeRTuning, recordTextShapeRFeedback, retrainTextShapeRRanker, isTextShapeRLineModelStale, refitTextShapeRLineModel, scheduleTextShapeRLineModelRefit, visibleLength, visibleWidth };

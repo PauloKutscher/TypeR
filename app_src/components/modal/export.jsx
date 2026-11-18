@@ -14,30 +14,11 @@ import { getProfileRegistry, readProfileStorage } from "../../profileStorage";
 const EMPTY_LIST = [];
 
 const ExportModal = React.memo(function ExportModal() {
-  const context = useContext((state) => ({
-    folders: state.folders,
-    styles: state.styles,
-    ignoreLinePrefixes: state.ignoreLinePrefixes,
-    ignoreTags: state.ignoreTags,
-    defaultStyleId: state.defaultStyleId,
-    language: state.language,
-    autoClosePSD: state.autoClosePSD,
-    pageImageMatchMode: state.pageImageMatchMode,
-    currentFolderTagPriority: state.currentFolderTagPriority,
-    pastePointText: state.pastePointText,
-    smartPaste: state.smartPaste,
-    pasteOnClick: state.pasteOnClick,
-    smartPasteAutoClean: state.smartPasteAutoClean,
-    smartPasteDistribute: state.smartPasteDistribute,
-    smartPasteAutoWrap: state.smartPasteAutoWrap,
-    smartPasteAutoSize: state.smartPasteAutoSize,
-    smartPasteAutoSizeVariation: state.smartPasteAutoSizeVariation,
-    smartPasteAutoSizeScale: state.smartPasteAutoSizeScale,
-    smartPasteMinScale: state.smartPasteMinScale,
-    smartPasteHyphenation: state.smartPasteHyphenation,
-    readingOrder: state.readingOrder,
-    refontRules: state.refontRules,
-  }));
+  const context = useContext((state) => {
+    const picked = { folders: state.folders, styles: state.styles };
+    EXPORTED_SETTINGS.forEach((field) => { picked[field] = state[field]; });
+    return picked;
+  });
   const profileRegistry = React.useMemo(getProfileRegistry, []);
   const [selectedProfileId, setSelectedProfileId] = React.useState(profileRegistry.activeProfileId);
   const [selected, setSelected] = React.useState([]);
@@ -162,30 +143,7 @@ const ExportModal = React.memo(function ExportModal() {
       version: config.appVersion,
       exported: new Date(),
     };
-    if (withSettings) {
-      data.ignoreLinePrefixes = exportSource.ignoreLinePrefixes;
-      data.ignoreTags = exportSource.ignoreTags;
-      data.defaultStyleId = exportSource.defaultStyleId;
-      data.language = exportSource.language;
-      data.autoClosePSD = exportSource.autoClosePSD;
-      data.pageImageMatchMode = exportSource.pageImageMatchMode;
-      data.currentFolderTagPriority = exportSource.currentFolderTagPriority;
-      data.pastePointText = !!exportSource.pastePointText;
-      // Smart paste preferences; undefined values (older profiles) are
-      // dropped by JSON and keep the importer's defaults
-      data.smartPaste = exportSource.smartPaste;
-      data.pasteOnClick = exportSource.pasteOnClick;
-      data.smartPasteAutoClean = exportSource.smartPasteAutoClean;
-      data.smartPasteDistribute = exportSource.smartPasteDistribute;
-      data.smartPasteAutoWrap = exportSource.smartPasteAutoWrap;
-      data.smartPasteAutoSize = exportSource.smartPasteAutoSize;
-      data.smartPasteAutoSizeVariation = exportSource.smartPasteAutoSizeVariation;
-      data.smartPasteAutoSizeScale = exportSource.smartPasteAutoSizeScale;
-      data.smartPasteMinScale = exportSource.smartPasteMinScale;
-      data.smartPasteHyphenation = exportSource.smartPasteHyphenation;
-      data.readingOrder = exportSource.readingOrder;
-      data.refontRules = exportSource.refontRules;
-    }
+    if (withSettings) Object.assign(data, pickExportedSettings(exportSource));
     if (withFontFiles) {
       const result = await exportZipWithFonts({
         zipPath: pathSelect.data,

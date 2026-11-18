@@ -424,6 +424,12 @@ export const buildPlan = (input, options = {}) => {
 };
 
 // The click of a trigger in document pixels (a Wand event may report points)
+export const leakClick = (trigger, resolution) => {
+  const own = triggerClick(trigger, resolution);
+  if (own || !trigger || trigger.source !== "manual" || trigger.lastSource !== "wand" || !trigger.lastClick) return own;
+  return triggerClick({ source: "wand", x: trigger.lastClick.x, y: trigger.lastClick.y, unit: trigger.lastClick.unit }, resolution);
+};
+
 export const triggerClick = (trigger, resolution) => {
   if (!trigger || trigger.source !== "wand" || !isFinite(trigger.x) || !isFinite(trigger.y)) return null;
   const scale = trigger.unit === "distanceUnit" ? (resolution || 72) / 72 : 1;

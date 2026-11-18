@@ -167,10 +167,17 @@ const outlines = require("./balloonOutlines.fixture.json");
 const errorLimits = { chainTop: 8, chainBottom: 5, chainMiddle: 8, retryAfterNoSide: 25, retryAfterShare: 8 };
 for (const [name, limit] of Object.entries(errorLimits)) {
   const fixture = outlines[name];
-  const placements = planAlignment({ ...page, width: 2000, height: 4000,
+  const capture = { ...page, width: 2000, height: 4000,
     texts: [{ id: fixture.layerId, box: fixture.box }],
     bubbles: [{ selectionBounds: boundsOf(fixture.contour), rawPath: pathOf([fixture.contour]), textIds: [fixture.layerId] }],
-  });
+  };
+  const placements = planAlignment(capture);
+  const [original] = planAlignment(capture, undefined, false);
+  const { xMid, yMid, ...frame } = original.rect;
+  const { xMid: newX, yMid: newY, ...newFrame } = placements[0].rect;
+  assert.deepStrictEqual(newFrame, frame, 'refinement keeps the fork frame');
+  assert.ok(Math.hypot(newX - xMid, newY - yMid) <= Math.min(frame.width, frame.height) * 0.025 + 1e-6,
+    'refinement limits how far the fork centre can move');
   assert.strictEqual(placements.length, 1, name);
   const rect = placements[0].rect;
   assert.ok(Math.hypot(rect.xMid - fixture.savedCentre.x, rect.yMid - fixture.savedCentre.y) <= limit, name + " lost the calibrated centre");

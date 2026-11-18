@@ -88,7 +88,7 @@ assert.strictEqual(poll().documentChanged, true);
 ps.tool = "magicWandTool"; ps.options = { selectionEnum: 1 };
 // Before any click: the tool is set back at the first poll
 let result = poll();
-assert.strictEqual(result.noChange, true);
+assert.strictEqual(result.cleared, true);
 assert.strictEqual(result.selectionModeReset, true);
 assert.strictEqual(ps.options.selectionEnum, 0);
 selection = bounds(100, 100, 300, 250);
@@ -107,9 +107,9 @@ selection = bounds(500, 700, 700, 900);
 result = poll();
 assert.strictEqual(result.multiSelection.length, 1, "the bubble clicked again is stored");
 assert.strictEqual(result.left, 500);
-// Without the tool option, a selection that grows without Shift is stored as before
+// The fork also rejects unions detected by geometry without a reported modifier.
 selection = bounds(450, 650, 750, 950);
-assert.strictEqual(poll().multiSelection.length, 1);
+assert.strictEqual(poll().multipleSelections, true);
 
 // "Auto-Collapse Iconic Panels": turned off, the other workspace options untouched
 ps.sets.length = 0;
@@ -189,7 +189,7 @@ const panelTests = async () => {
   });
   const utilsSource = fs.readFileSync(path.join(root, "app_src/utils.js"), "utf8");
   assert(utilsSource.includes("if (data.selectionModeReset) onModeReset();"));
-  assert(utilsSource.includes("callback({ multipleSelections: true, selectionModeReset: !!data.selectionModeReset });"));
+  assert(utilsSource.includes("multipleSelections: true, selectionModeReset: true"));
   const preview = fs.readFileSync(path.join(root, "app_src/components/previewBlock/previewBlock.jsx"), "utf8");
   assert(preview.includes("if (!selection.selectionModeReset) showShiftTip();"));
   assert(preview.includes('text: locale.multiBubbleNewSelectionMode, kind: "warning"'));

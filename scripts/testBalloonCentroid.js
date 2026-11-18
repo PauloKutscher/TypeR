@@ -348,7 +348,7 @@ assert.strictEqual(recovered.result, null, "a real Ctrl+D leaves no channel, so 
 
 // The reader that walks the marquee is `_getSelectionChanged`; the exported
 // `getSelectionChanged` is the wrapper that tags the answer with the document.
-const changedBody = hostSource.match(/function _getSelectionChanged\(\) \{([\s\S]*?)\r?\n\}/)[1];
+const changedBody = hostSource.match(/function _getSelectionChanged\([^)]*\) \{([\s\S]*?)\r?\n\}/)[1];
 const clearedBranch = changedBody.slice(0, changedBody.indexOf("_selectionClearedResult"));
 assert.ok(
   /_recoverSelectionFromTempChannel\(\)/.test(clearedBranch),
@@ -538,7 +538,7 @@ assert.ok(!coversTooMuch({ activeDocument: {} }, () => null, 0.25)(balloon), "an
  * multi-bubble looked switched off and the counter never moved. Measured on the
  * user's 300 dpi page: 0 of 4 balloons stored, 4 of 4 after the fix.
  */
-const captureChanged = lift("_getSelectionChanged()", [
+const captureChanged = lift("_getSelectionChanged(modeReset)", [
   "_hostState",
   "ScriptUI",
   "_getCurrentSelectionBounds",

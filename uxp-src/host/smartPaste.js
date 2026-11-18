@@ -12,14 +12,15 @@ const ps = require("photoshop");
 const photoshop = require("./photoshop");
 const { prepareSmartPaste } = require("../../app_src/oneClick/smartPaste");
 const { rememberAutoSizeReference } = require("../../app_src/oneClick/autoFontSize");
-const { fillFromMask, triggerClick, captureSource } = require("../../app_src/oneClick/bubblePlan");
+const { fillFromMask, triggerClick, leakClick, captureSource } = require("../../app_src/oneClick/bubblePlan");
 const { solverInternals } = require("../../app_src/oneClick/solver");
 const openBubble = require("../../app_src/oneClick/openBubble");
 const { box: boxOfPolygon } = require("../../app_src/oneClick/geometry");
 const { resolveTypeRFontVariant } = require("../../app_src/fontVariantResolver.jsxinc");
 
+const { needsHyphenationPatterns, registerHyphenationPatterns } = require("../../app_src/oneClick/hyphenation");
 const host = photoshop._internals;
-const { play, get, modal, suspendHistory, jamText } = host;
+const { play, get, modal, suspendHistory, jamText, PhotoshopError } = host;
 
 const TARGET_LAYER = { _ref: "layer", _enum: "ordinal", _value: "targetEnum" };
 const TARGET_DOCUMENT = { _ref: "document", _enum: "ordinal", _value: "targetEnum" };
@@ -81,14 +82,17 @@ async function captureSelection(trigger, wants) {
     bottom: Math.min(page.height, selectionBounds.bottom + margin),
   };
   // A leaking wand click takes the open-bubble route below: no full-page read
-  const leakingClick = trigger.source !== "rectangle" && trigger.source !== "lasso" && !!triggerClick(trigger, page.resolution) &&
-    openBubble.isPageLeak(selectionBounds, page.width, page.height);
+  const leakPoint = trigger.source !== "rectangle" && trigger.source !== "lasso" && openBubble.isPageLeak(selectionBounds, page.width, page.height)
+    ? leakClick(trigger, page.resolution)
+    : null;
+  const leakingClick = !!leakPoint;
   let pixels = null;
   let components = 0;
   let pixelBounds = null;
   let mask = null;
   let rawPath = null;
   let activeTextSize = null;
+  let activeTextUnit = null;
   await modal("TypeR Read Bubble", async (context) => {
     // Local pixels and the selection mask: the fill and the cleanup checks
     if (ps.imaging && ps.imaging.getPixels && !leakingClick) {
@@ -110,7 +114,10 @@ async function captureSelection(trigger, wants) {
         if (maskResult) maskResult.imageData.dispose();
       }
     }
-    if (wants.keepSize && host._layerIsTextLayer()) activeTextSize = host._getTextLayerSize();
+    if (wants.keepSize && host._layerIsTextLayer()) {
+      activeTextSize = host._getTextLayerSize();
+      activeTextUnit = host._getTextLayerUnit();
+    }
     if (trigger.source === "rectangle" || leakingClick) return;
     // The selection's outline as a work path, read and rolled back: the
     // document (and any unsaved work path) is left untouched
@@ -152,8 +159,14 @@ async function captureSelection(trigger, wants) {
   const click = source === "wand" ? triggerClick(trigger, page.resolution) : null;
   // An open bubble (the wand leaked into the page): isolate the chamber
   let openPlan = null;
-  if (leakingClick && click) {
-    openPlan = await recoverOpenBubble(doc, page, click, selectionBounds, wants);
+  if (leakPoint) {
+    try {
+      openPlan = await recoverOpenBubble(doc, page, leakPoint, selectionBounds, wants);
+    } catch (error) {
+      // No chamber could be isolated: the region around the click takes the
+      // text, where the classic paste would centre it in the page
+      openPlan = await recoverLocalRegion(doc, page, leakPoint, selectionBounds, wants, trigger.source === "wand");
+    }
   }
   return {
     openPlan,
@@ -168,6 +181,7 @@ async function captureSelection(trigger, wants) {
     fill,
     sample,
     activeTextSize,
+    activeTextUnit,
   };
 }
 
@@ -228,6 +242,58 @@ const textObject = (params) => jamText.toLayerTextObject(params);
 
 // Keep dependent make/set/read operations in one Photoshop call. Abort at
 // the first failed command so a later operation cannot target a user layer.
+async function toneAt(doc, page, point) {
+  const x = Math.max(0, Math.min(page.width - 1, Math.floor(point.x)));
+  const y = Math.max(0, Math.min(page.height - 1, Math.floor(point.y)));
+  const bounds = { left: Math.max(0, x - 3), top: Math.max(0, y - 3), right: Math.min(page.width, x + 4), bottom: Math.min(page.height, y + 4) };
+  let tone = null;
+  await modal("TypeR Read Open Bubble", async () => {
+    const result = await ps.imaging.getPixels({ documentID: doc.id, sourceBounds: bounds, componentSize: 8, colorSpace: "RGB" });
+    try {
+      const components = result.imageData.components;
+      const bytes = new Uint8Array(await result.imageData.getData({ chunky: true }));
+      const channels = [[], [], []];
+      for (let at = 0; at + components <= bytes.length; at += components) {
+        channels[0].push(bytes[at]);
+        channels[1].push(components === 1 ? bytes[at] : bytes[at + 1]);
+        channels[2].push(components === 1 ? bytes[at] : bytes[at + 2]);
+      }
+      if (!channels[0].length) return;
+      const mid = (list) => list.sort((a, b) => a - b)[Math.floor(list.length / 2)];
+      const rgb = { red: mid(channels[0]), green: mid(channels[1]), blue: mid(channels[2]) };
+      tone = { fill: Math.round((rgb.red + rgb.green + rgb.blue) / 3), rgb };
+    } finally {
+      result.imageData.dispose();
+    }
+  });
+  return tone;
+}
+
+async function recoverLocalRegion(doc, page, click, selectionBounds, wants, ownClick) {
+  const frame = openBubble.localWindow(page, click);
+  let raw = null;
+  try {
+    await modal("TypeR Read Open Bubble", (context) => suspendHistory(context, "TypeR Read Open Bubble", () => {
+      play({ _obj: "intersectWith", _target: [SELECTION], to: { _obj: "polygon", points: polygonPoints(frame.polygon) } });
+      raw = readWorkPath();
+    }, { rollback: true }));
+  } catch (error) {
+    raw = null;
+  }
+  let region = raw ? openBubble.localRegion(raw, page, click) : null;
+  // The click of a manual Paste is the last one seen: it must still lie in
+  // the selection
+  if (!region && !ownClick) throw Object.assign(new Error("The last click is outside the selection"), { code: "openBubble" });
+  if (!region) region = openBubble.discRegion(page, click);
+  let tone = null;
+  try {
+    if (ps.imaging && ps.imaging.getPixels) tone = await toneAt(doc, page, click);
+  } catch (error) {
+    tone = null;
+  }
+  return openBubble.localPlan({ documentId: doc.id, click, selectionBounds }, region, tone, { autoClean: !!wants.autoClean });
+}
+
 function measureBatch(commands) {
   const results = ps.action.batchPlay(commands.map((command) => Object.assign({ _options: { dialogOptions: "silent" } }, command)), {
     synchronousExecution: true, immediateRedraw: false, continueOnError: false,
@@ -236,20 +302,6 @@ function measureBatch(commands) {
   if (failure) throw Object.assign(new Error(failure.message || "Text measurement failed"), { code: failure.result });
   if (!results || results.length !== commands.length || results.some((result) => !result)) throw new Error("Incomplete text measurement");
   return results;
-}
-
-function measureTextObject(request) {
-  let params = request.params;
-  if (request.kind === "atlas" && params.typeUnit === "pixelsUnit") {
-    // Shared atlases express row leading in points. JAM writes it using
-    // typeUnit: preserve the 256px row spacing at resolutions other than 72.
-    params = clone(params);
-    const scale = ps.app.activeDocument.resolution / 72;
-    for (const range of params.layerText.textStyleRange || []) {
-      if (range.textStyle && typeof range.textStyle.leading === "number") range.textStyle.leading *= scale;
-    }
-  }
-  return textObject(params);
 }
 
 async function measureRequests(requests) {
@@ -261,7 +313,7 @@ async function measureRequests(requests) {
       const request = requests[i];
       if (request.kind === "atlas") {
         try {
-          const using = measureTextObject(request);
+          const using = textObject(request.params);
           const commands = [
             staging ? { _obj: "set", _target: [TARGET_LAYER], to: using } : { _obj: "make", _target: [{ _ref: "textLayer" }], using },
             // Convert to shape: the outlines tell each row's ink bounds.
@@ -281,7 +333,7 @@ async function measureRequests(requests) {
         }
         continue;
       }
-      const using = measureTextObject(request);
+      const using = textObject(request.params);
       const results = measureBatch([
         staging ? { _obj: "set", _target: [TARGET_LAYER], to: using } : { _obj: "make", _target: [{ _ref: "textLayer" }], using },
         { _obj: "get", _target: [{ _property: "boundsNoEffects" }, TARGET_LAYER] },
@@ -476,6 +528,7 @@ async function smartPaste(request) {
   try {
     if (!request || !Array.isArray(request.lines)) return JSON.stringify({ ok: false, code: "noText" });
     const settings = request.settings || {};
+    if (needsHyphenationPatterns(settings.hyphenation)) registerHyphenationPatterns(require('../../app_src/textShapeRPatterns').default);
     const prepared = await prepareSmartPaste(request, {
       capture: (trigger) => captureSelection(trigger, { keepSize: !!settings.keepSize, autoClean: !!settings.autoClean }),
       measure: measureRequests,
@@ -490,11 +543,21 @@ async function smartPaste(request) {
       history: done.history,
       cleanupSkipped: prepared.cleanupSkipped,
       selectionBounds: prepared.selectionBounds,
+      open: !!prepared.open,
       sessions: prepared.sessions.map((session) => ({ kind: session.plan.kind, role: session.role, styleId: session.styleId, size: session.text.size, tier: session.text.tier, hyphenated: session.text.hyphenated })),
     });
   } catch (error) {
-    return JSON.stringify({ ok: false, code: (error && error.code) || "error", message: String((error && error.message) || error), textColor: (error && error.textColor) || null });
+    return JSON.stringify({ ok: false, code: failureCode(error), message: String((error && error.message) || error), textColor: (error && error.textColor) || null });
   }
+}
+
+// The reason the panel shows: the engine's own codes, or "photoshop" for a
+// step Photoshop refused (a PhotoshopError carries its numeric result as code)
+function failureCode(error) {
+  const code = error && error.code;
+  if (typeof code === "string" && code) return code;
+  if (error instanceof PhotoshopError || typeof code === "number") return "photoshop";
+  return "error";
 }
 
 function getHistorySnapshot() {
@@ -620,5 +683,5 @@ function smartPasteSelectionProbe() {
 
 module.exports = {
   methods: { smartPaste, smartPasteCapture, smartPasteMeasure, smartPasteCommit, getHistorySnapshot, restoreHistoryState, replaySelectionTrigger, ensureWandSampleAll, smartPasteSelectionProbe },
-  _internals: { captureSelection, measureRequests, commitSessions, inkFits },
+  _internals: { captureSelection, measureRequests, commitSessions, inkFits, failureCode },
 };

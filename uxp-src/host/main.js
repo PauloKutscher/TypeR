@@ -15,7 +15,7 @@ const files = require("./files");
 const keyboard = require("./keyboard");
 const keysHelper = require("./keysHelper");
 const services = require("./services");
-const { runJsx, systemCall, runPowerShell } = require("./jsx");
+const { runJsx, systemCall } = require("./jsx");
 const { parseCall, callTimeout, createCallQueue } = require("./evalScript");
 const { createPanelStartup } = require("./panelStartup");
 const { createStartupLoader } = require("./startupFiles");
@@ -657,10 +657,6 @@ function handlePanelMessage(message, generation, channel) {
     autoReloaded = false;
     panelEditing = false;
     panelStartup.appReady();
-    // The fallback must be usable before starting any optional native repair.
-    if (inPanel && storageRefusal) {
-      webViewRepair.start(storageRefusal.kind).catch(error => console.error('TypeR: WebView repair', String(error && error.message || error)));
-    }
     return;
   }
   if (message.type === "request") {
@@ -739,13 +735,25 @@ function watchWebViewRefusal(generation, attempt) {
   if (os.platform() !== 'win32' || !panelVisible || !view || webviewReady) return;
   storageRefusal = null;
   REFUSAL_CHECKS_MS.forEach((delay) => setTimeout(async () => {
-    if (inPanel || generation !== viewGeneration || webviewReady || loadEvents.some((event) => !OWN_LOAD_EVENT.test(event))) return;
-    const refusal = await panelStart.findWebViewRefusalSince({
-      listFolder: files.listFolder, readText: files.readText, appData: await files.getRoamingAppData(), pluginId: PLUGIN_ID, since,
-    });
-    if (!refusal || inPanel || generation !== viewGeneration || webviewReady) return;
-    debugNote('startup.webview-refused', refusal.line);
-    enterInPanel(refusal.line.replace(/^(\[[^\]]*\])+\s*/, ''));
+    try {
+      if (inPanel || generation !== viewGeneration || watchGeneration !== refusalWatchGeneration || attempt !== webViewAttempt || webviewReady || !panelVisible) return;
+      const refusal = await panelStart.findWebViewRefusalSince({
+        listFolder: files.listFolder, readText: files.readText, appData: await files.getRoamingAppData(), pluginId: PLUGIN_ID, ...attempt,
+      });
+      if (!refusal || inPanel || generation !== viewGeneration || watchGeneration !== refusalWatchGeneration || attempt !== webViewAttempt || webviewReady || !panelVisible) return;
+      // An early refusal can recover when Adobe's identity arrives. Require
+      // two observations and 15 s without a bridge before giving up this view.
+      const confirmed = storageRefusal && storageRefusal.file === refusal.file && storageRefusal.kind === refusal.kind;
+      storageRefusal = refusal;
+      const box = view && view.getBoundingClientRect();
+      if (delay < 15000 || !confirmed || !box || box.width <= 0 || box.height <= 0) return;
+      debugNote('startup.webview-refused', refusal.line);
+      pendingRendererFailure = { generation, reason: refusal.line.replace(/^(\[[^\]]*\])+\s*/, '') };
+      recoverRenderer();
+    } catch (error) {
+      // Diagnostic I/O cannot prevent the ordinary renderer deadline.
+      debugNote('startup.log-unavailable', String(error && error.message || error));
+    }
   }, delay));
 }
 

@@ -1,6 +1,8 @@
+import { typeResolution } from "./textGraph";
 // Smart paste orchestration, shared by both hosts. It runs in the UXP host
 // and in the CEP panel; the host adapter only talks to Photoshop:
-//   adapter.capture(trigger) -> input (see bubblePlan.js) + { activeTextSize }
+//   adapter.capture(trigger) -> input (see bubblePlan.js) + { activeTextSize,
+//     activeTextUnit }
 //   adapter.measure(requests) -> replies (see measureSpec.js)
 //   adapter.resolveRunStyle(textStyle, run) -> textStyle (optional)
 //   adapter.useAtlas -> boolean
@@ -84,6 +86,12 @@ export const scaleStyleForPunctuationOnlyText = (style, text) => {
     });
   });
   return scaled;
+};
+
+// The kept size is in the active layer's unit, which may not be the style's
+const sizeInStyleUnit = (size, unit, textProps, resolution) => {
+  if (!unit) return size;
+  return (size * typeResolution({ typeUnit: unit }, resolution)) / typeResolution(textProps, resolution);
 };
 
 const overrideSize = (style, size) => {
@@ -170,7 +178,7 @@ export const prepareSmartPaste = async (request, adapter) => {
     const pageStyle = resolveStyleSizeForPage(clone(picked.style), page.width);
     const keepsActiveSize = settings.keepSize && input.activeTextSize > 0;
     let style = keepsActiveSize ? pageStyle : scaleStyleForPunctuationOnlyText(pageStyle, line.text);
-    if (keepsActiveSize) overrideSize(style, input.activeTextSize);
+    if (keepsActiveSize) overrideSize(style, sizeInStyleUnit(input.activeTextSize, input.activeTextUnit, style.textProps, page.resolution));
     // Enlarged punctuation may shrink back as far as the style's own size can
     const enlargedBy = style === pageStyle ? 1 : parseFloat(style.punctuationOnlyScale);
     const autoSize = settings.autoSize === true && !settings.keepSize && !isPunctuationOnlyText(line.text);

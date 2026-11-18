@@ -179,7 +179,7 @@ function needsPlatformPackage() {
   return true;
 }
 
-async function start(onMouseLine, onFocusStolen) {
+async function start(onMouseLine, onFocusStolen, onFocusReleased) {
   if (os.platform() === "win32") return false;
   mouseListener = onMouseLine || null;
   focusListener = onFocusStolen || null;

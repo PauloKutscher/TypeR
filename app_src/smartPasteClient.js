@@ -1,3 +1,4 @@
+import { localWindow, localRegion, discRegion, localPlan } from "./oneClick/openBubble";
 // Smart paste from the panel. UXP: the plugin host runs the whole engine
 // (smartPaste). CEP: the engine runs here, the ExtendScript host captures,
 // measures and commits (smartPasteCapture, smartPasteMeasure,
@@ -5,15 +6,15 @@
 // notice. Every paste is recorded for the undo sync (pasteHistory.js).
 
 import {
-  buildRichTextPayload, createTextLayerInSelection, csInterface, getUserFonts, locale, safeJsonParse, trackHostAction,
+  buildRichTextPayload, createTextLayerInSelection, createTextLayersInStoredSelections, csInterface, getUserFonts, locale, safeJsonParse, trackHostAction,
 } from "./utils";
 import { getScaledStyle, resolveStylePointText } from "./textLayerPayload";
 import { parsePageMarker } from "./pageMarker";
 import { prepareSmartPaste } from "./oneClick/smartPaste";
 import { rememberAutoSizeReference, normalizeAutoSizeVariation, normalizeAutoSizeScale } from "./oneClick/autoFontSize";
-import { captureSource, fillFromHistograms, triggerClick } from "./oneClick/bubblePlan";
+import { leakClick, captureSource, fillFromHistograms, triggerClick } from "./oneClick/bubblePlan";
 import { applyRefont, refontTextStyle } from "./oneClick/refont";
-import { resolveHyphenationLanguage } from "./oneClick/hyphenation";
+import { needsHyphenationPatterns, registerHyphenationPatterns, resolveHyphenationLanguage } from "./oneClick/hyphenation";
 import { getInterfaceLanguage } from "./interfaceLanguage";
 import { createPasteHistory, lineAfterHistoryMove } from "./oneClick/pasteHistory";
 import { resolveTypeRFontVariant } from "./fontVariantResolver.jsxinc";
@@ -187,22 +188,41 @@ export const resetMeasurementCosts = () => {
   measureCosts.line = { ms: 0, lines: 0 };
 };
 
+const histogramFill = (histograms) => {
+  if (!Array.isArray(histograms) || !histograms.length) return null;
+  let total = 0;
+  if (histograms[0]) for (let i = 0; i < histograms[0].length; i++) total += histograms[0][i];
+  return fillFromHistograms(histograms, total);
+};
+
 const cepAdapter = (request) => ({
   capture: async (trigger) => {
     const raw = await evalHost("smartPasteCapture(" + JSON.stringify({ trigger, keepSize: !!request.settings.keepSize }) + ")");
     const data = safeJsonParse(raw, { error: "error" });
     if (data.error) throw Object.assign(new Error(data.error), { code: data.error });
-    const histograms = Array.isArray(data.histograms) ? data.histograms : [];
-    let total = 0;
-    if (histograms[0]) for (let i = 0; i < histograms[0].length; i++) total += histograms[0][i];
     const source = captureSource(trigger, data.rawPath);
-    return {
+    const captured = {
       ...data,
       source,
       click: source === "wand" ? triggerClick(trigger, data.resolution) : null,
-      fill: histograms.length ? fillFromHistograms(histograms, total) : null,
+      fill: histogramFill(data.histograms),
       sample: null,
     };
+    // The selection leaks into the page: the text goes to the region around
+    // the click, read in a second call (the page-wide outline is never read)
+    const point = data.leak ? leakClick(trigger, data.resolution) : null;
+    if (point) {
+      const page = { width: data.width, height: data.height, resolution: data.resolution };
+      const local = safeJsonParse(await evalHost("smartPasteCapture(" + JSON.stringify({ trigger, local: localWindow(page, point).polygon }) + ")"), { error: "error" });
+      const region = !local.error && local.rawPath ? localRegion(local.rawPath, page, point) : null;
+      // The click of a manual Paste is the last one seen: it must still lie
+      // in the selection
+      if (region || trigger.source === "wand") {
+        captured.openPlan = localPlan({ documentId: data.documentId, click: point, selectionBounds: data.selectionBounds }, region || discRegion(page, point),
+          local.error ? null : histogramFill(local.histograms), { autoClean: !!request.settings.autoClean });
+      }
+    }
+    return captured;
   },
   measure: async (requests) => {
     const raw = await evalHost("smartPasteMeasure(" + JSON.stringify({ requests: requests.map((r) => ({ params: r.params, kind: r.kind, count: r.count })) }) + ")");
@@ -227,12 +247,23 @@ const cepAdapter = (request) => ({
   leanMeasure: true,
 });
 
+const loadHyphenation = async (language) => {
+  if (!needsHyphenationPatterns(language)) return;
+  try {
+    const patterns = await import(/* webpackChunkName: "text-shaper-patterns" */ "./textShapeRPatterns");
+    registerHyphenationPatterns(patterns.default);
+  } catch (error) {
+    console.warn("TypeR: hyphenation patterns", error);
+  }
+};
+
 export const runSmartPaste = async (request) => {
   if (isUxp()) {
     const raw = await evalHost("smartPaste(" + JSON.stringify(request) + ")", 120000);
     return safeJsonParse(raw, { ok: false, code: "error" });
   }
   try {
+    await loadHyphenation(request.settings && request.settings.hyphenation);
     const prepared = await prepareSmartPaste(request, cepAdapter(request));
     const raw = await evalHost("smartPasteCommit(" + JSON.stringify(prepared) + ")");
     const done = safeJsonParse(raw, { error: "commit" });
@@ -245,6 +276,7 @@ export const runSmartPaste = async (request) => {
       history: done.history,
       cleanupSkipped: prepared.cleanupSkipped,
       selectionBounds: prepared.selectionBounds,
+      open: !!prepared.open,
       sessions: prepared.sessions.map((session) => ({ kind: session.plan.kind, role: session.role, styleId: session.styleId, size: session.text.size, tier: session.text.tier })),
     };
   } catch (error) {
@@ -305,7 +337,9 @@ export const knownHistorySnapshot = () => (knownHistory ? knownHistory.snapshot 
 
 // Move the script line after a history move (latest state through getState)
 export const applyHistorySnapshot = (snapshot, getState, dispatch) => {
-  if (!snapshot || !pasteHistory.size()) return false;
+  if (!snapshot) return false;
+  noteSinglePasteUndone(snapshot, dispatch);
+  if (!pasteHistory.size()) return false;
   let moved = false;
   const changes = pasteHistory.observe(snapshot);
   for (let i = 0; i < changes.length; i++) {
@@ -339,8 +373,23 @@ export const recentSelectionTrigger = (maxAge = 4000) => (
     ? lastTrigger.trigger
     : null
 );
+// The selection changed without a click (Select All, a loaded selection):
+// the last click no longer says where it was made
+export const forgetSelectionClick = () => {
+  if (lastTrigger) lastTrigger.moved = true;
+};
 // A manual Paste, with the tool of the last selection (see captureSource)
-const manualTrigger = () => (lastTrigger ? { source: "manual", lastSource: lastTrigger.trigger.source } : { source: "manual" });
+// and, for a Magic Wand selection, its click: a selection that leaks into the
+// page is pasted around it (leakClick)
+const manualTrigger = () => {
+  if (!lastTrigger) return { source: "manual" };
+  const last = lastTrigger.trigger;
+  const out = { source: "manual", lastSource: last.source };
+  if (last.source === "wand" && !lastTrigger.moved && isFinite(last.x) && isFinite(last.y)) {
+    out.lastClick = last.unit ? { x: last.x, y: last.y, unit: last.unit } : { x: last.x, y: last.y };
+  }
+  return out;
+};
 
 let busy = false;
 let lastFinishedAt = 0;
@@ -474,11 +523,26 @@ const sameBounds = (a, b) => !!(a && b && ["left", "top", "right", "bottom"].eve
 export const rememberSinglePaste = (built, result, trigger) => {
   lastSingle = null;
   if (!trigger || trigger.source !== "wand" || !result || !result.ok || result.consumed !== 1 || built.lineIndexes.length < 2) return;
+  // A selection that leaks into the page is the same at every click: the next
+  // one, elsewhere on the page, is another text, not a second click
+  if (result.open) return;
   if (!result.history || result.history.before == null || result.history.after == null || !result.selectionBounds) return;
   lastSingle = { ...result.history, selectionBounds: result.selectionBounds, trigger, lineIndex: built.lineIndexes[0] };
 };
 
 // The paste a second click asks to split, or null
+export const singlePasteUndone = (record, snapshot) => {
+  if (!record || !snapshot || snapshot.documentId !== record.documentId || !Array.isArray(snapshot.states)) return false;
+  const after = snapshot.states.indexOf(record.after);
+  // Gone with its redo states, or still ahead of the current state
+  return after < 0 ? snapshot.states.indexOf(record.before) >= 0 : snapshot.states.indexOf(snapshot.current) < after;
+};
+function noteSinglePasteUndone(snapshot, dispatch) {
+  if (!singlePasteUndone(lastSingle, snapshot)) return;
+  lastSingle = null;
+  dispatch({ type: "showFeatureTip", id: "splitDoubleBubble" });
+}
+
 export const splitCandidate = (record, snapshot, bounds) => {
   if (!record || !snapshot || snapshot.documentId !== record.documentId || !Array.isArray(snapshot.states)) return null;
   const after = snapshot.states.indexOf(record.after);
@@ -551,7 +615,9 @@ export const smartPasteInSelection = async (getState, dispatch, options = {}) =>
       notice(dispatch, reasonText(code), "warning");
       return false;
     }
-    notice(dispatch, String(locale.smartPasteFallback || "{reason}").replace("{reason}", reasonText(code)), "warning");
+    // The classic paste takes over silently: the line is pasted all the same,
+    // and a warning reads as a bug to the user
+    if (code !== "noPlacement") notice(dispatch, reasonText(code), "warning");
     const before = await getHistorySnapshot();
     const lineBefore = getState().currentLineIndex;
     const ok = await runFallback(() => classicPaste(getState(), dispatch, options, result && result.textColor));
@@ -591,7 +657,10 @@ export const smartPasteStoredSelections = async (getState, dispatch, options = {
       const lineIndex = typeof selection.lineIndex === "number" ? selection.lineIndex : state.currentLineIndex;
       const line = state.lines && state.lines[lineIndex];
       if (!line || line.ignore) continue;
-      const trigger = { ...selection.trigger, documentKey: selection.documentKey || selection.trigger.documentKey };
+      // The click is made again with "Sample All Layers", as paste on click
+      // does: the text just pasted is the active layer, and a wand reading it
+      // alone takes nearly the whole page (reported as an open bubble)
+      const trigger = withSampleAll({ ...selection.trigger, documentKey: selection.documentKey || selection.trigger.documentKey });
       const replayed = safeJsonParse(await evalHost("replaySelectionTrigger(" + JSON.stringify(trigger) + ")", 15000, true), { error: "error" });
       if (replayed.error) {
         notice(dispatch, reasonText(replayed.error), "warning");
@@ -616,8 +685,11 @@ export const smartPasteStoredSelections = async (getState, dispatch, options = {
           notice(dispatch, reasonText(result.code), "warning");
           break;
         }
-        notice(dispatch, String(locale.smartPasteFallback || "{reason}").replace("{reason}", reasonText((result && result.code) || "error")), "warning");
-        await new Promise((resolve) => createTextLayerInSelection(line.text, styleWithTextColor(getScaledStyle(style || state.currentStyle, state.textScale), result && result.textColor), state.pastePointText, state.internalPadding || 0, state.direction, (ok) => {
+        // Silently, as for a single paste. The classic paste of this bubble uses the bounds stored with it, as
+        // the batch without smart paste does: the live selection may be gone
+        // (a failed commit deselects) or leaking after the failed smart paste
+        const fallbackStyle = styleWithTextColor(getScaledStyle(style || state.currentStyle, state.textScale), result && result.textColor);
+        await new Promise((resolve) => createTextLayersInStoredSelections([line.text], [fallbackStyle], [selection], state.pastePointText, state.internalPadding || 0, state.direction, (ok) => {
           if (ok) { pasted++; completed.push(selection); }
           resolve();
         }, { preserveActiveTextSize: options.preserveActiveTextSize === true }));

@@ -28,6 +28,7 @@ const hostConfig = (env, argv, entry, filename, library) => ({
         // app_src helpers shared with the panel are ES modules
         test: /\.m?js$/,
         include: [path.join(__dirname, "app_src")],
+        exclude: /[\\/]oneClick[\\/]hyphen[\\/]\w+Patterns\.js$/,
         use: { loader: "babel-loader", options: { babelrc: false, configFile: false, presets: [["@babel/preset-env", { targets: { chrome: "100" }, modules: false }]] } },
       },
     ],

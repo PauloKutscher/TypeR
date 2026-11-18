@@ -34,6 +34,7 @@ if (Test-Path $ManifestPath) {
 $Lang = $Host.CurrentCulture.TwoLetterISOLanguageName
 
 # Valeurs par défaut (anglais)
+$msg_uxp_damaged = "The downloaded TypeR package does not match its checksum."
 $msg_close    = "Photoshop is open: close it first."
 $msg_complete = "Installation completed."
 $msg_open     = "Open Photoshop and in the upper menu click the following: [Window] > [Extensions] > [TypeR (CEP)]"
@@ -923,7 +924,15 @@ if ($Edition -eq 'uxp') {
             Write-Host "  $msg_uxp_download"
             [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
             $ProgressPreference = 'SilentlyContinue'
-            Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/PauloKutscher/TypeR/releases/latest/download/UXP-Windows.ccx' -OutFile $Work -TimeoutSec 180
+            $Release = if ($env:TYPER_RELEASE_URL) { $env:TYPER_RELEASE_URL } else { 'https://github.com/PauloKutscher/TypeR/releases/latest/download' }
+            Invoke-WebRequest -UseBasicParsing -Uri "$Release/UXP-Windows.ccx" -OutFile $Work -TimeoutSec 180
+            # Checked against the release's checksum (older releases have none)
+            $Expected = $null
+            try {
+                Invoke-WebRequest -UseBasicParsing -Uri "$Release/UXP-Windows.ccx.sha256" -OutFile "$Work.sha256" -TimeoutSec 60
+                $Expected = ([IO.File]::ReadAllText("$Work.sha256") -split '\s+')[0]
+            } catch {} finally { Remove-Item -LiteralPath "$Work.sha256" -Force -ErrorAction SilentlyContinue }
+            if ($Expected -match '^[0-9a-fA-F]{64}$' -and (Get-TypeRFileHash $Work) -ne $Expected.ToLowerInvariant()) { throw $msg_uxp_damaged }
         }
         Write-Host "  $msg_uxp_installing"
         Install-TypeRPluginManually $Work
@@ -976,7 +985,7 @@ foreach ($RawLine in Get-Content -LiteralPath $Inventory) {
     $File = Join-Path $ScriptDir $Relative
     if (-not (Test-Path -LiteralPath $File -PathType Leaf)) { throw "Missing file: $Relative" }
     if ((Get-TypeRFileHash $File) -ne $Hash) { throw "Checksum mismatch: $Relative" }
-    $Listed[$Relative] = $true
+    $Listed[$Relative] = $Hash
 }
 foreach ($Relative in $Required) {
     if (-not $Listed.ContainsKey($Relative) -or (Get-Item -LiteralPath (Join-Path $ScriptDir $Relative)).Length -eq 0) { throw "Incomplete package: $Relative" }
@@ -1008,9 +1017,8 @@ $Moved = @(); $Installed = @(); $KeepBackup = $false
 try {
     New-Item -ItemType Directory -Path $Stage, $Backup -Force | Out-Null
     foreach ($Folder in $Folders) { Copy-Item -LiteralPath (Join-Path $ScriptDir $Folder) -Destination $Stage -Recurse }
-    foreach ($Line in Get-Content -LiteralPath $Inventory) {
-        $Parts = $Line -split '  ', 2
-        if ((Get-TypeRFileHash (Join-Path $Stage $Parts[1])) -ne $Parts[0]) { throw 'Staged package verification failed' }
+    foreach ($Relative in $Listed.Keys) {
+        if ((Get-TypeRFileHash (Join-Path $Stage $Relative)) -ne $Listed[$Relative]) { throw 'Staged package verification failed' }
     }
     foreach ($Folder in $Folders) {
         $Destination = Join-Path $TargetDir $Folder

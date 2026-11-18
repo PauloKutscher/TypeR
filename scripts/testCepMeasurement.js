@@ -53,9 +53,9 @@ const makeHost = (failure = null) => {
     _currentLayerBox() { if (failure === 'bounds') throw Error('bounds'); return { left: 580, top: 810, right: 620, bottom: 850 }; },
     jamText: { toLayerTextObject: params => {
       if (params.typeUnit === 'pixelsUnit') {
-        // The fork keeps its native 300-DPI conversion: the atlas row advance
-        // is supplied in points, then scaled for pixel-unit JAM text styles.
-        const expected = 256 * page.resolution / 72;
+        // Atlas row advance is built in the style's effective resolution and
+        // reaches Photoshop in the style's pixel unit.
+        const expected = 256;
         assert.ok(Math.abs(params.layerText.textStyleRange[0].textStyle.leading - expected) < 0.001);
       }
       return params;
@@ -230,44 +230,4 @@ for (const failures of [0, 1, 2]) {
   assert.strictEqual(stamps, failures ? 1 : 0);
 }
 
-// Photoshop's ink goes where Align puts it: the centre of its box on the
-// bubble's centre (text.target), in one move, none when it is already there
-{
-  const makeInk = (box) => {
-    const log = [];
-    const state = { box: { ...box } };
-    const context = vm.createContext({
-      _currentLayerBox: () => state.box && { ...state.box },
-      _moveLayer(dx, dy) { log.push('move ' + dx + ' ' + dy); state.box = { left: state.box.left + dx, right: state.box.right + dx, top: state.box.top + dy, bottom: state.box.bottom + dy }; },
-    });
-    ['_smartSettleOffset', '_smartSettleInk'].forEach(name => vm.runInContext(extract(name), context));
-    return { context, log, state };
-  };
-  const target = { x: 200, y: 200 };
-  const off = makeInk({ left: 151, right: 251, top: 177, bottom: 221 });
-  off.context._smartSettleInk({ plan: {}, text: { target } });
-  assert.deepStrictEqual(off.log, ['move -1 1'], 'a pixel off: one move');
-  assert.deepStrictEqual(off.state.box, { left: 150, right: 250, top: 178, bottom: 222 }, 'the ink box is centred on the target');
-  const half = makeInk({ left: 150, right: 251, top: 180, bottom: 221 });
-  half.context._smartSettleInk({ plan: {}, text: { target } });
-  assert.deepStrictEqual(half.log, [], 'half a pixel off is as close as whole-pixel bounds tell: no move');
-  const none = makeInk(null);
-  none.context._smartSettleInk({ plan: {}, text: { target } });
-  assert.deepStrictEqual(none.log, [], 'no ink, nothing to move');
-  const old = makeInk({ left: 0, right: 10, top: 0, bottom: 10 });
-  old.context._smartSettleInk({ plan: {}, text: {} });
-  assert.deepStrictEqual(old.log, [], 'a session without a target is left where it was made');
-  // The UXP host settles the same way (uxp-src/host/smartPaste.js)
-  const uxpSource = fs.readFileSync(path.join(__dirname, '../uxp-src/host/smartPaste.js'), 'utf8');
-  const uxpSettle = new Function(uxpSource.match(/function settleOffset\([^]*?\n\}/)[0] + '\nreturn settleOffset;')();
-  const cepSettle = vm.runInContext(extract('_smartSettleOffset') + '; _smartSettleOffset', vm.createContext({}));
-  [
-    [{ left: 151, right: 251, top: 177, bottom: 221 }, target],
-    [{ left: 150, right: 251, top: 180, bottom: 221 }, target],
-    [{ left: 10, right: 20, top: 10, bottom: 20 }, { x: 0, y: 0 }],
-    [null, target],
-    [{ left: 0, right: 10, top: 0, bottom: 10 }, null],
-    [{ left: 0, right: 10, top: 0, bottom: 10 }, { x: NaN, y: 3 }],
-  ].forEach(([box, goal]) => assert.deepStrictEqual(uxpSettle(box, goal), JSON.parse(JSON.stringify(cepSettle(box, goal))), 'UXP and CEP settle alike'));
-}
-console.log('CEP measurement: invisible groups, native updates, atlas metrics, DPI parity, composite histograms, ink settle and failure cleanup passed');
+console.log('CEP measurement: invisible groups, native updates, atlas metrics, DPI parity and failure cleanup passed');
