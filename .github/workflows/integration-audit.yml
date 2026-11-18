@@ -1,0 +1,53 @@
+name: WIP Upstream integration audit (all suites)
+on:
+  pull_request:
+    branches: [develop]
+permissions:
+  contents: read
+jobs:
+  audit:
+    if: github.head_ref == 'integration/upstream-develop-2026-11-18-candidate'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Run every independent suite and write an audit report
+        id: audit
+        continue-on-error: true
+        run: node scripts/integrationAudit.js
+      - name: Verify webpack build
+        id: build
+        continue-on-error: true
+        run: npm run build
+      - name: Verify built artifacts
+        id: artifacts
+        continue-on-error: true
+        run: npm run test:build
+      - name: Verify UXP package
+        id: package
+        continue-on-error: true
+        run: npm run package:uxp
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-audit-${{ matrix.os }}
+          path: .native-build/integration-audit.json
+          if-no-files-found: warn
+      - name: Explicitly fail if any check failed
+        if: always()
+        shell: bash
+        run: |
+          echo "all-suites: ${{ steps.audit.outcome }}"
+          echo "build: ${{ steps.build.outcome }}"
+          echo "build-artifacts: ${{ steps.artifacts.outcome }}"
+          echo "uxp-package: ${{ steps.package.outcome }}"
+          [[ "${{ steps.audit.outcome }}" == "success" && "${{ steps.build.outcome }}" == "success" && "${{ steps.artifacts.outcome }}" == "success" && "${{ steps.package.outcome }}" == "success" ]]
