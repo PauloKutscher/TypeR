@@ -52,7 +52,12 @@ const makeHost = (failure = null) => {
     _smartReadPath() { if (failure === 'path') throw Error('unavailable'); return outline(); },
     _currentLayerBox() { if (failure === 'bounds') throw Error('bounds'); return { left: 580, top: 810, right: 620, bottom: 850 }; },
     jamText: { toLayerTextObject: params => {
-      if (params.typeUnit === 'pixelsUnit') assert.strictEqual(params.layerText.textStyleRange[0].textStyle.leading, 256);
+      if (params.typeUnit === 'pixelsUnit') {
+        // The fork keeps its native 300-DPI conversion: the atlas row advance
+        // is supplied in points, then scaled for pixel-unit JAM text styles.
+        const expected = 256 * page.resolution / 72;
+        assert.ok(Math.abs(params.layerText.textStyleRange[0].textStyle.leading - expected) < 0.001);
+      }
       return params;
     } },
     jamEngine: { jsonToActionDescriptor: data => data },
