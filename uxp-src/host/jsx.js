@@ -7,7 +7,16 @@ const ps = require("photoshop");
 const uxp = require("uxp");
 const os = require('os');
 const { createWindowsLauncher } = require('./windowsLauncher');
-const { encodeCommand } = require('./webViewRepair');
+// Keep the fork's deliberate removal of automatic WebView repair.
+// This helper is only the UTF-16LE argument encoder used by JSX subprocess calls.
+function encodeCommand(text, encodeBase64) {
+  let bytes = '';
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    bytes += String.fromCharCode(code & 255, code >>> 8);
+  }
+  return encodeBase64(bytes);
+}
 
 const lfs = uxp.storage.localFileSystem;
 let counter = 0;

@@ -620,6 +620,17 @@ const setLayerTextFast = (text, layerSnapshotStyle, direction, callback = () => 
   }));
 };
 
+const getCurrentSelection = (callback = () => {}) => {
+  csInterface.evalScript("getCurrentSelection()", (result) => {
+    const data = safeJsonParse(result);
+    if (data.error) {
+      callback(null);
+    } else {
+      callback(data);
+    }
+  });
+};
+
 const photoshopEventCallbacks = new Set();
 let photoshopEventsRegistered = false;
 let photoshopEventsReceived = false;
