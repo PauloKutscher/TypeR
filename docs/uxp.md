@@ -65,13 +65,13 @@ pure helpers of both files (default style, selection maths, sample counts…) an
 Each one fixes something the CEP host gets wrong in Photoshop 2026:
 
 - Bubble and selection shapes are sampled from the selection mask (`imaging.getSelection`) instead of
-  a work path. The CEP host's path sampler returns inconsistent rows in Photoshop 2026; the mask gives
-  the shape its slower legacy sampler measured, without temporary channels or paths.
+  a work path: the same rows, without temporary channels or paths. (The CEP host's path sampler used
+  to return wrong rows in Photoshop: ExtendScript misread its scanline test and the path's handles were
+  paired the wrong way round. Both are fixed and it now agrees with its slower legacy sampler.)
 - Reads (rendered line breaks, shape scans) leave no `TyperTools Read Shape(s)` history state, and a
   failed or empty operation leaves no empty history state.
 - Text colors Photoshop reports as unit floats (`redFloat`…) are read and written as 0–255 RGB. The CEP
   host wrote them back empty, which made the size buttons fail on such layers ("program error").
-- FontScanR reads every layer of a document with a background layer; the CEP host missed the topmost.
 - Redundant commands are skipped: a temporary channel is only deleted when it exists, and the Middle
   East overrides are only set when the layer does not already have the values (each costs a relayout).
 
@@ -96,18 +96,14 @@ the WebView refuses because of CORS (GitHub release downloads) is made again by 
 
 ## When the WebView does not start
 
-The panel only exists inside the WebView. Photoshop's panel background is all that shows when it never
-starts, without an error event (reported on Windows with Photoshop 2026, cause not established). So
-`uxp-src/host/panelStartup.js` watches the start from the host page, which does not depend on the WebView:
-no load reported after 5 s sets the address once more, and no message from the panel after 15 s shows a
-notice with the versions, the view's size, the load events and, on Windows, the WebView2 versions present
-(reported by `panelStart.js`). Once the bridge answers, the app has up to 15 s to finish initializing;
-repeated bridge messages do not extend that deadline. Only the app-ready message clears the loading
-notice. Hiding the panel suspends the deadlines and showing it starts a fresh waiting period. The notice
-leaves the WebView in place: Photoshop 27.7 can take far longer than before to start it (its renderer is
-gone once the last WebView closes and starts cold), and a hidden WebView never loads (see
-`docs/uxp-startup-reproduction.md`), so a late start still opens the panel by itself. The native
-**Reload TypeR** button saves pending settings writes and recreates the WebView.
+`uxp-src/host/panelStartup.js` watches startup from the native host. A cold WebView gets
+30 seconds to establish its message bridge, without reassigning its address after 5 seconds.
+`loadstart` and `loadstop` do not prove the application can communicate: when the deadline is
+exhausted, or a `loaderror` occurs before a bridge exists, the host starts the native panel fallback.
+Hidden panels suspend the deadline; zero-sized views get another waiting period. Application errors
+and the 15-second initialization deadline after the first bridge message keep their diagnostics:
+switching renderers would not fix a failing host/storage operation. The native **Reload TypeR**
+button preserves pending settings writes.
 
 One cause is established (2026-11-03): no WebView2 runtime Photoshop can start. UXP tries the copy
 Adobe installs in `C:\Program Files\Common Files\Adobe\Microsoft\EdgeWebView` (its log says so) and
@@ -119,7 +115,7 @@ no load event ever reaches the host page, and Photoshop's own Home screen fails 
 the users' notice (`start=false, stop=false, bridge=false`). Reproduced locally by starting Photoshop
 with `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` set to a missing folder (`.update-test/webview-runtime-probe.ps1
 -Name missing -Folder C:\TypeR-no-runtime`; `-Name normal` restores the usual start). So when the deadline
-passes on Windows, `main.js` reads the newest UXP log through `panelStart.findWebViewCreationFailure`: with
+needs diagnostic details on Windows, `main.js` reads the UXP log identified by its own attempt marker: with
 that line, the notice drops the waiting hint, quotes the line, says the WebView2 component is missing or
 damaged, and the help button becomes **Install WebView2**, which opens Microsoft's download page (then
 restart Photoshop). The notice also reports what else that log says (`panelStart.readUxpLogFacts`): the folder UXP
@@ -139,9 +135,9 @@ same log; offline or modified installations) never has it, and every third-party
 any runtime and with any WebView2 variable. Since then **TypeR runs without a WebView** when it has to:
 the same application, built a second time for UXP's own panel DOM (`uxp/inpanel/`), is started in the
 panel by `uxp-src/host/inPanel.js` with a direct message channel instead of postMessage. The host
-switches as soon as the UXP log shows the refusal (read 1.5, 3.5 and 7 s after asking for the WebView),
-and on every platform when a WebView gives no sign of life at all within 15 s (this replaced the three
-automatic re-creations of the WebView). The first cause (no runtime) ends the same way: TypeR no longer
+checks the UXP log at 1.5, 7 and 15 seconds. Only the log containing this host's unique console marker
+is considered. Two observations and a 15-second grace period are required for an early switch, so a
+transient Adobe identity delay can recover. Other renderer failures use the policy above. The first cause (no runtime) ends the same way: TypeR no longer
 needs a runtime to open. Everything about it (cause, evidence, the mode, UXP's DOM limits and the crash
 it avoids, tests) is in `docs/uxp-webview-refused.md`. The support bundle's
 `installer/webview_rescue_win.ps1` (`3-WebView-Rescue.cmd`) still runs the ways out of a refused WebView
@@ -271,7 +267,15 @@ macOS keeps typer-keys.m, packed in native/typer-keys.json. It starts through
 ExtendScript app.system, receives Photoshop's PID and exits with Photoshop.
 The host follows its state file and heartbeat, drops stale keys and retries a
 stopped reader. Input Monitoring permission for Photoshop is still required.
-The old Windows C# reader and its base64 payload have been removed.
+
+Each Photoshop version has its own state file (`keys/state-<version>`), and a
+start stops the reader of its own Photoshop only (by the PID the reader got):
+two Photoshops open at once share TypeR's storage folder, and a reader reports
+the keys of the Photoshop that started it. The program itself stays at
+`keys/typer-keys`, the path macOS gave the permission to. The Windows reader
+still names one file for all (`state` in its own folder) and watches every
+Photoshop process: separating two Photoshops there needs a change in
+`typer-keys.cs`.
 
 Adobe reference: https://developer.adobe.com/uxp/guides/how-to/hybrid-plugins/build.
 
@@ -426,6 +430,23 @@ npm run test:uxp        # the UXP suites (also run by npm test)
 
 Changing `uxp-src/native/typer-keys.m` on macOS rebuilds `typer-keys.json`; commit it.
 For the Windows addon rebuild instructions, see Keyboard reader above.
+
+The WebView also releases passive focus after the pointer leaves its document.
+A focused input is retained while typing; a real Photoshop layer/document or
+canvas selection made outside the WebView releases it. The release is armed by a
+click in the WebView, or by an editor taking the focus, and disarmed after one
+release or native focus loss, so ordinary Photoshop selections do not open modal
+scopes. A bare window focus does not arm it: Photoshop focuses a panel it has just
+shown, and a panel expanded from a collapsed icon dock collapses when the restore
+activates the main window (3.0.2 report on Windows: the panel "closed by itself"
+about a second after opening, as the pointer left it). Plugin-generated events, IME composition, drags and switching applications
+do not request this restore. Switching applications preserves the editor caret.
+This lives in `web/focus.js`; the in-panel renderer keeps its native focus path.
+The page also reports whether it holds the focus and whether an editor has it
+(`focusState`), which the host's `restoreFocus` reads. On Windows the host's restore
+goes through the keyboard reader, and only while the page holds the focus (see
+Keyboard reader above): still to be confirmed live on a Windows host where the tool
+keys stayed dead until a document switch.
 
 ## Testing in Photoshop
 

@@ -4,7 +4,7 @@ import "./editStyle.scss";
 import React from "react";
 import deepClone from "../../deepClone";
 import PropTypes from "prop-types";
-import { FiChevronDown, FiChevronUp, FiCopy, FiX, FiMinus, FiPlus } from "react-icons/fi";
+import { FiChevronDown, FiChevronUp, FiCopy, FiX, FiMinus, FiPlus, FiDownload } from "react-icons/fi";
 import { TiSortAlphabetically } from "react-icons/ti";
 import { GiVerticalFlip, GiHorizontalFlip } from "react-icons/gi";
 import { TbAlphabetArabic } from "react-icons/tb";
@@ -32,6 +32,7 @@ import FontScanPromo from "./fontScanPromo";
 import FontPicker from "./fontPicker";
 import { pickFamilyPreviewFont } from "../../fontPreview";
 import UnsavedChangesDialog from "./unsavedChangesDialog";
+import { importStyleFiles, reportStyleImport } from "../../styleImport";
 
 const BUBBLE_TYPES = ["shout", "narration"];
 const PUNCTUATION_ONLY_SCALES = [1.5, 2, 3];
@@ -94,6 +95,22 @@ const EditStyleModal = React.memo(function EditStyleModal() {
     closeModal();
   };
 
+  // Imported styles replace the one being created: the window closes once
+  // something came in, and the styles block reports (missing fonts…)
+  const [importing, setImporting] = React.useState(false);
+  const importStyle = async () => {
+    setImporting(true);
+    let result = null;
+    try {
+      result = await importStyleFiles(context.dispatch);
+    } finally {
+      setImporting(false);
+    }
+    if (!result) return;
+    closeModal();
+    reportStyleImport(result);
+  };
+
   const changeStyleName = (e) => {
     setName(e.target.value);
     setEdited(true);
@@ -141,9 +158,9 @@ const EditStyleModal = React.memo(function EditStyleModal() {
         setSizePresetDefaultIndex(0);
         setSizePresetMinWidths([null]);
       }
-      if (data.textType === "point" || data.textType === "paragraph") {
-        setTextType(data.textType);
-      }
+      // The layer's text type is not part of its style (as in Photoshop's
+      // character and paragraph styles): copying it made every style taken
+      // from a point text paste point text whatever the paste setting
       if (data.stroke) setStroke(data.stroke);
       setEdited(true);
     });
@@ -247,6 +264,17 @@ const EditStyleModal = React.memo(function EditStyleModal() {
       </div>
       <div className="app-modal-body">
         <form className="app-modal-body-inner" onSubmit={saveStyle}>
+          {currentData.create && (
+            <div className="fsr-promo hostBgd">
+              <div className="fsr-promo-text">
+                <b>{locale.importStyleTitle || "Already have a style?"}</b>
+                <span>{locale.importStyleHint || "Import a TypeR export (.json, .zip with fonts) or a Photoshop tool preset (.tpl)."}</span>
+              </div>
+              <button type="button" className="topcoat-button--large fsr-promo-btn" disabled={importing} onClick={importStyle}>
+                <FiDownload size={16} /> {locale.importStyle || "Import a style"}
+              </button>
+            </div>
+          )}
           {currentData.create && <FontScanPromo />}
           <div className="fields">
             <div className="field">
@@ -826,7 +854,7 @@ const StyleDetails = React.memo(function StyleDetails(props) {
           <div className="style-edit-props-label">
             <span>{locale.editStyleAutoleading}:</span>
           </div>
-          <input type="number" min={0} placeholder="120" value={paragStyle.autoLeadingPercentage ? parseInt(paragStyle.autoLeadingPercentage * 100) : 120} onChange={(e) => changeAutoleading(Number(e.target.value))} className="topcoat-text-input--large" />
+          <input type="number" min={0} placeholder="120" value={paragStyle.autoLeadingPercentage ? Math.round(paragStyle.autoLeadingPercentage * 100) : 120} onChange={(e) => changeAutoleading(Number(e.target.value))} className="topcoat-text-input--large" />
           <span className="style-edit-props-unit">%</span>
         </div>
       )}
@@ -905,7 +933,7 @@ const StyleDetails = React.memo(function StyleDetails(props) {
               <TbAlphabetArabic size={12} />
               <GiVerticalFlip size={12} />
             </div>
-            <input type="number" value={textStyle.markYDistFromBaseline || 100} onChange={(e) => changeProp("markYDistFromBaseline", Number(e.target.value) || 0)} className="topcoat-text-input--large" />
+            <input type="number" value={textStyle.markYDistFromBaseline ?? 100} onChange={(e) => changeProp("markYDistFromBaseline", Number(e.target.value) || 0)} className="topcoat-text-input--large" />
             <span className="style-edit-props-unit">{unit}</span>
           </div>
         </div>
@@ -926,56 +954,56 @@ const StyleDetails = React.memo(function StyleDetails(props) {
         </div>
         <div className="style-edit-props-col m-justify">
           {textStyle.syntheticBold ? (
-            <button className="topcoat-icon-button--large" title={locale.editStyleBold} onClick={(e) => changeProp("syntheticBold", false, e)}>
+            <button aria-pressed={true} className="topcoat-icon-button--large" title={locale.editStyleBold} onClick={(e) => changeProp("syntheticBold", false, e)}>
               <BsTypeBold size={18} />
             </button>
           ) : (
-            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleBold} onClick={(e) => changeProp("syntheticBold", true, e)}>
+            <button aria-pressed={false} className="topcoat-icon-button--large--quiet" title={locale.editStyleBold} onClick={(e) => changeProp("syntheticBold", true, e)}>
               <BsTypeBold size={18} />
             </button>
           )}
           {textStyle.syntheticItalic ? (
-            <button className="topcoat-icon-button--large" title={locale.editStyleItalic} onClick={(e) => changeProp("syntheticItalic", false, e)}>
+            <button aria-pressed={true} className="topcoat-icon-button--large" title={locale.editStyleItalic} onClick={(e) => changeProp("syntheticItalic", false, e)}>
               <BsTypeItalic size={18} />
             </button>
           ) : (
-            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleItalic} onClick={(e) => changeProp("syntheticItalic", true, e)}>
+            <button aria-pressed={false} className="topcoat-icon-button--large--quiet" title={locale.editStyleItalic} onClick={(e) => changeProp("syntheticItalic", true, e)}>
               <BsTypeItalic size={18} />
             </button>
           )}
           {textStyle.fontCaps === "allCaps" ? (
-            <button className="topcoat-icon-button--large" title={locale.editStyleCapital} onClick={(e) => changeProp("fontCaps", null, e)}>
+            <button aria-pressed={true} className="topcoat-icon-button--large" title={locale.editStyleCapital} onClick={(e) => changeProp("fontCaps", null, e)}>
               <BsFonts size={18} />
             </button>
           ) : (
-            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleCapital} onClick={(e) => changeProp("fontCaps", "allCaps", e)}>
+            <button aria-pressed={false} className="topcoat-icon-button--large--quiet" title={locale.editStyleCapital} onClick={(e) => changeProp("fontCaps", "allCaps", e)}>
               <BsFonts size={18} />
             </button>
           )}
           {textStyle.fontCaps === "smallCaps" ? (
-            <button className="topcoat-icon-button--large" title={locale.editStyleSmall} onClick={(e) => changeProp("fontCaps", null, e)}>
+            <button aria-pressed={true} className="topcoat-icon-button--large" title={locale.editStyleSmall} onClick={(e) => changeProp("fontCaps", null, e)}>
               <AiOutlineFontSize size={18} />
             </button>
           ) : (
-            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleSmall} onClick={(e) => changeProp("fontCaps", "smallCaps", e)}>
+            <button aria-pressed={false} className="topcoat-icon-button--large--quiet" title={locale.editStyleSmall} onClick={(e) => changeProp("fontCaps", "smallCaps", e)}>
               <AiOutlineFontSize size={18} />
             </button>
           )}
           {textStyle.ligature ? (
-            <button className="topcoat-icon-button--large" title={locale.editStyleLigatures} onClick={(e) => changeProp("ligature", false, e)}>
+            <button aria-pressed={true} className="topcoat-icon-button--large" title={locale.editStyleLigatures} onClick={(e) => changeProp("ligature", false, e)}>
               <span className="style-edit-ligature-icon">fi</span>
             </button>
           ) : (
-            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleLigatures} onClick={(e) => changeProp("ligature", true, e)}>
+            <button aria-pressed={false} className="topcoat-icon-button--large--quiet" title={locale.editStyleLigatures} onClick={(e) => changeProp("ligature", true, e)}>
               <span className="style-edit-ligature-icon">fi</span>
             </button>
           )}
           {textStyle.contextualLigatures ? (
-            <button className="topcoat-icon-button--large" title={locale.editStyleContextualAlternates} onClick={(e) => changeProp("contextualLigatures", false, e)}>
+            <button aria-pressed={true} className="topcoat-icon-button--large" title={locale.editStyleContextualAlternates} onClick={(e) => changeProp("contextualLigatures", false, e)}>
               <span className="style-edit-ligature-icon m-upright">I</span>
             </button>
           ) : (
-            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleContextualAlternates} onClick={(e) => changeProp("contextualLigatures", true, e)}>
+            <button aria-pressed={false} className="topcoat-icon-button--large--quiet" title={locale.editStyleContextualAlternates} onClick={(e) => changeProp("contextualLigatures", true, e)}>
               <span className="style-edit-ligature-icon m-upright">I</span>
             </button>
           )}
@@ -984,94 +1012,94 @@ const StyleDetails = React.memo(function StyleDetails(props) {
       <div className="style-edit-props-row">
         <div className="style-edit-props-col m-justify">
           {paragStyle.alignment === "left" ? (
-            <button className="topcoat-icon-button--large" title={locale.editStyleAlignLeft} onClick={(e) => changeParagraph("alignment", null, e)}>
+            <button aria-pressed={true} className="topcoat-icon-button--large" title={locale.editStyleAlignLeft} onClick={(e) => changeParagraph("alignment", null, e)}>
               <AiOutlineAlignLeft size={18} />
             </button>
           ) : (
-            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleAlignLeft} onClick={(e) => changeParagraph("alignment", "left", e)}>
+            <button aria-pressed={false} className="topcoat-icon-button--large--quiet" title={locale.editStyleAlignLeft} onClick={(e) => changeParagraph("alignment", "left", e)}>
               <AiOutlineAlignLeft size={18} />
             </button>
           )}
           {paragStyle.alignment === "center" ? (
-            <button className="topcoat-icon-button--large" title={locale.editStyleAlignCenter} onClick={(e) => changeParagraph("alignment", null, e)}>
+            <button aria-pressed={true} className="topcoat-icon-button--large" title={locale.editStyleAlignCenter} onClick={(e) => changeParagraph("alignment", null, e)}>
               <AiOutlineAlignCenter size={18} />
             </button>
           ) : (
-            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleAlignCenter} onClick={(e) => changeParagraph("alignment", "center", e)}>
+            <button aria-pressed={false} className="topcoat-icon-button--large--quiet" title={locale.editStyleAlignCenter} onClick={(e) => changeParagraph("alignment", "center", e)}>
               <AiOutlineAlignCenter size={18} />
             </button>
           )}
           {paragStyle.alignment === "right" ? (
-            <button className="topcoat-icon-button--large" title={locale.editStyleAlignRight} onClick={(e) => changeParagraph("alignment", null, e)}>
+            <button aria-pressed={true} className="topcoat-icon-button--large" title={locale.editStyleAlignRight} onClick={(e) => changeParagraph("alignment", null, e)}>
               <AiOutlineAlignRight size={18} />
             </button>
           ) : (
-            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleAlignRight} onClick={(e) => changeParagraph("alignment", "right", e)}>
+            <button aria-pressed={false} className="topcoat-icon-button--large--quiet" title={locale.editStyleAlignRight} onClick={(e) => changeParagraph("alignment", "right", e)}>
               <AiOutlineAlignRight size={18} />
             </button>
           )}
           {paragStyle.hyphenate ? (
-            <button className="topcoat-icon-button--large" title={locale.editStyleHyphen} onClick={(e) => changeParagraph("hyphenate", false, e)}>
+            <button aria-pressed={true} className="topcoat-icon-button--large" title={locale.editStyleHyphen} onClick={(e) => changeParagraph("hyphenate", false, e)}>
               <FiMinus size={18} />
             </button>
           ) : (
-            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleHyphen} onClick={(e) => changeParagraph("hyphenate", true, e)}>
+            <button aria-pressed={false} className="topcoat-icon-button--large--quiet" title={locale.editStyleHyphen} onClick={(e) => changeParagraph("hyphenate", true, e)}>
               <FiMinus size={18} />
             </button>
           )}
           {paragStyle.hangingRoman ? (
-            <button className="topcoat-icon-button--large" title={locale.editStyleHanging} onClick={(e) => changeParagraph("hangingRoman", false, e)}>
+            <button aria-pressed={true} className="topcoat-icon-button--large" title={locale.editStyleHanging} onClick={(e) => changeParagraph("hangingRoman", false, e)}>
               <GrBlockQuote size={18} />
             </button>
           ) : (
-            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleHanging} onClick={(e) => changeParagraph("hangingRoman", true, e)}>
+            <button aria-pressed={false} className="topcoat-icon-button--large--quiet" title={locale.editStyleHanging} onClick={(e) => changeParagraph("hangingRoman", true, e)}>
               <GrBlockQuote size={18} />
             </button>
           )}
           {paragStyle.textEveryLineComposer ? (
-            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleSingleLineComposer} onClick={(e) => changeParagraph("textEveryLineComposer", false, e)}>
+            <button aria-pressed={false} className="topcoat-icon-button--large--quiet" title={locale.editStyleSingleLineComposer} onClick={(e) => changeParagraph("textEveryLineComposer", false, e)}>
               <BsTextParagraph size={18} />
             </button>
           ) : (
-            <button className="topcoat-icon-button--large" title={locale.editStyleSingleLineComposer} onClick={(e) => changeParagraph("textEveryLineComposer", true, e)}>
+            <button aria-pressed={true} className="topcoat-icon-button--large" title={locale.editStyleSingleLineComposer} onClick={(e) => changeParagraph("textEveryLineComposer", true, e)}>
               <BsTextParagraph size={18} />
             </button>
           )}
         </div>
         <div className="style-edit-props-col m-justify">
           {textStyle.baseline === "superScript" ? (
-            <button className="topcoat-icon-button--large" title={locale.editStyleSuper} onClick={(e) => changeProp("baseline", "normal", e)}>
+            <button aria-pressed={true} className="topcoat-icon-button--large" title={locale.editStyleSuper} onClick={(e) => changeProp("baseline", "normal", e)}>
               <GrSuperscript size={18} />
             </button>
           ) : (
-            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleSuper} onClick={(e) => changeProp("baseline", "superScript", e)}>
+            <button aria-pressed={false} className="topcoat-icon-button--large--quiet" title={locale.editStyleSuper} onClick={(e) => changeProp("baseline", "superScript", e)}>
               <GrSuperscript size={18} />
             </button>
           )}
           {textStyle.baseline === "subScript" ? (
-            <button className="topcoat-icon-button--large" title={locale.editStyleSub} onClick={(e) => changeProp("baseline", "normal", e)}>
+            <button aria-pressed={true} className="topcoat-icon-button--large" title={locale.editStyleSub} onClick={(e) => changeProp("baseline", "normal", e)}>
               <GrSubscript size={18} />
             </button>
           ) : (
-            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleSub} onClick={(e) => changeProp("baseline", "subScript", e)}>
+            <button aria-pressed={false} className="topcoat-icon-button--large--quiet" title={locale.editStyleSub} onClick={(e) => changeProp("baseline", "subScript", e)}>
               <GrSubscript size={18} />
             </button>
           )}
           {textStyle.underline === "underlineOnLeftInVertical" ? (
-            <button className="topcoat-icon-button--large" title={locale.editStyleUnderline} onClick={(e) => changeProp("underline", "underlineOff", e)}>
+            <button aria-pressed={true} className="topcoat-icon-button--large" title={locale.editStyleUnderline} onClick={(e) => changeProp("underline", "underlineOff", e)}>
               <BsTypeUnderline size={18} />
             </button>
           ) : (
-            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleUnderline} onClick={(e) => changeProp("underline", "underlineOnLeftInVertical", e)}>
+            <button aria-pressed={false} className="topcoat-icon-button--large--quiet" title={locale.editStyleUnderline} onClick={(e) => changeProp("underline", "underlineOnLeftInVertical", e)}>
               <BsTypeUnderline size={18} />
             </button>
           )}
           {textStyle.strikethrough === "xHeightStrikethroughOn" ? (
-            <button className="topcoat-icon-button--large" title={locale.editStyleStrike} onClick={(e) => changeProp("strikethrough", "strikethroughOff", e)}>
+            <button aria-pressed={true} className="topcoat-icon-button--large" title={locale.editStyleStrike} onClick={(e) => changeProp("strikethrough", "strikethroughOff", e)}>
               <BsTypeStrikethrough size={18} />
             </button>
           ) : (
-            <button className="topcoat-icon-button--large--quiet" title={locale.editStyleStrike} onClick={(e) => changeProp("strikethrough", "xHeightStrikethroughOn", e)}>
+            <button aria-pressed={false} className="topcoat-icon-button--large--quiet" title={locale.editStyleStrike} onClick={(e) => changeProp("strikethrough", "xHeightStrikethroughOn", e)}>
               <BsTypeStrikethrough size={18} />
             </button>
           )}

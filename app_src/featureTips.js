@@ -55,6 +55,11 @@ const FEATURE_TIPS = {
     after: 2,
     fallback: "Shift-click a TextShapeR suggestion to apply it and move on to the next line.",
   },
+  // Shown when a one-line paste on click is undone while the next line waits
+  splitDoubleBubble: {
+    key: "tipSplitDoubleBubble",
+    fallback: "A double bubble got a single line? Don't undo it: click the same bubble a second time with the Magic Wand, and TypeR splits it and pastes the next line in its other part.",
+  },
 };
 
 const isFeatureTipId = (id) => Object.prototype.hasOwnProperty.call(FEATURE_TIPS, id);
@@ -95,7 +100,7 @@ const formatFeatureTip = (id, localeStrings = {}, vars = {}) => {
     unsorted: localeStrings.noFolderTitle || "Unsorted",
     importPages: localeStrings.footerOpenRepo || "Import pages",
     paste: localeStrings.createLayer || "Paste",
-    align: localeStrings.alignLayer || "Align",
+    align: localeStrings.alignLayer || "Center",
     ...vars,
   };
   const text = localeStrings[tip.key] || tip.fallback;

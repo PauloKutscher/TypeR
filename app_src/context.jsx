@@ -20,10 +20,13 @@ import { collectDescendantIds, getAutomaticTagStyles } from "./folderUtils";
 import { perfMeasure } from "./perfDebug";
 import { useKeyboardAccessPrompt } from "./keyboardAccess";
 import { useUxpPlatformPackage } from "./uxpPlatformPackage";
+import { useStudioScript } from "./studioScript";
+import { useAutoCollapseGuard } from "./autoCollapse";
 import { TAB_FIELDS, createTab, migrateTabStorage, moveTab } from "./tabStorage";
 import { applyAutoTabNames, getNextDefaultTabName } from "./tabNames";
-import { getInterfaceLanguage } from "./interfaceLanguage";
+import { getInterfaceDirection, getInterfaceLanguage } from "./interfaceLanguage";
 import { loadTextShapeREngine } from "./textShapeREngineLoader";
+import { normalizeSmartPasteHyphenation } from "./oneClick/hyphenationLanguages";
 import {
   cycleStyleSizePreset,
   normalizeStyleSizePresets,
@@ -60,10 +63,6 @@ const normalizeSmartPasteMinScale = (value) => {
   if (!Number.isFinite(num)) return SMART_PASTE_MIN_SCALE_DEFAULT;
   return Math.round(Math.min(1, Math.max(0.5, num)) * 100) / 100;
 };
-const SMART_PASTE_HYPHENATION_MODES = ["auto", "fr", "en", "off"];
-const normalizeSmartPasteHyphenation = (value) => (
-  SMART_PASTE_HYPHENATION_MODES.indexOf(value) !== -1 ? value : "auto"
-);
 // Transient toast shown above the footer (smart paste fallbacks, toggles)
 const NOTICE_KINDS = ["info", "warning"];
 let lastNoticeId = 0;
@@ -121,6 +120,8 @@ const storeFields = [
   "textShapeRLearnTipShown",
   "textShapeRBubbleAware",
   "dehyphenateTextShapeR",
+  "preserveTextShapeRSpaces",
+  "autoScrollText",
   "textShapeRTuning",
   "internalPadding",
   "interpretMarkdown",
@@ -287,6 +288,8 @@ const initialState = {
   textShapeRPerformanceTipShown: storage.data?.textShapeRPerformanceTipShown === true,
   textShapeRPerformanceTipVisible: false,
   textShapeRBubbleAware: storage.data?.textShapeRBubbleAware === true,
+  preserveTextShapeRSpaces: storage.data?.preserveTextShapeRSpaces === true,
+  autoScrollText: storage.data?.autoScrollText !== false,
   dehyphenateTextShapeR: storage.data?.dehyphenateTextShapeR === true,
   textShapeRTuning: storage.data?.textShapeRTuning || null,
   modalType: null,
@@ -458,6 +461,10 @@ const baseReducer = (state, action) => {
         if (!storeFields.includes(field)) continue;
         if (field === "styles" && state.styles) {
           newState[field] = mergeImportedStyles(state.styles, action.data.styles, action.keepExistingStyles === true);
+        } else if (field === "folders" && action.keepExistingStyles === true && Array.isArray(state.folders) && Array.isArray(action.data.folders)) {
+          // The styles kept from the current library keep their folders
+          const importedIds = action.data.folders.map((folder) => folder.id);
+          newState.folders = action.data.folders.concat(state.folders.filter((folder) => !importedIds.includes(folder.id)));
         } else {
           newState[field] = action.data[field];
         }
@@ -572,6 +579,8 @@ const baseReducer = (state, action) => {
           };
         }
       }
+      // A paste at a linked page boundary keeps the line but still reveals it.
+      thenScroll = true;
       if (action.add && newState.currentLine.last) break;
       let newIndex = state.currentLineIndex;
       for (let i = newIndex + 1; i < state.lines.length; i++) {
@@ -580,7 +589,6 @@ const baseReducer = (state, action) => {
           break;
         }
       }
-      thenScroll = true;
       thenSelectStyle = true;
       break;
     }
@@ -1314,6 +1322,16 @@ const baseReducer = (state, action) => {
       break;
     }
 
+    case "setAutoScrollText": {
+      newState.autoScrollText = action.value !== false;
+      break;
+    }
+
+    case "setPreserveTextShapeRSpaces": {
+      newState.preserveTextShapeRSpaces = action.value === true;
+      break;
+    }
+
     case "setDehyphenateTextShapeR": {
       newState.dehyphenateTextShapeR = action.value === true;
       break;
@@ -1511,11 +1529,6 @@ const baseReducer = (state, action) => {
       if (!newState.backgroundImage && state.editorTheme === CUSTOM_IMAGE_THEME_ID) {
         newState.editorTheme = "system";
       }
-      break;
-    }
-
-    case "resetUiLayout": {
-      newState.uiLayout = normalizeUiLayout(null);
       break;
     }
 
@@ -1752,13 +1765,18 @@ const baseReducer = (state, action) => {
   if (needsLineProcessing || lineIndexChanged) {
     newState.currentLine = newState.lines[newState.currentLineIndex] || null;
     if (!newState.currentLine || newState.currentLine.ignore) {
-      let newIndex = 0;
-      for (let line of newState.lines) {
-        if (!line.ignore) {
-          newIndex = line.rawIndex;
-          break;
-        }
+      // The nearest usable line, the following ones first: editing the current
+      // line must not send the user back to the top of the script
+      const lines = newState.lines;
+      const from = Math.max(0, Math.min(newState.currentLineIndex || 0, lines.length - 1));
+      let newIndex = -1;
+      for (let i = from; i < lines.length && newIndex < 0; i++) {
+        if (!lines[i].ignore) newIndex = lines[i].rawIndex;
       }
+      for (let i = from - 1; i >= 0 && newIndex < 0; i--) {
+        if (!lines[i].ignore) newIndex = lines[i].rawIndex;
+      }
+      if (newIndex < 0) newIndex = 0;
       newState.currentLine = newState.lines[newIndex] || null;
       newState.currentLineIndex = newIndex;
     }
@@ -1807,12 +1825,12 @@ const baseReducer = (state, action) => {
   }
   if (newState.currentStyle && newState.currentStyleId !== state.currentStyleId) {
     const folder = newState.currentStyle.folder || "unsorted";
-    if (!newState.openFolders.includes(folder)) newState.openFolders.push(folder);
+    if (!newState.openFolders.includes(folder)) newState.openFolders = newState.openFolders.concat(folder);
     if (action.type !== "setCurrentStyleId") {
       scrollToStyle(newState.currentStyleId);
     }
   }
-  if (thenScroll) {
+  if (thenScroll && newState.autoScrollText !== false) {
     scrollToLine(newState.currentLineIndex);
   }
 
@@ -1978,13 +1996,14 @@ const ContextProvider = React.memo(function ContextProvider(props) {
     loadTextShapeREngine().then((engine) => {
       if (!active) return;
       engine.setDehyphenationEnabled(state.dehyphenateTextShapeR === true);
+      engine.setPreserveTextShapeRSpaces(state.preserveTextShapeRSpaces === true);
       engine.setTextShapeRInterfaceLanguage(getInterfaceLanguage(state));
       engine.setTextShapeRTuning(state.textShapeRTuning);
     });
     return () => {
       active = false;
     };
-  }, [state.inlineTextShapeR, state.dehyphenateTextShapeR, state.textShapeRTuning, state.language]);
+  }, [state.inlineTextShapeR, state.preserveTextShapeRSpaces, state.dehyphenateTextShapeR, state.textShapeRTuning, state.language]);
   React.useEffect(() => {
     const version = state.stylePrefixRefreshVersion || 0;
     if (!version) return undefined;
@@ -1993,13 +2012,15 @@ const ContextProvider = React.memo(function ContextProvider(props) {
     }, 75);
     return () => clearTimeout(timer);
   }, [state.stylePrefixRefreshVersion]);
+  // The text fields follow the text direction (textBlock); the panel itself
+  // follows its interface language
   React.useEffect(() => {
-    const direction = state.direction === "rtl" ? "rtl" : "ltr";
+    const direction = getInterfaceDirection(state);
     document.documentElement.setAttribute("dir", direction);
     if (document.body) {
       document.body.setAttribute("dir", direction);
     }
-  }, [state.direction]);
+  }, [state.language]);
   React.useEffect(() => {
     applyThemeState({
       editorTheme: state.editorTheme,
@@ -2055,6 +2076,10 @@ const ContextProvider = React.memo(function ContextProvider(props) {
     }).catch(error => console.warn("Automatic update check failed:", error));
   }, [state.checkUpdates, state.autoUpdate]);
   useUxpPlatformPackage();
+  // A script sent by TypeR Studio with the pages it opens here
+  useStudioScript(dispatch, () => stateRef.current);
+  // Photoshop's "Auto-Collapse Iconic Panels" closes a panel in an icon dock at every click on the document
+  useAutoCollapseGuard(dispatch);
   useKeyboardAccessPrompt(state.modalType);
   // Legacy panel: called "TypeR (CEP)", or "TypeR (old)" while TypeR UXP is installed (uxpMigration.js)
   React.useEffect(() => {
@@ -2078,5 +2103,4 @@ export {
   defaultUiLayout,
   normalizeUiLayout,
   normalizeSmartPasteMinScale,
-  normalizeSmartPasteHyphenation,
 };

@@ -1,11 +1,14 @@
 import { fetchBody } from "./network";
+import { htmlNodeToMarkdown } from "./markdownFormatting";
 import { createLatestTaskQueue } from "./latestTaskQueue";
-import { mergeLocaleBundle } from "./localeBundle";
+import { findLocaleFallback, mergeLocaleBundle } from "./localeBundle";
+import config from "./config";
 import { readJsonStorage, writeJsonStorage, reportStorageIssue } from "./storageIO";
 import "./lib/CSInterface";
 import { parseMarkdownRuns, convertHtmlToMarkdown } from "./markdownConvert";
 import { resolveStylePointText } from "./textLayerPayload";
 import { planAlignment } from "./oneClick/alignPlan";
+import { keepPastedTexts } from "./oneClick/pasteTargets";
 import { noteTourEvent } from "./tourEvents";
 import { findNewerReleases, pickUpdateDownloadUrl } from "./updateLogic";
 import { withWatcherKey } from "./hotkeyState";
@@ -69,6 +72,7 @@ const checkUpdate = async (currentVersion) => {
         version: newerReleases[0].tag_name,
         downloadUrl: pickUpdateDownloadUrl(newerReleases[0], UPDATE_PACKAGE_EXTENSION, uxpHost && uxpHost.platform),
         testMode: !!testConfig,
+        currentVersion: comparisonVersion,
         releases: newerReleases.map(release => ({
           version: release.tag_name,
           body: release.body_html || release.body,
@@ -225,7 +229,9 @@ const downloadAndInstallUpdate = async (downloadUrl, onProgress, onComplete, onE
     onComplete && onComplete({ reloading: false });
   } catch (error) {
     console.error('Update failed:', error);
-    onError && onError(error.message || locale.updateFailed);
+    // A package that failed its checks must not be served again by "Retry"
+    if (cachedUpdateZip.url === downloadUrl) cachedUpdateZip = { url: null, promise: null };
+    onError && onError((error && error.message) || String(error || ""));
   }
 };
 
@@ -260,9 +266,8 @@ const commitStorageData = (data, rewrite) => {
   const nextData = storage.error || rewrite ? data : Object.assign({}, storage.data, data);
   storageCache = nextData;
   storageReadError = null;
-  const success = writeJsonStorage(storagePath, nextData);
-  if (!success) reportStorageIssue(storagePath, "write");
-  return success;
+  // writeJsonStorage reports its own failure with the exact reason
+  return writeJsonStorage(storagePath, nextData);
 };
 
 const flushStorageWrite = (force = false) => {
@@ -292,6 +297,16 @@ const flushStorageWrite = (force = false) => {
     if (!force) pendingStorageTimer = setTimeout(flushStorageWrite, MAX_STORAGE_DELAY);
   }
   return success;
+};
+
+// The storage notice's retry: save what is waiting, or the whole current
+// state when the failed save already left the queue. A failed first read
+// keeps the cache empty, so it never replaces the file with defaults.
+const retryStorageSave = () => {
+  if (pendingStorageData) return flushStorageWrite(true);
+  const storage = loadStorageCache();
+  if (storage.error) return false;
+  return commitStorageData(storage.data, true);
 };
 
 const writeToStorage = (data, rewrite, options = {}) => {
@@ -421,6 +436,10 @@ const initLocale = () => {
   loadLocaleFile(`${path}/locale/messages.properties`);
   baseLocale = Object.assign({}, locale);
   locale = mergeLocaleBundle(locale, automatic);
+  // "Auto" in a Photoshop whose language has no folder of its own country
+  const uiLocale = csInterface.hostEnvironment && csInterface.hostEnvironment.appUILocale;
+  const fallback = findLocaleFallback(uiLocale, Object.keys(config.languages).filter((id) => id !== "auto" && id !== "en_US"));
+  if (fallback) loadLocaleFile(`${path}/locale/${fallback}/messages.properties`);
   const lang = readStorage("language");
   if (lang && lang !== "auto") {
     const file = lang === "en_US" ? `${path}/locale/messages.properties` : `${path}/locale/${lang}/messages.properties`;
@@ -601,17 +620,6 @@ const setLayerTextFast = (text, layerSnapshotStyle, direction, callback = () => 
   }));
 };
 
-const getCurrentSelection = (callback = () => {}) => {
-  csInterface.evalScript("getCurrentSelection()", (result) => {
-    const data = safeJsonParse(result);
-    if (data.error) {
-      callback(null);
-    } else {
-      callback(data);
-    }
-  });
-};
-
 const photoshopEventCallbacks = new Set();
 let photoshopEventsRegistered = false;
 let photoshopEventsReceived = false;
@@ -740,7 +748,9 @@ const scanTextShapeRTraining = (path, callback = () => {}) => {
   }, 10 * 60 * 1000));
 };
 
-const getSelectionChanged = (callback = () => {}) => {
+// onModeReset: the host found the selection tool on "Add to selection" (or
+// Subtract, Intersect) and set it back to "New selection"
+const getSelectionChanged = (callback = () => {}, onModeReset = () => {}) => {
   csInterface.evalScript("getSelectionChanged()", (result) => {
     const data = safeJsonParse(result);
     if (data.documentChanged) {
@@ -871,6 +881,8 @@ const alignTextLayerToSelection = (resizeTextBox = false, padding = 0, callback 
     let placements = [];
     try {
       placements = capture && !capture.error ? planAlignment(capture, readingOrder) : [];
+      // A text the smart paste just centred stays on that centre
+      placements = capture && !capture.error ? keepPastedTexts(capture, placements, !!resizeTextBox) : placements;
     } catch (planError) {
       placements = [];
     }
@@ -1189,21 +1201,47 @@ const resizeTextArea = (defer = false) => {
   }
 };
 
+// Scrolls the script sheet so that the line sits a few rows under its top.
+// The sheet (.text-block, the parent of .text-lines) is scrolled by itself:
+// scrollIntoView() also scrolls every ancestor and, in the new TypeR's
+// WebView, left the sheet where it was after a paste (3.0.1). The row's top
+// comes from the row when it is mounted, from the row layout otherwise (rows
+// far from the view are not rendered), and the scroll is set again on the
+// next frame, after a textarea resize or a caret reveal that follows it.
+const SCROLL_CONTEXT_LINES = 5;
+const scriptRowTop = (textLines, index) => {
+  const row = textLines.querySelector(`.text-line[data-line-index="${index}"]`);
+  if (row) return row.offsetTop;
+  const layout = textLines.__typerRowLayout;
+  if (layout && layout.offsets && layout.offsets[index] != null) {
+    return layout.offsets[index] + (parseFloat(getComputedStyle(textLines).paddingTop) || 0);
+  }
+  return null;
+};
 const scrollToLine = (lineIndex, delay = 100) => {
-  lineIndex = lineIndex < 5 ? 0 : lineIndex - 5;
-  setTimeout(() => {
-    const line = document.querySelector(`.text-line[data-line-index="${lineIndex}"]`);
-    if (line) {
-      line.scrollIntoView();
-      return;
-    }
+  let cancelled = false;
+  const current = Math.max(0, Number(lineIndex) || 0);
+  const target = Math.max(0, current - SCROLL_CONTEXT_LINES);
+  const scroll = () => {
+    if (cancelled) return false;
     const textLines = document.querySelector(".text-lines");
-    const layout = textLines && textLines.__typerRowLayout;
-    const scrollContainer = textLines && textLines.parentElement;
-    if (layout && scrollContainer && layout.offsets[lineIndex] != null) {
-      scrollContainer.scrollTop = layout.offsets[lineIndex];
+    const sheet = textLines && textLines.parentElement;
+    if (!sheet) return false;
+    let top = scriptRowTop(textLines, target);
+    if (top == null) return false;
+    // Wrapped context rows must not push the current line below the sheet.
+    const currentTop = scriptRowTop(textLines, current);
+    if (currentTop != null && sheet.clientHeight > 0) {
+      top = Math.max(top, currentTop - Math.floor(sheet.clientHeight / 2));
     }
+    sheet.scrollTop = Math.max(0, Math.round(top));
+    return true;
+  };
+  const timer = setTimeout(() => {
+    if (!scroll()) return;
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(scroll);
   }, delay);
+  return () => { cancelled = true; clearTimeout(timer); };
 };
 
 const scrollToStyle = (styleId, delay = 100) => {

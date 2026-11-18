@@ -101,9 +101,10 @@ assert.ok(result[0].bounds && result[1].metrics && result[2].bounds && result[3]
 assert.deepStrictEqual(mixed.calls, ['make', 'set', 'convert', 'make', 'set', 'convert']);
 assert.strictEqual(mixed.layerRemovals(), 1, 'The group cleanup removes the final atlas without a redundant layer deletion');
 assert.ok(JSON.stringify(result).length < 1000, 'The bridge receives metrics rather than thousands of Bezier points');
-const pixelAtlas = { ...atlas, params: { typeUnit: 'pixelsUnit', layerText: { textStyleRange: [{ textStyle: { leading: 256 * 72 / page.resolution } }] } } };
+// The engine writes a pixel style's row advance in pixels: the host passes it on
+const pixelAtlas = { ...atlas, params: { typeUnit: 'pixelsUnit', layerText: { textStyleRange: [{ textStyle: { leading: 256 } }] } } };
 assert.ok(makeHost().run([pixelAtlas])[0].metrics);
-assert.strictEqual(pixelAtlas.params.layerText.textStyleRange[0].textStyle.leading, 256 * 72 / page.resolution, 'Do not mutate the supplied atlas');
+assert.strictEqual(pixelAtlas.params.layerText.textStyleRange[0].textStyle.leading, 256, 'Do not mutate the supplied atlas');
 
 for (const failure of ['convert', 'path']) {
   const host = makeHost(failure);
@@ -223,4 +224,45 @@ for (const failures of [0, 1, 2]) {
   assert.deepStrictEqual(JSON.parse(JSON.stringify(context._smartSelectionHistograms())), failures === 2 ? [] : [[4, 5], [6, 7], [8, 9]]);
   assert.strictEqual(stamps, failures ? 1 : 0);
 }
-console.log('CEP measurement: invisible groups, native updates, atlas metrics, DPI parity, composite histograms and failure cleanup passed');
+
+// Photoshop's ink goes where Align puts it: the centre of its box on the
+// bubble's centre (text.target), in one move, none when it is already there
+{
+  const makeInk = (box) => {
+    const log = [];
+    const state = { box: { ...box } };
+    const context = vm.createContext({
+      _currentLayerBox: () => state.box && { ...state.box },
+      _moveLayer(dx, dy) { log.push('move ' + dx + ' ' + dy); state.box = { left: state.box.left + dx, right: state.box.right + dx, top: state.box.top + dy, bottom: state.box.bottom + dy }; },
+    });
+    ['_smartSettleOffset', '_smartSettleInk'].forEach(name => vm.runInContext(extract(name), context));
+    return { context, log, state };
+  };
+  const target = { x: 200, y: 200 };
+  const off = makeInk({ left: 151, right: 251, top: 177, bottom: 221 });
+  off.context._smartSettleInk({ plan: {}, text: { target } });
+  assert.deepStrictEqual(off.log, ['move -1 1'], 'a pixel off: one move');
+  assert.deepStrictEqual(off.state.box, { left: 150, right: 250, top: 178, bottom: 222 }, 'the ink box is centred on the target');
+  const half = makeInk({ left: 150, right: 251, top: 180, bottom: 221 });
+  half.context._smartSettleInk({ plan: {}, text: { target } });
+  assert.deepStrictEqual(half.log, [], 'half a pixel off is as close as whole-pixel bounds tell: no move');
+  const none = makeInk(null);
+  none.context._smartSettleInk({ plan: {}, text: { target } });
+  assert.deepStrictEqual(none.log, [], 'no ink, nothing to move');
+  const old = makeInk({ left: 0, right: 10, top: 0, bottom: 10 });
+  old.context._smartSettleInk({ plan: {}, text: {} });
+  assert.deepStrictEqual(old.log, [], 'a session without a target is left where it was made');
+  // The UXP host settles the same way (uxp-src/host/smartPaste.js)
+  const uxpSource = fs.readFileSync(path.join(__dirname, '../uxp-src/host/smartPaste.js'), 'utf8');
+  const uxpSettle = new Function(uxpSource.match(/function settleOffset\([^]*?\n\}/)[0] + '\nreturn settleOffset;')();
+  const cepSettle = vm.runInContext(extract('_smartSettleOffset') + '; _smartSettleOffset', vm.createContext({}));
+  [
+    [{ left: 151, right: 251, top: 177, bottom: 221 }, target],
+    [{ left: 150, right: 251, top: 180, bottom: 221 }, target],
+    [{ left: 10, right: 20, top: 10, bottom: 20 }, { x: 0, y: 0 }],
+    [null, target],
+    [{ left: 0, right: 10, top: 0, bottom: 10 }, null],
+    [{ left: 0, right: 10, top: 0, bottom: 10 }, { x: NaN, y: 3 }],
+  ].forEach(([box, goal]) => assert.deepStrictEqual(uxpSettle(box, goal), JSON.parse(JSON.stringify(cepSettle(box, goal))), 'UXP and CEP settle alike'));
+}
+console.log('CEP measurement: invisible groups, native updates, atlas metrics, DPI parity, composite histograms, ink settle and failure cleanup passed');

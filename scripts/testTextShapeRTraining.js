@@ -6,8 +6,8 @@ const load = require("./helpers/loadAppModule")();
 const { normalizeTrainingFiles, makeTrainingPage, selectedTrainingEntries, trainTextShapeREntries } = load("app_src/textShapeRTraining.js");
 
 async function testLearning() {
-  const files = normalizeTrainingFiles(["/pages/10.psd", "/pages/2.psd", "/pages/2.psd", "/pages/no.png", null]);
-  assert.deepStrictEqual(files.map((file) => file.name), ["2.psd", "10.psd"]);
+  const files = normalizeTrainingFiles(["/pages/10.psd", "/pages/2.psd", "/pages/2.psd", "/pages/no.png", null, "/pages/11.PSB"]);
+  assert.deepStrictEqual(files.map((file) => file.name), ["2.psd", "10.psd", "11.PSB"], "large documents (.psb) train too");
   // Picks may also be { name, path } objects whose path is an opaque token:
   // the name alone carries the extension and the sort key
   assert.deepStrictEqual(normalizeTrainingFiles([
@@ -155,9 +155,20 @@ function testPhotoshopScan() {
   box.scanTextShapeRTraining('/pages/quote" and slash\\.psd');
   assert.deepStrictEqual(opened, ['/pages/quote" and slash\\.psd']);
   assert.strictEqual(app.activeDocument, original);
+  // The same page asked for under another spelling of its path (symbolic
+  // link, Unicode form): Photoshop answers the opening with the open
+  // document, which is the user's and must not be closed
+  original.id = 7;
+  const closedBefore = closed.length;
+  original.close = () => { throw new Error("The user's document was closed"); };
+  app.open = (file) => { opened.push(file.fsName); return original; };
+  assert.strictEqual(JSON.parse(box.scanTextShapeRTraining("/link/existing.psd")).entries.length, 93);
+  assert.strictEqual(duplicated, 3, "an open page found by its id is read from a duplicate");
+  assert.strictEqual(closed.length, closedBefore + 1, "only the duplicate is closed");
+  app.open = (file) => { opened.push(file.fsName); if (failOpen) throw new Error("Open failed"); return workDocument(); };
   failRead = true;
   assert.strictEqual(JSON.parse(box.scanTextShapeRTraining("/pages/new.psd")).error, "scanFailed");
-  assert.strictEqual(closed.length, 4, "A failed read still closes its temporary document without saving");
+  assert.strictEqual(closed.length, 5, "A failed read still closes its temporary document without saving");
   assert.strictEqual(app.activeDocument, original);
   assert.strictEqual(app.displayDialogs, "all");
   failRead = false;

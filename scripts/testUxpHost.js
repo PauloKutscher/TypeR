@@ -391,6 +391,14 @@ assert.deepStrictEqual(contentWrites[0].to.antiAlias, antiAliasStrong, "A conten
 });
 const sized = () => ({ textProps: { layerText: { textStyleRange: [{ textStyle: { size: 10, impliedFontSize: 10 } }, { textStyle: { size: 12 } }] } } });
 assert.deepStrictEqual(port._overrideStyleTextSize(sized(), 30), host._overrideStyleTextSize(sized(), 30));
+// A size preset scales every run with its leading, in both hosts
+const runs = () => [{ textStyle: { size: 10, impliedFontSize: 10, leading: 12, autoLeading: false } }, { textStyle: { size: 15, leading: 18, baselineShift: 2 } }];
+const hostRuns = runs();
+const portRuns = runs();
+host._scaleTextStyleRanges(hostRuns, 20);
+port._scaleTextStyleRanges(portRuns, 20);
+assert.deepStrictEqual(portRuns, hostRuns);
+assert.deepStrictEqual(hostRuns, [{ textStyle: { size: 20, impliedFontSize: 20, leading: 24, autoLeading: false } }, { textStyle: { size: 30, leading: 36, baselineShift: 4 } }]);
 const PUNCTUATION_ONLY = ["?!", "!!", "...", "…", " ?!", "« !! »", "(?)", "¿¡", "؟", "！？", "?\r!"];
 const NOT_PUNCTUATION_ONLY = ["", "  ", "\r", "Non!", "?!a", "1!", "♪", null, undefined];
 PUNCTUATION_ONLY.forEach((text) => {
@@ -447,8 +455,6 @@ shapes.forEach((bounds) => {
   assert.strictEqual(port._normalizeShapeSampleCount(value, 17), host._normalizeShapeSampleCount(value, 17));
 });
 
-/* ---------------- slot of a new text in the layer stack ---------------- */
-
 /* ---------------- where a new text goes in the layer stack ---------------- */
 
 // Root text uses an ordinal move; folder placement is covered by testTextLayerStack.js.
@@ -460,19 +466,27 @@ const raiseCalls = [];
 const raisePort = loadPortModule(stackPhotoshop((command) => {
   raiseCalls.push(command);
   if (command._obj === "get" && command._target[0]._property === "group") return { group: true };
+  if (command._obj === "get" && command._target[0]._property === "itemIndex") return { itemIndex: command._target[1]._id === cleanLayer.id ? 9 : 3 };
   return {};
-}))._internals;
+}, [cleanLayer, { id: 2, name: "Page", kind: "pixel" }]))._internals;
 raisePort._raiseNewTextLayer();
-assert.deepStrictEqual(raiseCalls.map((command) => command._obj), ["get", "ungroup", "move"], "a clipped text is released, then raised");
-assert.deepStrictEqual(raiseCalls[2].to, { _ref: "layer", _enum: "ordinal", _value: "front" }, "the raise is Photoshop's Bring to Front");
-assert.deepStrictEqual(raiseCalls[2]._target, [{ _ref: "layer", _enum: "ordinal", _value: "targetEnum" }]);
+assert.deepStrictEqual(raiseCalls.map((command) => command._obj), ["get", "ungroup", "get", "get", "move"], "a clipped text under the clean layer is released, then raised");
+assert.deepStrictEqual(raiseCalls[4].to, { _ref: "layer", _enum: "ordinal", _value: "front" }, "the raise is Photoshop's Bring to Front");
+assert.deepStrictEqual(raiseCalls[4]._target, [{ _ref: "layer", _enum: "ordinal", _value: "targetEnum" }]);
 const plainCalls = [];
 loadPortModule(stackPhotoshop((command) => { plainCalls.push(command._obj); return { group: false }; }))._internals._raiseNewTextLayer();
-assert.deepStrictEqual(plainCalls, ["get", "move"], "an unclipped text is only raised");
+assert.deepStrictEqual(plainCalls, ["get"], "without a clean layer, an unclipped text stays above the active layer");
+const belowCalls = [];
+loadPortModule(stackPhotoshop((command) => { belowCalls.push(command._obj); return indexAnswers(12, 9)(command); }, [cleanLayer]))._internals._raiseNewTextLayer();
+assert.deepStrictEqual(belowCalls, ["get", "get", "get"], "a text already above the clean layer is not moved");
+const aboveCalls = [];
+loadPortModule(stackPhotoshop((command) => { aboveCalls.push(command._obj); return indexAnswers(3, 9)(command); }, [cleanLayer]))._internals._raiseNewTextLayer();
+assert.deepStrictEqual(aboveCalls, ["get", "get", "get", "move"], "a text under the clean layer is raised");
 // A text already in front: Photoshop refuses the move, which must not fail the paste
-const refusing = loadPortModule(stackPhotoshop((command) => (command._obj === "move" ? { _obj: "error", message: "The command \"Move\" is not currently available.", result: 1 } : { group: false })))._internals;
+const refusing = loadPortModule(stackPhotoshop((command) => (command._obj === "move" ? { _obj: "error", message: "The command \"Move\" is not currently available.", result: 1 } : indexAnswers(3, 9)(command)), [cleanLayer]))._internals;
 assert.doesNotThrow(() => refusing._raiseNewTextLayer());
 assert.match(hostSource, /charIDToTypeID\("Frnt"\)/, "host.js brings the new text to the front the same way");
+assert.match(hostSource, /function _cleanLayerAbove\(\)/, "host.js raises a text only when the clean layer is above it");
 assert.doesNotMatch(hostSource, /_topSlotOfStack|putIndex\(charID\.Layer, slot/, "host.js no longer moves a new text by index");
 
 /* -------------- auto-centre and size +/- helpers vs host.js -------------- */
@@ -576,7 +590,11 @@ const liveCases = [
   [{ layerText: { textStyleRange: [{ textStyle: { size: 40 } }] } }, { typeUnit: "millimetersUnit", layerText: { textStyleRange: [{ textStyle: { size: 3 } }] } }],
   [{ typeUnit: "rulerUnit", layerText: { textStyleRange: [{ textStyle: { size: 40 } }] } }, { typeUnit: "pixelsUnit", layerText: { textStyleRange: [{ textStyle: { size: 3 } }] } }],
   [{ typeUnit: "pointsUnit", layerText: {} }, null],
+  [{ typeUnit: "pixelsUnit", layerText: { textStyleRange: [{ textStyle: { size: 10, leading: 12, autoLeading: false } }] } },
+    { typeUnit: "pixelsUnit", layerText: { transform: { xx: 2, xy: 0, yx: 0, yy: 2, tx: 0, ty: 0 }, textStyleRange: [{ textStyle: { size: 40, impliedFontSize: 80, leading: 50, autoLeading: false } }] } }],
 ];
+assert.strictEqual(port._keepLiveTextSize(JSON.parse(JSON.stringify(liveCases[5][0])), liveCases[5][1], 72).layerText.textStyleRange[0].textStyle.size, 80,
+  "a transformed layer keeps the size it shows");
 liveCases.forEach(([target, live]) => {
   [72, 300].forEach((resolution) => {
     const fromPort = port._keepLiveTextSize(JSON.parse(JSON.stringify(target)), live, resolution);

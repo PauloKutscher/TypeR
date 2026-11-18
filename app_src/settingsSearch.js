@@ -93,6 +93,7 @@ const SECTIONS = [
     groupText: "TextShapeR",
     entries: [
       { title: "settingsInlineTextShapeRLabel", hint: "settingsInlineTextShapeRHint", keywords: "forme shape suggestion" },
+      { title: "settingsPreserveTextShapeRSpacesLabel", hint: "settingsPreserveTextShapeRSpacesHint", keywords: "espaces spacing whitespace" },
       { title: "settingsDehyphenateLabel", hint: "settingsDehyphenateHint", parent: "settingsInlineTextShapeRLabel", keywords: "cesure tiret hyphen" },
     ],
   },
@@ -109,6 +110,7 @@ const SECTIONS = [
     tab: "script",
     group: "settingsGroupTextScript",
     entries: [
+      { title: "settingsAutoScrollTextLabel", hint: "settingsAutoScrollTextHint", keywords: "defilement scroll suivi" },
       { title: "settingsLinePrefixesLabel", hint: "settingsLinePrefixesDescr", keywords: "ignorer ignore commentaire comment" },
       { title: "settingsIgnoreTagsLabel", hint: "settingsIgnoreTagsDescr", keywords: "balise ignorer ignore" },
       { title: "settingsMarkdownLabel", hint: "settingsMarkdownHint", keywords: "gras italique bold italic" },
@@ -196,6 +198,7 @@ const SECTIONS = [
       { title: "settingsLayoutElHelp", layoutBlock: "footer", parent: "settingsLayoutBlockFooter" },
       { title: "settingsLayoutElSettings", layoutBlock: "footer", parent: "settingsLayoutBlockFooter" },
       { title: "settingsLayoutElRepo", layoutBlock: "footer", parent: "settingsLayoutBlockFooter" },
+      { title: "settingsLayoutElStudio", layoutBlock: "footer", parent: "settingsLayoutBlockFooter" },
       { title: "settingsLayoutModeIcons", hint: "settingsLayoutModeIconsNote", layoutBlock: "footer", parent: "settingsLayoutBlockFooter", keywords: "icone icon" },
       { title: "settingsLayoutScaleLabel", keywords: "zoom taille size agrandir echelle ui" },
       { title: "settingsLayoutReset", hint: "settingsLayoutCanvasHint", keywords: "reinitialiser" },

@@ -4,7 +4,9 @@
 import { request, notify, on, runsInPanel } from "./bridge";
 import { installCepEnvironment } from "./cepShim";
 import { installErrorReporting, installFetchFallback, installFileInputs, installInputCentering, installLocalStorage } from "./domShims";
+import { requestInit } from "./initRequest";
 import "./webkit.scss";
+import { installFocusRelease } from "./focus";
 
 // The WebView is WebKit on macOS and Chromium (WebView2) on Windows: the
 // layout fixes of webkit.scss only apply to the first
@@ -29,20 +31,6 @@ if (process.env.TYPER_DEV === "1") {
   });
 }
 
-// The host may attach its listener after this page started: ask again until
-// it answers (init only reads, so a repeated request is harmless)
-async function requestInit() {
-  const TIMEOUT = {};
-  for (let attempt = 0; attempt < 60; attempt++) {
-    notify("ready");
-    const result = await Promise.race([request("init"), new Promise((resolve) => setTimeout(() => resolve(TIMEOUT), 1000))]);
-    if (result !== TIMEOUT) return result;
-  }
-  // The host reloads the panel once on this reason (uxp-src/host/main.js)
-  const error = new Error("the plugin host does not answer");
-  error.reason = "init-timeout";
-  throw error;
-}
 
 // Startup milestones, in ms since the page started (perf diagnostics)
 const startup = (window.__typerStartup = {});
@@ -54,7 +42,7 @@ const mark = (name) => {
 async function start() {
   installErrorReporting(report);
   mark("script");
-  const init = await requestInit();
+  const init = await requestInit({ request, notify });
   mark("init");
   installCepEnvironment(init);
   const root = new window.CSInterface().getSystemPath(window.SystemPath.EXTENSION);
@@ -66,6 +54,7 @@ async function start() {
     (name, text) => window.cep.fs.writeFile(root + "/" + name, text)
   );
   installFileInputs();
+  if (!runsInPanel) installFocusRelease({ document, window, request, on, notify });
   // In the panel, fetch is UXP's own, without CORS, and the host's fetchUrl
   // uses it: the fallback would call itself
   if (!runsInPanel) installFetchFallback();

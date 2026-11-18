@@ -15,7 +15,7 @@ const files = require("./files");
 const keyboard = require("./keyboard");
 const keysHelper = require("./keysHelper");
 const services = require("./services");
-const { runJsx, systemCall } = require("./jsx");
+const { runJsx, systemCall, runPowerShell } = require("./jsx");
 const { parseCall, callTimeout, createCallQueue } = require("./evalScript");
 const { createPanelStartup } = require("./panelStartup");
 const { createStartupLoader } = require("./startupFiles");
@@ -65,6 +65,10 @@ let inPanel = null;
 let inPanelReason = '';
 // Photoshop destroyed the panel the application ran in: the next one gets it
 let restartInPanel = false;
+let webViewAttempt = null;
+let pendingRendererFailure = null;
+let storageRefusal = null;
+let refusalWatchGeneration = 0;
 
 function clearProbes() {
   if (stopProbes) stopProbes();
@@ -101,26 +105,19 @@ async function reportPanelStartFailure(baseText, { head = baseText, french = fal
   const generation = viewGeneration;
   const size = startupViewSize;
   const events = loadEvents.slice();
+  const sessionMarker = webViewAttempt && webViewAttempt.sessionMarker;
   const windows = os.platform() === 'win32';
   const webViewFolders = windows
     ? await panelStart.readWebViewFolders(folder => require('fs').readdir(files.toUrl(folder)), panelStart.windowsWebViewFolders(os.homedir())) : [];
   // What Photoshop's own log says about its WebViews in this session
   const logFacts = windows
     ? await panelStart.readUxpLogFacts({
-      listFolder: files.listFolder, readText: files.readText, appData: await files.getRoamingAppData(), pluginId: PLUGIN_ID,
+      listFolder: files.listFolder, readText: files.readText, appData: await files.getRoamingAppData(), pluginId: PLUGIN_ID, sessionMarker,
     }) : null;
   const webViewFailure = logFacts && logFacts.failure ? Object.assign({ line: logFacts.failure }, logFacts) : null;
   // A report from a closed/reloaded panel must never cover its replacement.
   if (generation !== viewGeneration || webviewReady || !panelVisible || panelStartup.getState() !== 'failed') return;
   if (logFacts) debugNote('startup.uxp-log', panelStart.uxpLogLines(logFacts).join(' | '));
-  // No sign of life from the WebView at all, whatever the cause (refused by
-  // UXP, no runtime it can start, never started): the application runs in
-  // the panel itself (docs/uxp-webview-refused.md). A WebView that loaded
-  // something and failed keeps the notice.
-  if (!events.some((event) => !OWN_LOAD_EVENT.test(event))) {
-    enterInPanel(webViewFailure ? webViewFailure.line.replace(/^(\[[^\]]*\])+\s*/, '') : 'no sign of life from the WebView in 15 s');
-    return;
-  }
   if (webViewFailure) {
     debugNote('startup.webview-failure', webViewFailure.line);
     if (crashTrace) crashTrace.note('webview', 'creation failed: ' + webViewFailure.line);
@@ -162,14 +159,17 @@ function showStatus(text) {
 const panelStartup = createPanelStartup({
   initiallyVisible: false,
   environment: () => ({ photoshop: String(uxp.host.version || 'unknown'), uxp: String(uxp.versions && uxp.versions.uxp || 'unknown'), platform: os.platform(), locale: uxp.host.uiLocale }),
-  retry() {
-    // In the panel itself there is no WebView to ask again
-    if (inPanel || !view) return;
-    noteLoadEvent('retry');
-    loadingPanel = true;
-    view.src = PANEL_URL;
+  canRender() {
+    if (!view) return true;
+    const box = view.getBoundingClientRect();
+    return box.width > 0 && box.height > 0;
   },
-  onFailure(text, { bridge, head, french }) {
+  onFailure(text, { bridge, head, french, reason }) {
+    if (!bridge && !inPanel && /^renderer-/.test(reason)) {
+      pendingRendererFailure = { generation: viewGeneration, reason: head };
+      recoverRenderer();
+      return;
+    }
     if (!bridge) reportPanelStartFailure(text, { head, french }).catch(error => console.error('TypeR: startup report', error));
     // The panel answers but does not finish starting: the log says where init is
     else console.error('TypeR: the panel did not finish starting (' + startupFiles.summary() + ')');
@@ -189,6 +189,16 @@ const panelStartup = createPanelStartup({
     if (view) view.style.display = 'block';
   }
 });
+
+// Rendering errors and an exhausted bridge deadline can use the native UI.
+// Application/init errors keep their diagnostic: changing renderers does not
+// repair storage or host operations, and must not execute them a second time.
+function recoverRenderer() {
+  const failure = pendingRendererFailure;
+  if (!failure || !panelVisible || inPanel || webviewReady || failure.generation !== viewGeneration) return;
+  pendingRendererFailure = null;
+  enterInPanel(failure.reason);
+}
 
 /* ======================= panel messages ======================= */
 
@@ -264,11 +274,25 @@ function readLocaleStrings() {
   const locales = mirrorFiles ? mirrorFiles.locales : {};
   let language = "auto";
   try {
-    language = JSON.parse(mirrorFiles.files.storage || "{}").language || "auto";
+    // The language is a setting of the active profile (app_src/profileStorage.js)
+    const stored = mirrorFiles.files;
+    let storage = "storage";
+    try {
+      const profile = "storage_profile_" + String(JSON.parse(stored.storage_profiles || "{}").activeProfileId || "");
+      if (profile !== "storage_profile_default" && typeof stored[profile] === "string") storage = profile;
+    } catch (registryError) {}
+    language = JSON.parse(stored[storage] || "{}").language || "auto";
   } catch (error) {}
   if (language === "auto") language = uxp.host.uiLocale || "en_US";
   const strings = parse(locales["locale/messages.properties"]);
-  Object.assign(strings, parse(locales["locale/" + language + "/messages.properties"]));
+  let file = "locale/" + language + "/messages.properties";
+  if (typeof locales[file] !== "string" && !/^en/i.test(language)) {
+    // No folder for this country: one of the same language (Photoshop's
+    // "es_ES" and "es_MX" read "es_SP"), as the panel does (localeBundle.js)
+    const prefix = "locale/" + String(language).slice(0, 2).toLowerCase() + "_";
+    file = Object.keys(locales).find((name) => name.toLowerCase().indexOf(prefix) === 0) || file;
+  }
+  Object.assign(strings, parse(locales[file]));
   return strings;
 }
 
@@ -376,10 +400,6 @@ const methods = Object.assign({}, photoshop.methods, {
   reloadUserFonts,
   getHotkeyPressed: () => keyboard.getState(),
   isHostAppFrontmost: () => true,
-  deleteFolder: (path) => files.removeTree(path).then(() => "OK", (error) => "ERROR: " + error.message),
-  openFolder: (path) => uxp.shell.openPath(path).then(() => "OK", (error) => "ERROR: " + error.message),
-  makeExecutable: () => "OK",
-  launchInstaller: (path) => uxp.shell.openPath(path).then(() => "OK", (error) => "ERROR: " + error.message),
 });
 
 // One host call at a time, each with a time limit (see evalScript.js)
@@ -421,6 +441,17 @@ async function evalScript(script) {
   const traceTag = crashTrace && !UNTRACED_CALLS[call.name] ? "call#" + ++traceCallCount : null;
   const traceStarted = Date.now();
   if (traceTag) crashTrace.note(traceTag, call.name + "(" + crashTrace.json(call.args, 500).slice(1, -1) + ")");
+  // A click on a panel button (TextShapeR, Insert, a style) leaves the
+  // keyboard focus in the WebView, where Photoshop's shortcuts die, and the
+  // user works in the document right after such a change: the focus leaves
+  // as the call starts (a style applied to a TextShapeR layer lasts long
+  // enough for the next tool key to arrive before its end), and once more
+  // after it, in case Photoshop was busy (see restoreFocus). Both are awaited:
+  // a restore's bringToFront played while the call's commands run makes them
+  // fail ("the command Set is not available"), which turned every style
+  // applied to a text layer into "no text layer selected" in 3.0.2
+  const changesDocument = DOCUMENT_CHANGING_CALLS[call.name] === "set";
+  if (changesDocument) await restoreFocus("call");
   try {
     const result = await method(...call.args);
     const text = result === undefined || result === null ? "" : String(result);
@@ -433,10 +464,7 @@ async function evalScript(script) {
   } finally {
     if (Object.prototype.hasOwnProperty.call(DOCUMENT_CHANGING_CALLS, call.name)) {
       onPhotoshopEvent(DOCUMENT_CHANGING_CALLS[call.name], { _isCommand: true });
-      // A click on a panel button (TextShapeR, Insert, a style) leaves the
-      // keyboard focus in the WebView, where Photoshop's shortcuts die; the
-      // user works in the document after such a change (see restoreFocus)
-      if (DOCUMENT_CHANGING_CALLS[call.name] === "set") restoreFocus();
+      if (changesDocument) await restoreFocus("call");
     }
   }
 }
@@ -490,6 +518,7 @@ async function init() {
     locales: mirrorFiles.locales,
     hostEnvironment: getHostEnvironment(),
     platform: os.platform(),
+    arch: processorArch(),
     keys: keyboard.getState(),
     hidden: !panelVisible,
     version: services.pluginVersion(),
@@ -498,6 +527,8 @@ async function init() {
 
 const requests = {
   init,
+  // The page's pointer left it with nothing being edited (web/focus.js)
+  restoreFocus: () => queueFocusRestore("panel"),
   // A call past its time limit answers like a call that threw, as CEP did.
   // The smart paste answers "timeout" instead: the panel must not paste the
   // classic way while Photoshop may still finish the smart paste.
@@ -526,7 +557,7 @@ const requests = {
   keyboardDebug: () => Object.assign(typeof keysHelper.diagnostics === "function" ? keysHelper.diagnostics() : {
     source: "helper", running: null, foreground: null, error: "",
     state: keyboard.getState(), sampledAt: keyboard.lastUpdate(),
-  }, { focusRestores }),
+  }, { focusRestores, focusSkips }),
   openKeyboardAccess: () => systemCall('open "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"'),
   log: (...args) => log("panel:", ...args),
 };
@@ -565,8 +596,6 @@ let loadingPanel = false;
 let panelAddress = PANEL_URL;
 // The automatic reload after an init without answer, once per start
 let autoReloaded = false;
-// The load events TypeR notes itself are no sign of life from the WebView
-const OWN_LOAD_EVENT = /^retry$/;
 
 // A new WebView in place of the current one (the Reload TypeR button)
 async function reloadView(generation) {
@@ -587,10 +616,15 @@ function showPanelPage() {
   loadingPanel = true;
   webviewReady = false;
   recentRequestIds.clear();
+  pendingRendererFailure = null;
+  storageRefusal = null;
+  webViewAttempt = { since: Date.now(), sessionMarker: 'TypeR WebView attempt ' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + '-' + viewGeneration };
+  // Adobe writes console output to this Photoshop session's UXP log.
+  console.log(webViewAttempt.sessionMarker);
   panelStartup.begin();
-  watchWebViewRefusal(viewGeneration, Date.now());
+  watchWebViewRefusal(viewGeneration, webViewAttempt);
   try { view.src = PANEL_URL; }
-  catch (error) { panelStartup.fail(String(error && error.message || error)); }
+  catch (error) { panelStartup.fail(String(error && error.message || error), 'renderer-error'); }
 }
 
 // A message of the application, from its WebView or from the panel's DOM
@@ -601,18 +635,32 @@ function handlePanelMessage(message, generation, channel) {
     diagnostic.note('web.' + String(message.stage).slice(0, 60), message.detail);
     return;
   }
-  if (!['ready', 'appReady', 'request', 'devResult', 'panelError'].includes(message.type)) return;
+  if (!['ready', 'appReady', 'request', 'devResult', 'panelError', 'focusState'].includes(message.type)) return;
   if (crashTrace && !webviewReady) crashTrace.note('webview', 'panel answered, view ' + (inPanel ? 'in panel' : viewSize()));
   webviewReady = true;
+  pendingRendererFailure = null;
   panelStartup.bridgeReady();
   if (message.type === "ready") {
     debugNote('bridge.ready', channel);
     return;
   }
+  // Whether the page holds the keyboard focus, and whether the user is typing
+  // in it (an input, a text area or an editable element has its focus): see
+  // restoreFocus
+  if (message.type === "focusState") {
+    panelEditing = !!message.editing;
+    panelFocused = message.focused !== false;
+    return;
+  }
   if (message.type === "appReady") {
     debugNote('app.ready', channel);
     autoReloaded = false;
+    panelEditing = false;
     panelStartup.appReady();
+    // The fallback must be usable before starting any optional native repair.
+    if (inPanel && storageRefusal) {
+      webViewRepair.start(storageRefusal.kind).catch(error => console.error('TypeR: WebView repair', String(error && error.message || error)));
+    }
     return;
   }
   if (message.type === "request") {
@@ -683,10 +731,13 @@ function enterInPanel(reason) {
 
 // Windows: UXP writes its refusal to its log the moment the WebView is
 // asked for. Looked for a few times in the first seconds of a WebView that
-// gives no sign of life, so that the panel opens without waiting 15 s.
-const REFUSAL_CHECKS_MS = [1500, 3500, 7000];
-function watchWebViewRefusal(generation, since) {
-  if (os.platform() !== 'win32') return;
+// has no bridge. Confirmed refusals get a 15 s grace period; other failures
+// use the 30 s renderer deadline, independently of diagnostic I/O.
+const REFUSAL_CHECKS_MS = [1500, 7000, 15000];
+function watchWebViewRefusal(generation, attempt) {
+  const watchGeneration = ++refusalWatchGeneration;
+  if (os.platform() !== 'win32' || !panelVisible || !view || webviewReady) return;
+  storageRefusal = null;
   REFUSAL_CHECKS_MS.forEach((delay) => setTimeout(async () => {
     if (inPanel || generation !== viewGeneration || webviewReady || loadEvents.some((event) => !OWN_LOAD_EVENT.test(event))) return;
     const refusal = await panelStart.findWebViewRefusalSince({
@@ -766,6 +817,9 @@ function attachView() {
       panelAddress = url;
     }
     viewOnPanel = url === panelAddress || url.indexOf("plugin:/") === 0;
+    // A page that reloads itself (profile switch, settings import) numbers
+    // its requests from 1 again: those are not the previous page's
+    recentRequestIds.clear();
     if (viewOnPanel) { panelStartup.loadStarted(); return; }
     showPanelPage();
     if (/^https?:\/\//i.test(url)) uxp.shell.openExternal(url).catch(() => {});
@@ -797,6 +851,17 @@ function attachView() {
   if (help) help.onclick = () => uxp.shell.openExternal(webViewHelpUrl).catch((error) => showStatus(String(error.message || error)));
   showPanelPage();
   return view;
+}
+
+// os.arch() says x64 on Apple chips too: the processor's name tells them apart
+// (Open in TypeR Studio's download)
+function processorArch() {
+  try {
+    const model = String((os.cpus()[0] || {}).model || "");
+    if (/apple/i.test(model)) return "arm64";
+    if (/intel/i.test(model)) return "x64";
+  } catch (error) {}
+  return os.arch();
 }
 
 /* ====================== Photoshop events ====================== */
@@ -843,17 +908,52 @@ keyboard.onChange((state) => post({ type: "keys", state }));
 // cursor and its tooltip opens; the addon reports the theft. And the panel's
 // own WebView: a click on a TextShapeR shape or a button keeps the focus
 // there, and unlike a CEP panel a WebView forwards no key to Photoshop; the
-// calls that change the document (evalScript) end with a restore. The focus
-// goes back to the document: bringToFront does that, from the modal scope it
-// needs as an action. Photoshop busy (a text being edited, a dialog): the
-// user's next click restores it, as before.
+// calls that change the document (evalScript) end with a restore, and the
+// page asks for one when the pointer leaves it (web/focus.js). Release the
+// native WebView before bringing Photoshop forward from a modal scope;
+// bringing the application forward alone does not release its WebView (macOS).
+// On Windows the WebView2 windows belong to msedgewebview2.exe and neither
+// UXP's blur nor bringToFront takes the focus out of them (the canvas click
+// does not always either, and the user switches documents to get the keys
+// back): the keyboard reader, asked through its state folder, sets it on
+// Photoshop's windows from outside if a WebView still holds it (typer-keys.cs,
+// ReleaseWebViewFocus). Nothing else moves the focus there, and a call
+// restores nothing while the page does not hold the focus: 3.0.2 and 3.0.3
+// gave the focus to an element of the panel's own DOM first, on every paste,
+// and a UXP panel that holds the focus on Windows keeps Photoshop's keys for
+// itself, so a paste by shortcut from the document killed the tool keys and
+// the actions' shortcuts until a click on the document. The page reports
+// whether it holds the focus and whether the user is typing in it
+// (focusState): a change made by a shortcut while typing keeps the caret.
+// Photoshop busy (a text being edited, a dialog): the user's next click
+// restores it, as before.
 let restoringFocus = false;
 let focusRestores = 0;
+let focusSkips = 0;
+let panelEditing = false;
+// Until the page says otherwise: web/focus.js reports as it starts, before
+// appReady, which therefore leaves this alone
+let panelFocused = true;
 
-async function restoreFocus() {
+// reason: "call" after a document change made from the panel, "panel" asked
+// by the page (its pointer left and nothing is being edited), "reader" for a
+// tooltip theft
+async function restoreFocus(reason) {
   if (restoringFocus) return;
+  const windowsWebView = !!(view && viewOnPanel && os.platform() === "win32");
+  if (reason === "call" && (panelEditing || (windowsWebView && !panelFocused))) {
+    focusSkips++;
+    return;
+  }
   restoringFocus = true;
   try {
+    // Blurring an HTML button only moves focus to the WebView's body.
+    // Release the native WebView too: bringToFront alone leaves it as the
+    // keyboard responder on macOS, swallowing Photoshop's tool shortcuts.
+    if (view && typeof view.blur === "function") view.blur();
+    if (windowsWebView) {
+      keysHelper.requestFocusRelease().catch((error) => debugNote("focus.request", String((error && error.message) || error)));
+    }
     await photoshop._internals.modal("TypeR", () => ps.app.bringToFront());
     focusRestores++;
   } catch (error) {
@@ -861,6 +961,14 @@ async function restoreFocus() {
   } finally {
     restoringFocus = false;
   }
+}
+
+// A restore asked outside a host call (the page, the keyboard reader) waits
+// in the call queue: run beside a call, its bringToFront makes the call's
+// commands fail. The calls restore the focus themselves (evalScript).
+const FOCUS_RESTORE_TIMEOUT_MS = 10 * 1000;
+function queueFocusRestore(reason) {
+  return enqueue(() => restoreFocus(reason), FOCUS_RESTORE_TIMEOUT_MS);
 }
 
 /* ========================= setup ========================= */
@@ -883,10 +991,21 @@ async function startOnce() {
   } catch (error) {
     console.error("TypeR: history listener", error);
   }
+  // A document opened: TypeR Studio may have left a script with it (app_src/studioScript.js).
+  // Apart from the CEP-style events, which every panel listener reacts to.
+  try {
+    await ps.action.addNotificationListener(["open"], () => post({ type: "documentOpened" }));
+  } catch (error) {
+    console.error("TypeR: open listener", error);
+  }
   try {
     document.theme.onUpdated.addListener(onThemeChanged);
   } catch (error) {}
-  keysHelper.start((line) => post({ type: "watcherLine", line }), restoreFocus).catch((error) => console.error("TypeR keys", error));
+  keysHelper.start(
+    (line) => post({ type: "watcherLine", line }),
+    () => queueFocusRestore("reader"),
+    (answer) => debugNote("focus.release", answer)
+  ).catch((error) => console.error("TypeR keys", error));
   services.removeStalePluginFolders().catch((error) => console.error("TypeR: plugin cleanup", error));
   services.removeUpdateFolder().catch((error) => console.error("TypeR: update cleanup", error));
   services.renameLegacyPanel().catch((error) => console.error("TypeR: Legacy panel name", error));
@@ -925,14 +1044,20 @@ uxp.entrypoints.setup({
       },
       show() {
         if (crashTrace) crashTrace.note("lifecycle", "panel show");
+        const wasVisible = panelVisible;
         attachView();
         panelVisible = true;
         panelStartup.setVisible(true);
+        // A panel may be created hidden long before the user opens it.
+        // Start a fresh visible grace period and invalidate old async reads.
+        if (!wasVisible && webViewAttempt) watchWebViewRefusal(viewGeneration, webViewAttempt);
+        recoverRenderer();
         post({ type: "visibility", hidden: false });
       },
       hide() {
         if (crashTrace) crashTrace.note("lifecycle", "panel hide");
         panelVisible = false;
+        refusalWatchGeneration++;
         panelStartup.setVisible(false);
         clearProbes();
         post({ type: "visibility", hidden: true });

@@ -90,6 +90,7 @@ new Function('require', 'module', 'exports', fs.readFileSync(filename, 'utf8'))(
 const load = createLoader({ photoshop: ps, './photoshop': port.exports });
 const smart = load('uxp-src/host/smartPaste.js');
 const { atlasParams, atlasMetrics, lineParams, measureEdges, clearMetricCache } = load('app_src/oneClick/measureSpec.js');
+const { typeResolution } = load('app_src/oneClick/textGraph.js');
 const style = { typeUnit: 'pixelsUnit', layerText: {
   textStyleRange: [{ textStyle: { size: 20, fontPostScriptName: 'ArialMT' } }],
   paragraphStyleRange: [{ paragraphStyle: { alignment: 'center' } }],
@@ -133,7 +134,7 @@ const measure = async requests => {
     reset();
     doc.resolution = dpi;
     const styled = { ...style, typeUnit: unit };
-    const params = atlasParams(edges, styled, 20, dpi);
+    const params = atlasParams(edges, styled, 20, typeResolution(styled, dpi));
     const original = copy(params);
     const reply = await measure([{ kind: 'atlas', count: 3, params }]);
     assert.ok(atlasMetrics(reply[0].path, 3, doc), unit + ' atlas must keep separate rows at ' + dpi + ' dpi');
@@ -165,5 +166,21 @@ const measure = async requests => {
   const result = await measureEdges(edges, { textProps: style, baseSize: 20, dpi: 72, page: doc, useAtlas: true }, measure);
   assert.strictEqual(result.cache.size, 3, 'The real engine retries failed atlases individually');
   assert.strictEqual(sim.rollbacks, 2, 'Both the failed atlas and its fallback are rolled back');
+  // A failed smart paste answers with a reason, whatever was thrown: the
+  // panel reads it, and a host call that throws instead is an "EvalScript
+  // error." the panel cannot tell from anything else
+  const { failureCode } = smart._internals;
+  assert.strictEqual(failureCode(Object.assign(new Error('Document changed'), { code: 'doc' })), 'doc');
+  assert.strictEqual(failureCode(new Error('anything')), 'error');
+  assert.strictEqual(failureCode(new TypeError('x is undefined')), 'error');
+  assert.strictEqual(failureCode(null), 'error');
+  assert.strictEqual(failureCode(new port.exports._internals.PhotoshopError({ _obj: 'make' }, { result: -25010, message: 'refused' })), 'photoshop');
+  assert.strictEqual(failureCode(Object.assign(new Error('numeric'), { code: -128 })), 'photoshop');
+  const savedDocuments = ps.app.documents;
+  ps.app.documents = { get length() { throw new Error('Photoshop is busy'); } };
+  const refused = JSON.parse(await smart.methods.smartPaste({ lines: [{ text: 'Bonjour.', style: { textProps: style } }], settings: {} }));
+  ps.app.documents = savedDocuments;
+  assert.strictEqual(refused.ok, false);
+  assert.strictEqual(typeof refused.code, 'string', 'smartPaste answers a code instead of throwing');
   console.log('UXP measurements passed: batched calls, mixed requests, DPI, fallback and history restoration');
 })().catch(error => { console.error(error); process.exitCode = 1; });

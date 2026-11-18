@@ -99,6 +99,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     currentLine: state.currentLine,
     interpretMarkdown: state.interpretMarkdown,
     textShapeRTuning: state.textShapeRTuning,
+    preserveTextShapeRSpaces: state.preserveTextShapeRSpaces,
     textShapeRBubbleAware: state.textShapeRBubbleAware,
     inlineTextShapeR: state.inlineTextShapeR,
     currentLineIndex: state.currentLineIndex,
@@ -136,6 +137,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     loadTextShapeREngine().then((engine) => {
       if (!active) return;
       engine.setDehyphenationEnabled(context.getState().dehyphenateTextShapeR === true);
+      engine.setPreserveTextShapeRSpaces(context.getState().preserveTextShapeRSpaces === true);
       engine.setTextShapeRInterfaceLanguage(getInterfaceLanguage(context.getState()));
       engine.setTextShapeRTuning(context.getState().textShapeRTuning);
       setTextShapeREngine(engine);
@@ -260,7 +262,10 @@ const PreviewBlock = React.memo(function PreviewBlock() {
     };
   }, [inlineLayerSource.text, inlineLayerSource.bounds, textShapeREngine]);
   const inlineTextShapeRVariants = React.useMemo(
-    () => textShapeREngine ? textShapeREngine.generateTextShapeRVariants(inlineLayerSource.text, {
+    () => {
+      if (!textShapeREngine) return [];
+      textShapeREngine.setPreserveTextShapeRSpaces(context.state.preserveTextShapeRSpaces === true);
+      return textShapeREngine.generateTextShapeRVariants(inlineLayerSource.text, {
       limit: 12,
       allowHyphenation: true,
       profile: "balanced",
@@ -268,10 +273,11 @@ const PreviewBlock = React.memo(function PreviewBlock() {
       width: inlineSelectionShape?.width,
       height: inlineSelectionShape?.height,
       calibration: inlineCalibration,
-    }) : [],
+    });
+    },
     // textShapeRTuning is not read here but changes the generator's scoring:
     // its module-level state is updated before the dispatch triggers this
-    [inlineLayerSource.text, inlineSelectionShape, inlineCalibration, context.state.textShapeRTuning, textShapeREngine]
+    [inlineLayerSource.text, inlineSelectionShape, inlineCalibration, context.state.preserveTextShapeRSpaces, context.state.textShapeRTuning, textShapeREngine]
   );
   const [inlineVariantPage, setInlineVariantPage] = React.useState(0);
   const inlinePageSize = 3;
@@ -1008,7 +1014,8 @@ const PreviewBlock = React.memo(function PreviewBlock() {
         // multi-bubble needs one selection at a time, so warn instead of
         // storing a selection spanning several outlines
         if (selection.multipleSelections) {
-          showShiftTip();
+          // A tool that was on "Add to selection" gets its own notice below
+          if (!selection.selectionModeReset) showShiftTip();
           return;
         }
         if (selection.multiSelection && selection.multiSelection.length > 0) {
@@ -1053,7 +1060,7 @@ const PreviewBlock = React.memo(function PreviewBlock() {
           addSelectionAndAdvance(trigger ? { ...cleanSelection, trigger } : cleanSelection);
         }
       }
-    });
+    }, () => context.dispatch({ type: "showNotice", text: locale.multiBubbleNewSelectionMode, kind: "warning" }));
   }, [context.state.multiBubbleMode, context.state.modalType, context.state.storedSelections, context.state.currentLineIndex, context.state.lines, showShiftTip]);
   selectionCheckCallbackRef.current = checkForSelectionChange;
 

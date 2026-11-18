@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const load = require('./helpers/loadAppModule')();
 const { validateReleasePackage, REQUIRED_PACKAGE_FILES } = load('app_src/releasePackage.js');
-const { installPackageFiles } = load('app_src/updateInstaller.js');
+const { installPackageFiles, inventoryNames, removeStaleBuildFiles } = load('app_src/updateInstaller.js');
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const decode = bytes => Buffer.from(bytes).toString('utf8');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'typer-release-safety-'));

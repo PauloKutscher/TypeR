@@ -85,3 +85,35 @@
         opacity: 0.75;
     }
 }
+
+// Open in TypeR Studio (components/footer/openInStudio.jsx)
+// A long label (Download TypeR Studio, in some languages) wraps instead of being cut
+.open-in-studio .settings-confirm-actions > button {
+    flex: 0 1 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: auto;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.open-in-studio-options {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    margin-bottom: 14px;
+    text-align: left;
+    &:empty {
+        display: none;
+    }
+    select {
+        width: 100%;
+    }
+}
+.open-in-studio-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+}

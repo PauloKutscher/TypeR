@@ -4,7 +4,7 @@ import "./stylesBlock.scss";
 import React from "react";
 import deepClone from "../../deepClone";
 import PropTypes from "prop-types";
-import { FiArrowRightCircle, FiPlus, FiFolderPlus, FiChevronDown, FiChevronUp, FiCopy, FiClipboard, FiTrash2, FiPlusSquare, FiEye, FiEyeOff, FiMinus, FiInfo, FiX } from "react-icons/fi";
+import { FiArrowRightCircle, FiPlus, FiFolderPlus, FiChevronDown, FiChevronUp, FiCopy, FiClipboard, FiTrash2, FiPlusSquare, FiEye, FiEyeOff, FiMinus, FiInfo, FiX, FiDownload } from "react-icons/fi";
 import { MdEdit, MdLock } from "react-icons/md";
 import { CiExport } from "react-icons/ci";
 
@@ -18,6 +18,11 @@ import { createFontPreviewRegistry, getFontPreviewFamily } from "../../fontPrevi
 import { notePerfRender } from "../../perfDebug";
 import { getStyleTextSize, normalizeStyleSizePresets, parseStyleSize, sanitizeStyleSizeInput, stepStyleSize } from "../../styleSizePresets";
 import { isStyleStrokeOn } from "../../styleStroke";
+import { setStyleImportReporter } from "../../styleImportReporter";
+
+// Loaded on first use, like the import code: neither is needed at startup
+const MissingFontsDialog = React.lazy(() => import(/* webpackChunkName: "missing-fonts" */ "../modal/missingFontsDialog"));
+const loadStyleImport = () => import(/* webpackChunkName: "style-import" */ "../../styleImport");
 
 const FontPreviewContext = React.createContext({ aliases: {}, css: "", revision: 0 });
 const emptyIdSet = new Set();
@@ -123,6 +128,21 @@ const StylesBlock = React.memo(function StylesBlock() {
     context.dispatch({ type: "setModal", modal: "editFolder", data: { create: true } });
     closeStyleContextMenu();
   }, [context.dispatch, closeStyleContextMenu]);
+
+  // The same import as Settings > Data, styles only: .json, .zip with fonts, .tpl
+  const importContextStyle = React.useCallback(() => {
+    closeStyleContextMenu();
+    loadStyleImport()
+      .then(({ importStyleFiles, reportStyleImport }) =>
+        importStyleFiles(context.dispatch).then((result) => reportStyleImport(result)))
+      .catch(() => nativeAlert(locale.importStyleError || locale.errorImportStyles, locale.errorTitle, true));
+  }, [context.dispatch, closeStyleContextMenu]);
+
+  const [missingFontsImport, setMissingFontsImport] = React.useState(null);
+  React.useEffect(() => setStyleImportReporter({
+    showMissingFonts: setMissingFontsImport,
+    onFonts: (fonts) => setInstalledFonts(fonts),
+  }), []);
 
   // Fonts are fetched once at panel startup: enumerating app.fonts blocks
   // Photoshop, and refreshing on focus used to swallow clicks on style items
@@ -241,7 +261,7 @@ const StylesBlock = React.memo(function StylesBlock() {
           role="menu"
           style={{
             left: Math.max(4, Math.min(styleContextMenu.x, window.innerWidth - 196)),
-            top: Math.max(4, Math.min(styleContextMenu.y, window.innerHeight - (styleContextMenu.type === "style" ? 216 : 116))),
+            top: Math.max(4, Math.min(styleContextMenu.y, window.innerHeight - (styleContextMenu.type === "style" ? 246 : 146))),
           }}
           onMouseDown={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}
@@ -273,6 +293,10 @@ const StylesBlock = React.memo(function StylesBlock() {
             <FiFolderPlus size={15} />
             <span>{locale.addFolder}</span>
           </button>
+          <button type="button" role="menuitem" onClick={importContextStyle}>
+            <FiDownload size={15} />
+            <span>{locale.importStyle || "Import a style"}</span>
+          </button>
           {styleContextMenu.type === "style" && (
             <React.Fragment>
               <div className="style-context-menu-separator hostBrdTopContrast" />
@@ -283,6 +307,15 @@ const StylesBlock = React.memo(function StylesBlock() {
             </React.Fragment>
           )}
         </div>
+      )}
+      {missingFontsImport && (
+        <React.Suspense fallback={null}>
+          <MissingFontsDialog
+            fonts={missingFontsImport.fonts}
+            message={missingFontsImport.message}
+            onClose={() => setMissingFontsImport(null)}
+          />
+        </React.Suspense>
       )}
       <div className="style-add hostBrdTopContrast style-btn-list">
         <button className="topcoat-button--large" onClick={() => context.dispatch({ type: "setModal", modal: "editFolder", data: { create: true } })}>
@@ -321,7 +354,11 @@ const getStyleDropLocation = (event) => {
     return { position, edge: position === "before" ? "top" : "bottom" };
   }
 
-  const position = event.clientX < rect.left + rect.width / 2 ? "before" : "after";
+  // In a right-to-left interface the row runs from the right: the left half
+  // of a style is the side of the styles that come after it
+  const rtl = window.getComputedStyle(list).direction === "rtl";
+  const onLeft = event.clientX < rect.left + rect.width / 2;
+  const position = onLeft !== rtl ? "before" : "after";
   const sibling = position === "before"
     ? event.currentTarget.previousElementSibling
     : event.currentTarget.nextElementSibling;
@@ -333,12 +370,14 @@ const getStyleDropLocation = (event) => {
   return {
     position,
     edge: isSameRow
-      ? (position === "before" ? "left" : "right")
+      ? (onLeft ? "left" : "right")
       : (position === "before" ? "top" : "bottom"),
   };
 };
 
 const FolderTree = React.memo(function FolderTree(props) {
+  // One array for every sibling: a new one per item would re-render them all
+  const siblingFolderIds = React.useMemo(() => (props.folders || []).map((item) => item.id), [props.folders]);
   if (!props.folders || !props.folders.length) return null;
   return (
     <div
@@ -359,7 +398,7 @@ const FolderTree = React.memo(function FolderTree(props) {
           direction={props.direction}
           showQuickStyleSize={props.showQuickStyleSize}
           styleSizeStep={props.styleSizeStep}
-          siblingFolderIds={props.folders.map((item) => item.id)}
+          siblingFolderIds={siblingFolderIds}
           parentId={props.parentId}
           onOpenStyleContextMenu={props.onOpenStyleContextMenu}
           onOpenFolderContextMenu={props.onOpenFolderContextMenu}
@@ -437,6 +476,8 @@ const FolderItem = React.memo(function FolderItem(props) {
     setDropActive(false);
     setStyleDropTarget(null);
     const styleId = getDraggedStyleId(e);
+    // The dragged item may be unmounted by this move, before its dragend
+    currentDraggingStyleId = null;
     if (!styleId) return;
     props.dispatch({ type: "moveStyleToFolder", id: styleId, folderId: props.data.id || null });
   }, [props.dispatch, props.data.id, props.parentId, props.siblingFolderIds, folderDropEdge]);
@@ -488,6 +529,8 @@ const FolderItem = React.memo(function FolderItem(props) {
     (e, targetStyleId) => {
       if (!hasStyleDragData(e)) return;
       const draggedStyleId = getDraggedStyleId(e);
+      // The dragged item may be unmounted by this move, before its dragend
+      currentDraggingStyleId = null;
       if (!draggedStyleId) return;
       e.preventDefault();
       e.stopPropagation();
@@ -769,7 +812,11 @@ const StyleItem = React.memo(function StyleItem(props) {
   };
   const scheduleCloseQuickSize = () => {
     if (quickCloseTimeout.current) clearTimeout(quickCloseTimeout.current);
-    quickCloseTimeout.current = setTimeout(() => setQuickOpen(false), 150);
+    quickCloseTimeout.current = setTimeout(() => {
+      setQuickOpen(false);
+      // The field only blurs when it had the focus: +/- alone never clear it
+      setQuickSizeOverride(null);
+    }, 150);
     if (quickWrapRef.current && quickWrapRef.current.contains(document.activeElement)) {
       document.activeElement.blur();
     }

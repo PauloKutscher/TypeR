@@ -58,6 +58,7 @@ MSG_STATUS_NEWER_EN="Installed version: {old}, newer than this archive ({new})"
 MSG_CHOOSE_UPDATE_EN="Which version of TypeR do you want to update or install?"
 MSG_UPDATED_EN="TypeR was updated: {old} → {new}"
 MSG_UXP_FAILED_EN="The installation failed. Close Photoshop and run this script again."
+MSG_UXP_DAMAGED_EN="The download of TypeR is damaged: run this script again."
 
 # —————————————————————————————————————————————————————————————
 # Messages en français
@@ -97,6 +98,7 @@ MSG_STATUS_NEWER_FR="Version installée : {old}, plus récente que cette archive
 MSG_CHOOSE_UPDATE_FR="Quelle version de TypeR voulez-vous mettre à jour ou installer ?"
 MSG_UPDATED_FR="TypeR a été mis à jour : {old} → {new}"
 MSG_UXP_FAILED_FR="L'installation a échoué. Fermez Photoshop et relancez ce script."
+MSG_UXP_DAMAGED_FR="Le téléchargement de TypeR est endommagé : relancez ce script."
 
 # —————————————————————————————————————————————————————————————
 # Messages en espagnol
@@ -136,6 +138,7 @@ MSG_STATUS_NEWER_ES="Versión instalada: {old}, más reciente que este archivo (
 MSG_CHOOSE_UPDATE_ES="¿Qué versión de TypeR quieres actualizar o instalar?"
 MSG_UPDATED_ES="TypeR se ha actualizado: {old} → {new}"
 MSG_UXP_FAILED_ES="La instalación falló. Cierra Photoshop y vuelve a ejecutar este script."
+MSG_UXP_DAMAGED_ES="La descarga de TypeR está dañada: vuelve a ejecutar este script."
 
 # —————————————————————————————————————————————————————————————
 # Messages en portugais
@@ -175,6 +178,7 @@ MSG_STATUS_NEWER_PT="Versão instalada: {old}, mais recente que este arquivo ({n
 MSG_CHOOSE_UPDATE_PT="Qual versão do TypeR você quer atualizar ou instalar?"
 MSG_UPDATED_PT="O TypeR foi atualizado: {old} → {new}"
 MSG_UXP_FAILED_PT="A instalação falhou. Feche o Photoshop e execute este script novamente."
+MSG_UXP_DAMAGED_PT="O download do TypeR está danificado: execute este script novamente."
 
 # —————————————————————————————————————————————————————————————
 # Affectation des messages en fonction de la langue
@@ -187,7 +191,7 @@ case "$LANGUAGE" in
 esac
 for name in CLOSE_PHOTOSHOP PRESS_KEY INSTALL_COMPLETE OPEN_PHOTOSHOP PRESS_ENTER CREDITS TYPERTOOLS DISCORD \
   TITLE PS_FOUND PS_NONE UXP_NAME UXP_DESC UXP_REQ UXP_TOO_OLD LEGACY_NAME LEGACY_DESC LEGACY_REQ LEGACY_ROSETTA RECOMMENDED KEYS CANCELLED \
-  CHOOSE CHOICE_PROMPT BOTH_INSTALLED UXP_DOWNLOAD UXP_INSTALLING UXP_COMPLETE UXP_COMPLETE_MANUAL UXP_FAILED \
+  CHOOSE CHOICE_PROMPT BOTH_INSTALLED UXP_DOWNLOAD UXP_INSTALLING UXP_COMPLETE UXP_COMPLETE_MANUAL UXP_FAILED UXP_DAMAGED \
   STATUS_UPDATE STATUS_CURRENT STATUS_NEWER CHOOSE_UPDATE UPDATED; do
   localized="MSG_${name}_${LANGUAGE_SUFFIX}"
   printf -v "MSG_$name" '%s' "${!localized}"

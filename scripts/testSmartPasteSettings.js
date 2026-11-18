@@ -92,8 +92,17 @@ for (const [stored, expected] of [[0.5, 0.5], [1, 1], [1.5, 1.5], [0, 0.5], [2, 
 for (const mode of ["auto", "fr", "en", "off"]) {
   assert.strictEqual(loadContext({ smartPasteHyphenation: mode }).initial.smartPasteHyphenation, mode);
 }
-for (const bad of ["FR", "de", 1, null, true, { mode: "fr" }, "toString"]) {
+for (const bad of ["FR", "TR", "ja", "nl", 1, null, true, { mode: "fr" }, "toString"]) {
   assert.strictEqual(loadContext({ smartPasteHyphenation: bad }).initial.smartPasteHyphenation, "auto");
+}
+// Each language of Settings > Hyphenation has its name in the interface
+{
+  const { HYPHENATION_LANGUAGES } = load("app_src/oneClick/hyphenationLanguages.js");
+  const english = require("fs").readFileSync(require("path").join(__dirname, "../locale/messages.properties"), "utf8");
+  for (const code of HYPHENATION_LANGUAGES) {
+    const key = "settingsHyphenation" + code.charAt(0).toUpperCase() + code.slice(1);
+    assert.ok(new RegExp("^" + key + "=.+", "m").test(english), key);
+  }
 }
 
 // Refont rules are normalized through the shared engine helper
@@ -190,7 +199,8 @@ for (const bad of ["FR", "de", 1, null, true, { mode: "fr" }, "toString"]) {
   assert.strictEqual(reducer(initial, { type: "setSmartPasteMinScale", value: "bogus" }).smartPasteMinScale, 0.75);
 
   assert.strictEqual(reducer(initial, { type: "setSmartPasteHyphenation", value: "off" }).smartPasteHyphenation, "off");
-  assert.strictEqual(reducer(initial, { type: "setSmartPasteHyphenation", value: "es" }).smartPasteHyphenation, "auto");
+  assert.strictEqual(reducer(initial, { type: "setSmartPasteHyphenation", value: "tr" }).smartPasteHyphenation, "tr");
+  assert.strictEqual(reducer(initial, { type: "setSmartPasteHyphenation", value: "klingon" }).smartPasteHyphenation, "auto");
 
   state = reducer(initial, {
     type: "setRefontRules",
