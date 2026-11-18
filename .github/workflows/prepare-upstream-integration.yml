@@ -126,7 +126,12 @@ jobs:
           printf '\n## Protected implementation files\n' >> docs/upstream-merge-review-2026-11-18.md
           printf -- '- `%s`\n' "${protected[@]}" >> docs/upstream-merge-review-2026-11-18.md
           git add docs/upstream-merge-review-2026-11-18.md
-          git diff --cached --check
+          # Report upstream whitespace/CRLF issues without rewriting existing code.
+          git -c core.whitespace=cr-at-eol diff --cached --check > /tmp/typer-whitespace.log 2>&1 || true
+          if [ -s /tmp/typer-whitespace.log ]; then
+            echo 'Whitespace warnings (existing upstream formatting):'
+            tail -35 /tmp/typer-whitespace.log
+          fi
           echo 'Staged files:'
           git diff --cached --stat | tail -40
           git commit -m 'WIP: stage upstream develop integration; preserve fork centering for A/B validation'
