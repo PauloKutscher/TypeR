@@ -13,7 +13,7 @@ A branch de integração reúne a fork PauloKutscher/TypeR em 74eb9c7, a develop
 | Smart Paste, TextShapeR e host Photoshop | 2f0fe12, 9bbd066, ce016f4, 007f7e1, 3b166cc, 59b939c, daa88fd, 921a60a, b25146d, a66fd2d, bc1dc67, 68709eb, 97cf33d | Integradas as resoluções de tamanho/unidades, espaços, idiomas, leitura de caminhos, documento já aberto, histórico e seleção. O planejamento e o encaixe de colagem da fork foram preservados. A mudança em Center aproveita o cálculo óptico de 97cf33d com o enquadramento da fork; o alvo integral do upstream e as alterações dependentes desse alvo ficaram fora da centralização de produção. |
 | Armazenamento | 785c464, e15fcc3 | Retries e avisos de escrita tardia no painel. O cache de perfil permanece compatível com a fork. |
 | Documentação | 3eaf370, 7a811d3 | Ajuda e histórico revistos com as notas do upstream. |
-| Versões upstream | d0e2960, de183b7, 43b581c | Histórico incorporado. A versão dos artefatos continua 3.0.3.7 até uma publicação da fork. |
+| Versões upstream | d0e2960, de183b7, 43b581c | Histórico incorporado. Os artefatos ficaram em 3.0.3.7 durante a integração. A publicação da fork usa 3.0.4. |
 | Importação de estilos | e50bab5, 4623a96 | Módulo compartilhado e entradas no Settings, no editor de estilo e no menu da biblioteca. |
 
 ## Centralização medida no Photoshop

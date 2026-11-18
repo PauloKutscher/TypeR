@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 3.0.4 — PauloKutscher fork
+
+- Integrate the upstream development changes, including TypeR Studio, ZIP style imports, settings export, translations and UXP storage recovery.
+- Keep the fork’s chamber and frame in Center and refine the target with the upstream optical centre when both agree. The final CEP build passed the native Photoshop comparison.
+- Fix Smart Paste with repeated spaces, connected triple bubbles, explicit text units and rollback when Photoshop history is full.
+- Improve UXP keyboard focus and Caps Lock handling. Keep the native Windows keyboard addon and the in-panel fallback for unavailable WebViews.
+- Verify installer package checksums and keep the existing Windows update and recovery paths.
+
 ## 3.0.3.7 — PauloKutscher fork
 
 - Merge upstream `6f2e380`: add an in-panel fallback for refused or unavailable UXP WebViews and WebP import in UXP. Preserve the fork's native Windows keyboard addon and offline Windows package swap; omit the upstream DLL patch after Kaspersky detected and deleted its script during integration.
