@@ -179,6 +179,16 @@ const linesInside = (session) => {
   assert.strictEqual(single.sessions[0].text.params.layerText.paragraphStyleRange[0].paragraphStyle.alignment, "center");
   linesInside(single.sessions[0]);
 
+  // A double space typed in the script is a break like any other: the same
+  // line count and size as with single spaces
+  const doubled = ellipseNodes(600, 500, 95, 110);
+  const doubledInput = { source: "wand", click: { x: 600, y: 500 }, selectionBounds: boundsOf(geometry.flatten(doubled)), rawPath: pathOf([doubled]), fill: white };
+  const breaksOf = async (text) => {
+    const out = await prepareSmartPaste({ trigger: { source: "wand" }, lines: [line(text)], roleStyles: {}, settings: { hyphenation: "off", minScale: 0.7 } }, adapterFor(doubledInput));
+    return { size: out.sessions[0].text.size, lines: out.sessions[0].text.params.layerText.textKey.split("\r").map((row) => row.replace(/ +/g, " ")) };
+  };
+  assert.deepStrictEqual(await breaksOf("Je ne pensais  vraiment pas te  revoir ici."), await breaksOf("Je ne pensais vraiment pas te revoir ici."), "double spaces break like single ones");
+
   // A small bubble shrinks the text, never below 70%
   const small = ellipseNodes(300, 300, 95, 70);
   const smallInput = { source: "wand", click: { x: 300, y: 300 }, selectionBounds: boundsOf(geometry.flatten(small)), rawPath: pathOf([small]), fill: white };
@@ -638,11 +648,19 @@ const linesInside = (session) => {
   }, adapterFor(tripleInput));
   assert.strictEqual(triple.consumed, 3, "three chambers");
   assert.ok(triple.sessions[0].text.axis > triple.sessions[1].text.axis && triple.sessions[1].text.axis > triple.sessions[2].text.axis, "right to left");
-  // Clicked in the left chamber: that one first, then the others right to left
+  // Clicked in the left chamber, an end of the chain: the lines follow the
+  // chain, the neighbour before the far chamber, even in a manga
   const tripleFromLeft = await prepareSmartPaste({
     trigger: { source: "wand" }, lines: [line("Un."), line("Deux."), line("Trois.")], roleStyles: {}, settings: { distribute: true },
   }, adapterFor({ ...tripleInput, click: { x: 300, y: 400 } }));
-  assert.deepStrictEqual(tripleFromLeft.sessions.map((s) => Math.round(s.plan.selection.xMid / 240)), [1, 3, 2], "clicked chamber, then right, then middle");
+  assert.deepStrictEqual(tripleFromLeft.sessions.map((s) => Math.round(s.plan.selection.xMid / 240)), [1, 2, 3], "clicked chamber, then its neighbour, then the far one");
+  // Clicked in the middle chamber: the two others in reading order
+  for (const [readingOrder, expected] of [["rtl", [2, 3, 1]], ["ltr", [2, 1, 3]]]) {
+    const fromMiddle = await prepareSmartPaste({
+      trigger: { source: "wand" }, lines: [line("Un."), line("Deux."), line("Trois.")], roleStyles: {}, settings: { distribute: true, readingOrder },
+    }, adapterFor({ ...tripleInput, click: { x: 540, y: 400 } }));
+    assert.deepStrictEqual(fromMiddle.sessions.map((s) => Math.round(s.plan.selection.xMid / 240)), expected, "middle chamber first, then " + readingOrder);
+  }
   // A comic or a manhwa reads left to right
   const comic = await prepareSmartPaste({
     trigger: { source: "wand" }, lines: [line("Un."), line("Deux."), line("Trois.")], roleStyles: {}, settings: { distribute: true, readingOrder: "ltr" },

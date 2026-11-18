@@ -264,11 +264,25 @@ function readLocaleStrings() {
   const locales = mirrorFiles ? mirrorFiles.locales : {};
   let language = "auto";
   try {
-    language = JSON.parse(mirrorFiles.files.storage || "{}").language || "auto";
+    // The language is a setting of the active profile (app_src/profileStorage.js)
+    const stored = mirrorFiles.files;
+    let storage = "storage";
+    try {
+      const profile = "storage_profile_" + String(JSON.parse(stored.storage_profiles || "{}").activeProfileId || "");
+      if (profile !== "storage_profile_default" && typeof stored[profile] === "string") storage = profile;
+    } catch (registryError) {}
+    language = JSON.parse(stored[storage] || "{}").language || "auto";
   } catch (error) {}
   if (language === "auto") language = uxp.host.uiLocale || "en_US";
   const strings = parse(locales["locale/messages.properties"]);
-  Object.assign(strings, parse(locales["locale/" + language + "/messages.properties"]));
+  let file = "locale/" + language + "/messages.properties";
+  if (typeof locales[file] !== "string" && !/^en/i.test(language)) {
+    // No folder for this country: one of the same language (Photoshop's
+    // "es_ES" and "es_MX" read "es_SP"), as the panel does (localeBundle.js)
+    const prefix = "locale/" + String(language).slice(0, 2).toLowerCase() + "_";
+    file = Object.keys(locales).find((name) => name.toLowerCase().indexOf(prefix) === 0) || file;
+  }
+  Object.assign(strings, parse(locales[file]));
   return strings;
 }
 

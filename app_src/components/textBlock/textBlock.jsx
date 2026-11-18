@@ -214,7 +214,7 @@ const TextBlock = React.memo(function TextBlock() {
   }, []);
 
   React.useEffect(() => {
-    scrollToLine(context.state.currentLineIndex, 1000);
+    return scrollToLine(context.state.currentLineIndex, 1000);
   }, [context.state.currentLineIndex]);
 
   const ignoreTags = React.useMemo(

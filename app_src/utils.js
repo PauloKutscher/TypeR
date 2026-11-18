@@ -1,6 +1,7 @@
 import { fetchBody } from "./network";
 import { createLatestTaskQueue } from "./latestTaskQueue";
-import { mergeLocaleBundle } from "./localeBundle";
+import { findLocaleFallback, mergeLocaleBundle } from "./localeBundle";
+import config from "./config";
 import { readJsonStorage, writeJsonStorage, reportStorageIssue } from "./storageIO";
 import "./lib/CSInterface";
 import { parseMarkdownRuns, convertHtmlToMarkdown } from "./markdownConvert";
@@ -421,6 +422,10 @@ const initLocale = () => {
   loadLocaleFile(`${path}/locale/messages.properties`);
   baseLocale = Object.assign({}, locale);
   locale = mergeLocaleBundle(locale, automatic);
+  // "Auto" in a Photoshop whose language has no folder of its own country
+  const uiLocale = csInterface.hostEnvironment && csInterface.hostEnvironment.appUILocale;
+  const fallback = findLocaleFallback(uiLocale, Object.keys(config.languages).filter((id) => id !== "auto" && id !== "en_US"));
+  if (fallback) loadLocaleFile(`${path}/locale/${fallback}/messages.properties`);
   const lang = readStorage("language");
   if (lang && lang !== "auto") {
     const file = lang === "en_US" ? `${path}/locale/messages.properties` : `${path}/locale/${lang}/messages.properties`;
@@ -1189,21 +1194,47 @@ const resizeTextArea = (defer = false) => {
   }
 };
 
+// Scrolls the script sheet so that the line sits a few rows under its top.
+// The sheet (.text-block, the parent of .text-lines) is scrolled by itself:
+// scrollIntoView() also scrolls every ancestor and, in the new TypeR's
+// WebView, left the sheet where it was after a paste (3.0.1). The row's top
+// comes from the row when it is mounted, from the row layout otherwise (rows
+// far from the view are not rendered), and the scroll is set again on the
+// next frame, after a textarea resize or a caret reveal that follows it.
+const SCROLL_CONTEXT_LINES = 5;
+const scriptRowTop = (textLines, index) => {
+  const row = textLines.querySelector(`.text-line[data-line-index="${index}"]`);
+  if (row) return row.offsetTop;
+  const layout = textLines.__typerRowLayout;
+  if (layout && layout.offsets && layout.offsets[index] != null) {
+    return layout.offsets[index] + (parseFloat(getComputedStyle(textLines).paddingTop) || 0);
+  }
+  return null;
+};
 const scrollToLine = (lineIndex, delay = 100) => {
-  lineIndex = lineIndex < 5 ? 0 : lineIndex - 5;
-  setTimeout(() => {
-    const line = document.querySelector(`.text-line[data-line-index="${lineIndex}"]`);
-    if (line) {
-      line.scrollIntoView();
-      return;
-    }
+  let cancelled = false;
+  const current = Math.max(0, Number(lineIndex) || 0);
+  const target = Math.max(0, current - SCROLL_CONTEXT_LINES);
+  const scroll = () => {
+    if (cancelled) return false;
     const textLines = document.querySelector(".text-lines");
-    const layout = textLines && textLines.__typerRowLayout;
-    const scrollContainer = textLines && textLines.parentElement;
-    if (layout && scrollContainer && layout.offsets[lineIndex] != null) {
-      scrollContainer.scrollTop = layout.offsets[lineIndex];
+    const sheet = textLines && textLines.parentElement;
+    if (!sheet) return false;
+    let top = scriptRowTop(textLines, target);
+    if (top == null) return false;
+    // Wrapped context rows must not push the current line below the sheet.
+    const currentTop = scriptRowTop(textLines, current);
+    if (currentTop != null && sheet.clientHeight > 0) {
+      top = Math.max(top, currentTop - Math.floor(sheet.clientHeight / 2));
     }
+    sheet.scrollTop = Math.max(0, Math.round(top));
+    return true;
+  };
+  const timer = setTimeout(() => {
+    if (!scroll()) return;
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(scroll);
   }, delay);
+  return () => { cancelled = true; clearTimeout(timer); };
 };
 
 const scrollToStyle = (styleId, delay = 100) => {

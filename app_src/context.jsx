@@ -22,7 +22,7 @@ import { useKeyboardAccessPrompt } from "./keyboardAccess";
 import { useUxpPlatformPackage } from "./uxpPlatformPackage";
 import { TAB_FIELDS, createTab, migrateTabStorage, moveTab } from "./tabStorage";
 import { applyAutoTabNames, getNextDefaultTabName } from "./tabNames";
-import { getInterfaceLanguage } from "./interfaceLanguage";
+import { getInterfaceDirection, getInterfaceLanguage } from "./interfaceLanguage";
 import { loadTextShapeREngine } from "./textShapeREngineLoader";
 import {
   cycleStyleSizePreset,
@@ -572,6 +572,8 @@ const baseReducer = (state, action) => {
           };
         }
       }
+      // A paste at a linked page boundary keeps the line but still reveals it.
+      thenScroll = true;
       if (action.add && newState.currentLine.last) break;
       let newIndex = state.currentLineIndex;
       for (let i = newIndex + 1; i < state.lines.length; i++) {
@@ -580,7 +582,6 @@ const baseReducer = (state, action) => {
           break;
         }
       }
-      thenScroll = true;
       thenSelectStyle = true;
       break;
     }
@@ -1993,13 +1994,15 @@ const ContextProvider = React.memo(function ContextProvider(props) {
     }, 75);
     return () => clearTimeout(timer);
   }, [state.stylePrefixRefreshVersion]);
+  // The text fields follow the text direction (textBlock); the panel itself
+  // follows its interface language
   React.useEffect(() => {
-    const direction = state.direction === "rtl" ? "rtl" : "ltr";
+    const direction = getInterfaceDirection(state);
     document.documentElement.setAttribute("dir", direction);
     if (document.body) {
       document.body.setAttribute("dir", direction);
     }
-  }, [state.direction]);
+  }, [state.language]);
   React.useEffect(() => {
     applyThemeState({
       editorTheme: state.editorTheme,
