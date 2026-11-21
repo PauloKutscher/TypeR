@@ -104,7 +104,7 @@ const makeHost = ({ deferredHistory = false, publishOnSelect = true } = {}) => {
       return { bounds: { width: 100, height: 120 }, rows: [{ width: 1 }], scan: "path" };
     },
   });
-  ["_sameIds", "_suspendedHistoryIndex", "_withTemporaryHistory", "getCurrentSelectionShape", "getActiveLayerBubbleShape", "_smartPageLeak", "smartPasteCapture", "smartPasteMeasure"].forEach((name) => {
+  ["_sameIds", "_suspendedHistoryIndex", "_withTemporaryHistory", "getCurrentSelectionShape", "getActiveLayerBubbleShape", "_smartPageLeak", "_smartInteriorHistograms", "smartPasteCapture", "smartPasteMeasure"].forEach((name) => {
     vm.runInContext(extract(name), context);
   });
   return {

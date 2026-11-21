@@ -484,7 +484,12 @@ function Write-TypeRAtomicBytes([string]$Path, [byte[]]$Bytes) {
     try {
         $Stream = [IO.File]::Open($Temporary, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
         try { $Stream.Write($Bytes, 0, $Bytes.Length); $Stream.Flush($true) } finally { $Stream.Dispose() }
-        if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($Temporary, $Path, [NullString]::Value) }
+        if (Test-Path -LiteralPath $Path) {
+            for ($Attempt = 0; $true; $Attempt++) {
+                try { [IO.File]::Replace($Temporary, $Path, [NullString]::Value); break }
+                catch [IO.IOException] { if ($Attempt -ge 9) { throw }; Start-Sleep -Milliseconds 50 }
+            }
+        }
         else { [IO.File]::Move($Temporary, $Path) }
     } finally {
         if (Test-Path -LiteralPath $Temporary) { Remove-Item -LiteralPath $Temporary -Force }
