@@ -11,6 +11,7 @@ import {
 import { getScaledStyle, resolveStylePointText } from "./textLayerPayload";
 import { parsePageMarker } from "./pageMarker";
 import { prepareSmartPaste } from "./oneClick/smartPaste";
+import { STROKE_SAMPLE_INSET } from "./oneClick/smartStroke";
 import { rememberAutoSizeReference, normalizeAutoSizeVariation, normalizeAutoSizeScale } from "./oneClick/autoFontSize";
 import { leakClick, captureSource, fillFromHistograms, triggerClick } from "./oneClick/bubblePlan";
 import { applyRefont, refontTextStyle } from "./oneClick/refont";
@@ -197,7 +198,7 @@ const histogramFill = (histograms) => {
 
 const cepAdapter = (request) => ({
   capture: async (trigger) => {
-    const raw = await evalHost("smartPasteCapture(" + JSON.stringify({ trigger, keepSize: !!request.settings.keepSize }) + ")");
+    const raw = await evalHost("smartPasteCapture(" + JSON.stringify({ trigger, keepSize: !!request.settings.keepSize, strokeInset: STROKE_SAMPLE_INSET }) + ")");
     const data = safeJsonParse(raw, { error: "error" });
     if (data.error) throw Object.assign(new Error(data.error), { code: data.error });
     const source = captureSource(trigger, data.rawPath);
@@ -213,11 +214,13 @@ const cepAdapter = (request) => ({
     const point = data.leak ? leakClick(trigger, data.resolution) : null;
     if (point) {
       const page = { width: data.width, height: data.height, resolution: data.resolution };
-      const local = safeJsonParse(await evalHost("smartPasteCapture(" + JSON.stringify({ trigger, local: localWindow(page, point).polygon }) + ")"), { error: "error" });
+      const local = safeJsonParse(await evalHost("smartPasteCapture(" + JSON.stringify({ trigger, local: localWindow(page, point).polygon, strokeInset: STROKE_SAMPLE_INSET }) + ")"), { error: "error" });
       const region = !local.error && local.rawPath ? localRegion(local.rawPath, page, point) : null;
       // The click of a manual Paste is the last one seen: it must still lie
       // in the selection
       if (region || trigger.source === "wand") {
+        captured.histograms = local.histograms;
+        captured.strokeHistograms = local.strokeHistograms;
         captured.openPlan = localPlan({ documentId: data.documentId, click: point, selectionBounds: data.selectionBounds }, region || discRegion(page, point),
           local.error ? null : histogramFill(local.histograms), { autoClean: !!request.settings.autoClean });
       }

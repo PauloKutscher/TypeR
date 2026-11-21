@@ -47,6 +47,24 @@ for (const stroke of [undefined, null, { ...style.stroke, enabled: false }, { ..
 assert.strictEqual(applySmartStroke({ ...style, stroke: { ...style.stroke, smart: false, invertOnDark: true } }, pixels(() => 40), plan).plan, plan, 'Disabling Smart stroke bypasses inversion');
 assert.strictEqual(applySmartStroke(style, pixels(x => x < 120 ? 20 : 230), plan).style.stroke, style.stroke);
 assert.strictEqual(applySmartStroke(style, {}, plan).style, style);
+const thinArtwork = pixels((x, y) => (Math.abs(y - 0.5 * x - 57) < 3 ? 110 : 249));
+const caughtFrame = pixels((x, y) => (x < 28 || y < 27 || x > 211 || y > 212 ? 40 : 250));
+assert.strictEqual(strokeBackground(thinArtwork, plan), 'mixed', 'Interior artwork on paper-white still needs contrast');
+assert.strictEqual(strokeBackground(caughtFrame, plan), 'light', 'The edge of a white balloon must not add stroke');
+const transparentPreset = { ...style, stroke: { smart: true, enabled: false, size: 0 } };
+for (const preset of [{}, transparentPreset]) {
+  const applied = applySmartStroke(preset, thinArtwork, plan);
+  assert.strictEqual(applied.style.stroke.enabled, true);
+  assert.strictEqual(applied.style.stroke.size, 3);
+}
+const manuallyDisabled = { ...style, stroke: { ...style.stroke, enabled: false } };
+assert.strictEqual(applySmartStroke(manuallyDisabled, thinArtwork, plan).style, manuallyDisabled);
+const fullHistogram = Array(256).fill(0);
+fullHistogram[0] = 400;
+fullHistogram[255] = 600;
+const whiteInterior = Array(256).fill(0);
+whiteInterior[255] = 400;
+assert.strictEqual(strokeBackground({ histograms: [fullHistogram], strokeHistograms: [whiteInterior] }, plan), 'light', 'CEP uses the interior before the whole selection');
 assert.doesNotThrow(() => applySmartStroke({}, pixels(() => 230), plan));
 const disabled = { stroke: { ...style.stroke, smart: false } };
 assert.strictEqual(applySmartStroke(disabled, pixels(() => 230), plan).style, disabled);

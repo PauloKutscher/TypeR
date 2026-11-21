@@ -58,6 +58,43 @@ const boxOf = (descriptor) => {
 
 /* ======================== capture ======================== */
 
+function samplePixels(pixels, components, bounds) {
+  if (!pixels || !bounds || components < 1) return null;
+  const width = bounds.right - bounds.left;
+  const height = bounds.bottom - bounds.top;
+  if (width * height * components !== pixels.length) return null;
+  return ([x, y]) => {
+    const left = Math.floor(x) - bounds.left;
+    const top = Math.floor(y) - bounds.top;
+    if (left < 0 || top < 0 || left >= width || top >= height) throw new Error("Outside the bubble crop");
+    const at = (top * width + left) * components;
+    const red = pixels[at];
+    return { red, green: components === 1 ? red : pixels[at + 1], blue: components === 1 ? red : pixels[at + 2] };
+  };
+}
+
+async function sampleLocalStroke(doc, page, plan) {
+  if (!ps.imaging || !ps.imaging.getPixels || !plan?.selection || plan.autoClean) return null;
+  const b = plan.selection;
+  const crop = { left: Math.max(0, Math.floor(b.left)), top: Math.max(0, Math.floor(b.top)),
+    right: Math.min(page.width, Math.ceil(b.right)), bottom: Math.min(page.height, Math.ceil(b.bottom)) };
+  try {
+    return await modal("TypeR Read Local Background", async () => {
+      const result = await ps.imaging.getPixels({ documentID: doc.id, sourceBounds: crop, componentSize: 8, colorSpace: "RGB" });
+      try {
+        if (result.level) return null;
+        const pixels = new Uint8Array(await result.imageData.getData({ chunky: true }));
+        return samplePixels(pixels, result.imageData.components, result.sourceBounds || crop);
+      } finally {
+        result.imageData.dispose();
+      }
+    });
+  } catch (sampleError) {
+    return null;
+  }
+}
+
+
 async function captureSelection(trigger, wants) {
   if (!hasDocument()) throw Object.assign(new Error("No document"), { code: "doc" });
   if (trigger && trigger.documentKey && trigger.documentKey !== photoshop.methods.getTypeRDocumentKey()) throw Object.assign(new Error("Document changed"), { code: "doc" });
@@ -132,21 +169,7 @@ async function captureSelection(trigger, wants) {
       rawPath = replies[1];
     }, { rollback: true });
   });
-  let sample = null;
-  if (pixels && pixelBounds) {
-    const width = pixelBounds.right - pixelBounds.left;
-    const height = pixelBounds.bottom - pixelBounds.top;
-    if (width * height * components === pixels.length && components >= 1) {
-      sample = (point) => {
-        const x = Math.floor(point[0]) - pixelBounds.left;
-        const y = Math.floor(point[1]) - pixelBounds.top;
-        if (x < 0 || y < 0 || x >= width || y >= height) throw new Error("Outside the bubble crop");
-        const at = (y * width + x) * components;
-        const red = pixels[at];
-        return { red, green: components === 1 ? red : pixels[at + 1], blue: components === 1 ? red : pixels[at + 2] };
-      };
-    }
-  }
+  let sample = samplePixels(pixels, components, pixelBounds);
   let fill = null;
   if (sample && mask) {
     try {
@@ -168,6 +191,7 @@ async function captureSelection(trigger, wants) {
       openPlan = await recoverLocalRegion(doc, page, leakPoint, selectionBounds, wants, trigger.source === "wand");
     }
   }
+  if (openPlan) sample = await sampleLocalStroke(doc, page, openPlan);
   return {
     openPlan,
     documentId: doc.id,
@@ -435,20 +459,7 @@ function placeText(session, pointText) {
   if (text.autoWrap) {
     host._placeLayerInRect(plan.selection, true, text.pad);
   } else if (!pointText) {
-    const before = layerInk();
-    host._changeToBoxText();
-    const after = layerInk();
-    if (before && after) {
-      // The box must not re-wrap the composed lines; point text otherwise
-      if (Math.abs(before.right - before.left - (after.right - after.left)) > 1.5 ||
-          Math.abs(before.bottom - before.top - (after.bottom - after.top)) > 1.5) {
-        host._changeToPointText();
-        const back = layerInk();
-        if (back) translateLayer(before.left - back.left, before.top - back.top);
-      } else {
-        translateLayer(before.left - after.left, before.top - after.top);
-      }
-    }
+    host._smartConvertToParagraph();
   }
   let ink = layerInk();
   if (!text.autoWrap && !inkFits(plan, ink, text.pad) && ink) {

@@ -1,7 +1,7 @@
 // A style's stroke can be switched off with a shortcut: it keeps its size and
 // color, and the host skips it while enabled is false.
 
-const DEFAULT_SIZE = 3;
+export const DEFAULT_STYLE_STROKE = { enabled: true, size: 3, opacity: 100, position: "outer", color: { r: 255, g: 255, b: 255 } };
 
 export const isStyleStrokeOn = (style) => {
   const stroke = style && style.stroke;
@@ -14,7 +14,7 @@ export const toggleStyleStroke = (style) => {
   if (!(stroke.size > 0)) {
     return {
       ...style,
-      stroke: { opacity: 100, position: "outer", color: { r: 255, g: 255, b: 255 }, ...stroke, enabled: true, size: DEFAULT_SIZE },
+      stroke: { ...DEFAULT_STYLE_STROKE, ...stroke, enabled: true, size: DEFAULT_STYLE_STROKE.size },
     };
   }
   return { ...style, stroke: { ...stroke, enabled: !isStyleStrokeOn(style) } };

@@ -4258,7 +4258,7 @@ module.exports = {
   _internals: {
     play, get, modal, suspendHistory, jamText, PhotoshopError, _hostState, _getLayerStroke, _getLayerText, _setTextContentsOnly,
     // smart paste (uxp-src/host/smartPaste.js)
-    _makeTextLayer, _applyMiddleEast, _changeToBoxText, _changeToPointText, _setLayerStroke, _getActiveLayerId,
+    _makeTextLayer, _applyMiddleEast, _changeToBoxText, _changeToPointText, _smartConvertToParagraph, _setLayerStroke, _getActiveLayerId,
     _placeLayerInRect,
     _layerIsTextLayer, _getTextLayerSize, _getTextLayerUnit, _getFontList,
     _getCurrentTextLayerBounds, _getCurrentSelectionBounds, _getActiveHistoryIndex,

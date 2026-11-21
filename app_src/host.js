@@ -7113,6 +7113,26 @@ function _smartIntersectPolygon(polygon) {
   executeAction(stringIDToTypeID("intersectWith"), desc, DialogModes.NO);
 }
 
+function _smartInteriorHistograms(inset) {
+  if (!(inset > 0 && inset < 0.5)) return [];
+  var bounds = _liveSelectionBounds();
+  if (!bounds) return [];
+  var x = bounds.width * inset;
+  var y = bounds.height * inset;
+  if (bounds.width - 2 * x < 8 || bounds.height - 2 * y < 8) return [];
+  var saved = _saveSelectionState();
+  if (!saved.stored) return [];
+  try {
+    _intersectSelectionWithRect({ left: bounds.left + x, top: bounds.top + y, right: bounds.right - x, bottom: bounds.bottom - y });
+    return _liveSelectionBounds() ? _smartSelectionHistograms() : [];
+  } catch (sampleError) {
+    return [];
+  } finally {
+    _restoreSelectionState(saved, false);
+  }
+}
+
+
 function smartPasteCapture(data) {
   if (!app.documents.length) return jamJSON.stringify({ error: "doc" });
   if (data && data.trigger && data.trigger.documentKey && data.trigger.documentKey !== getTypeRDocumentKey()) return jamJSON.stringify({ error: "doc" });
@@ -7160,17 +7180,19 @@ function smartPasteCapture(data) {
     if (local) _smartIntersectPolygon(local);
     // Histograms first: making the work path consumes the selection
     var histograms = _smartSelectionHistograms();
+    var strokeHistograms = _smartInteriorHistograms(data && data.strokeInset);
     var path = null;
     if (needsPath) {
       _makeWorkPathFromSelection(2.0);
       path = _smartReadWorkPath();
     }
-    return { path: path, histograms: histograms };
+    return { path: path, histograms: histograms, strokeHistograms: strokeHistograms };
   }, { discardRedo: true });
   if (!read || read.error) return jamJSON.stringify({ error: "shape" });
   if (needsPath && !read.path) return jamJSON.stringify({ error: "shape" });
   result.rawPath = read.path;
   result.histograms = read.histograms || [];
+  result.strokeHistograms = read.strokeHistograms || [];
   return jamJSON.stringify(result);
 }
 
