@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 3.0.5 — PauloKutscher fork
+
+- Preserve paragraph boxes in UXP Smart Paste when Photoshop's initial frame is too narrow.
+- Add a default smart stroke on mixed backgrounds for presets without a configured stroke. Sample the interior to ignore stray balloon borders.
+- Refine Smart Paste placement with measured glyph bounds and a guarded move toward the neck of connected balloons.
+- Improve Center's optical target and use the shared contour split in UXP. Retry suspicious automatic wand selections only when the alternative can fit the text.
+
+
 ## 3.0.4 — PauloKutscher fork
 
 - Integrate the upstream development changes, including TypeR Studio, ZIP style imports, settings export, translations and UXP storage recovery.
