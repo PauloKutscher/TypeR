@@ -5037,6 +5037,7 @@ function _alignCaptureRun() {
         if (!known) {
           known = _alignReadOutline();
           if (!known) continue;
+          known.probed = true;
           bubbles.push(known);
         }
         known.textIds.push(texts[i].id);

@@ -717,7 +717,7 @@ function _getAdaptiveSelectionOpenRadius(bounds) {
 // and a marquee taken around a text has holes on its letters: the strip between
 // the text and the outline goes, and the bounds shrink towards the far side of
 // the bubble. `holes` lists the text boxes to fill for the measure.
-function _getAdaptiveOpenedSelectionBounds(bounds, holes) {
+function _getAdaptiveOpenedSelectionBounds(bounds, holes, getTarget) {
   if (!bounds) return bounds;
 
   const radius = _getAdaptiveSelectionOpenRadius(bounds);
@@ -752,6 +752,8 @@ function _getAdaptiveOpenedSelectionBounds(bounds, holes) {
 
       if (candidate && candidate.width * candidate.height >= 200) {
         opened = candidate;
+        const target = getTarget ? getTarget(candidate) : null;
+        if (target) opened = { ...candidate, xMid: target.x, yMid: target.y };
       } else {
         attemptRadius = Math.floor(attemptRadius / 2);
       }
@@ -2087,7 +2089,7 @@ function _checkSelection(options) {
 
   let adjustedSelection = selection;
   if (adaptiveOpen) {
-    adjustedSelection = _getAdaptiveOpenedSelectionBounds(selection, options.holes);
+    adjustedSelection = _getAdaptiveOpenedSelectionBounds(selection, options.holes, options.getTarget);
   } else if (adjustAmount !== 0) {
     adjustedSelection = _getAdjustedSelectionBounds(selection, adjustAmount);
   }
@@ -2470,25 +2472,95 @@ function _createTextLayerInSelection(state) {
 }
 
 // With the lettering hidden, the text's centre has no glyph left to land on
-function _wandBubbleOfActiveText() {
+function _wandBubbleOfActiveText(activeOnly = false) {
   const box = _currentLayerBox();
   if (!box) return;
-  _withoutLettering(() => {
+  const wand = () => {
     try {
       _magicWandAt(box.xMid, box.yMid, _BUBBLE_WAND_TOLERANCE);
     } catch (wandError) {}
-  });
+  };
+  if (!activeOnly) {
+    _withoutLettering(wand);
+    return;
+  }
+  const layerId = _safeActiveLayerId();
+  const visible = get([{ _property: "visible" }, { _ref: "layer", _id: layerId }]).visible;
+  if (visible) _setLayerVisibilityByIds([layerId], false);
+  try {
+    wand();
+  } finally {
+    if (visible) _setLayerVisibilityByIds([layerId], true);
+  }
 }
+
+function _centerWithinTextSize(selection, anchor) {
+  return selection && !selection.error &&
+    Math.abs(selection.xMid - anchor.xMid) <= anchor.width &&
+    Math.abs(selection.yMid - anchor.yMid) <= anchor.height;
+}
+
+function _retryAutomaticCenter(selection, anchor, getTarget) {
+  if (!anchor || _centerWithinTextSize(selection, anchor) || _channelExists(_SAVED_SELECTION_CHANNEL)) return selection;
+  const saved = _saveSelectionState();
+  if (saved.had && !saved.stored) return selection;
+  try {
+    _deselect();
+    _wandBubbleOfActiveText(true);
+    const raw = _liveSelectionBounds();
+    // A neighbouring glyph can select a tiny region with a misleadingly close centre.
+    if (!raw || raw.width < anchor.width || raw.height < anchor.height) return selection;
+    const alternative = _checkSelection({ adaptiveOpen: true, getTarget });
+    return _centerWithinTextSize(alternative, anchor) ? alternative : selection;
+  } finally {
+    _restoreSelectionState(saved, false);
+  }
+}
+
+
+function _centerOpenedOutline(bounds, anchor) {
+  const page = _bubbleDocumentSize();
+  if (!page || bounds.width * bounds.height >= page.width * page.height * 0.25) return null;
+  const workPath = [{ _ref: "path", _property: "workPath" }];
+  try {
+    const existing = get(workPath);
+    if (existing && existing.pathContents) return null;
+  } catch (noWorkPath) {
+    // Photoshop reports a missing work path as an action error.
+  }
+  try {
+    const outline = _alignReadOutline();
+    if (!outline) return null;
+    const { _splitOutlineAtCusps } = require("../../app_src/bubbleGeometry.jsxinc");
+    const { subpathsFromDescriptor } = require("../../app_src/oneClick/bubblePlan");
+    const { contains, flatten } = require("../../app_src/oneClick/geometry");
+    const resolution = _bubbleDocumentResolution();
+    const contours = subpathsFromDescriptor(outline.rawPath, resolution).filter(part => part.closed);
+    const polygons = contours.map(part => flatten(part.contour));
+    const target = _splitOutlineAtCusps(polygons, anchor);
+    return target && _containsPoint(bounds, target.x, target.y) &&
+      polygons.some(polygon => contains(polygon, target)) ? target : null;
+  } catch (outlineError) {
+    return null;
+  } finally {
+    try { play({ _obj: "delete", _target: workPath }); } catch (noTemporaryWorkPath) {}
+  }
+}
+
 
 function _alignCurrentTextLayerToSelection(state) {
   if (!_layerIsTextLayer()) return "layer";
 
   // The chamber of a double or triple bubble the panel found for this text
-  let selection = (state.placements && state.placements["id" + _safeActiveLayerId()]) || _checkSelection({ adaptiveOpen: true, holes: [_currentLayerBox()] });
-  if (selection.error) {
+  let selection = state.placements && state.placements["id" + _safeActiveLayerId()];
+  if (!selection) {
+    const anchor = _currentLayerBox();
+    const getTarget = anchor ? (bounds) => _centerOpenedOutline(bounds, anchor) : null;
+    selection = _checkSelection({ adaptiveOpen: true, holes: [anchor], getTarget });
     if (selection.error === "noSelection") {
       _wandBubbleOfActiveText();
-      selection = _checkSelection({ adaptiveOpen: true });
+      selection = _checkSelection({ adaptiveOpen: true, getTarget });
+      if (!state.resize) selection = _retryAutomaticCenter(selection, anchor, getTarget);
     }
     if (selection.error) return selection.error;
   }
@@ -3231,6 +3303,7 @@ function _alignCaptureRun() {
         if (!known) {
           known = _alignReadOutline();
           if (!known) return;
+          known.probed = true;
           bubbles.push(known);
         }
         known.textIds.push(text.id);

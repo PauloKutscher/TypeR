@@ -162,6 +162,9 @@ export const planAlignment = (capture, readingOrder, optical = true) => {
       // still need Smart Paste's reading-order assignment to separate them.
       const split = keepReadingOrder ? null : _splitOutlineAtCusps(polygons, text.box);
       if (!chambers && !split && texts.length > 1) return;
+      // An automatic outline can touch the text without enclosing its centre.
+      // A cusp cut then chooses a side of a different bubble. Let the host probe again.
+      if (!chambers && split && bubble.probed && !polygons.some((polygon) => contains(polygon, centreOf(text.box)))) return;
       const centroid = split || (!chambers ? _polygonCentroid(polygons) : null);
       const rect = chambers ? rectOf(chambers[assigned[i]].selection) : rectOf({
         ...input.selectionBounds,
@@ -179,10 +182,12 @@ export const planAlignment = (capture, readingOrder, optical = true) => {
         const outline = chamber ? chamber.cleanPolygon : !split && polygons.length === 1 ? polygons[0] : null;
         const target = bodyCentre(outline, !!chamber);
         const limit = Math.min(rect.width, rect.height) * 0.05;
-        if (target && Math.hypot(target.x - rect.xMid, target.y - rect.yMid) <= limit &&
+        const distance = target ? Math.hypot(target.x - rect.xMid, target.y - rect.yMid) : 0;
+        if (target && distance <= limit &&
             target.x >= rect.left && target.x <= rect.right && target.y >= rect.top && target.y <= rect.bottom) {
-          rect.xMid = (rect.xMid + target.x) / 2;
-          rect.yMid = (rect.yMid + target.y) / 2;
+          const weight = distance >= 2 ? 1 : 0.5;
+          rect.xMid += (target.x - rect.xMid) * weight;
+          rect.yMid += (target.y - rect.yMid) * weight;
         }
       }
       placed[text.id] = true;

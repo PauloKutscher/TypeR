@@ -1,3 +1,4 @@
+import { bodyCentre } from "./bodyCentre";
 // Smart paste layout: measure the translation's words natively, search the
 // best lines inside the bubble polygon, verify the chosen lines with exact
 // native measurements, and compose the Photoshop text parameters. Ported
@@ -452,7 +453,41 @@ export const planText = async (plan, payload, context) => {
   }
   if (!found) throw new NoPlacementError();
   const { graph, pass } = found;
-  const composed = composeText(graph, pass.best.choice, page, payload.autoWrap ? plan.selection : null);
+  const choice = { ...pass.best.choice, lines: pass.best.choice.lines.map(line => ({ ...line })) };
+  if (!payload.autoWrap && plan.source === "wand") {
+    const lines = pass.best.candidate.lines;
+    const left = Math.min(...lines.map(({ edge }) => edge.metric.left * choice.size));
+    const right = Math.max(...lines.map(({ edge }) => edge.metric.right * choice.size));
+    const inkX = choice.axis + (left + right) / 2;
+    const inkY = (pass.best.candidate.top + pass.best.candidate.bottom) / 2;
+    let axis = choice.axis;
+    let dy = 0;
+    if (!plan.connected) {
+      axis = plan.selection.xMid - (left + right) / 2;
+    } else if (plan.neck && !plan.triple && (!plan.necks || plan.necks.length === 1)) {
+      const optical = bodyCentre(plan.cleanPolygon, true);
+      if (optical) {
+        const [a, b] = plan.neck;
+        const x = (a[0] + b[0]) / 2 - plan.selection.xMid;
+        const y = (a[1] + b[1]) / 2 - plan.selection.yMid;
+        const distance = Math.hypot(x, y);
+        // Only retain the optical correction when it moves toward the shared neck.
+        const toward = distance > 0 ? ((optical.x - inkX) * x + (optical.y - inkY) * y) / distance : 0;
+        const limit = Math.min(plan.selection.width, plan.selection.height) * 0.05;
+        if (toward > 0.5 && toward <= limit) {
+          axis += toward * x / distance;
+          dy = toward * y / distance;
+        }
+      }
+    }
+    if (Math.hypot(axis - choice.axis, dy) > 0.5 && lines.every(({ edge, baseline }) =>
+      solverInternals.fitsExactBand(pass.model.poly, edge.metric, choice.size, baseline + dy, axis, pass.model.opts.pad)
+    )) {
+      choice.axis = axis;
+      choice.lines.forEach(line => { line.baseline += dy; });
+    }
+  }
+  const composed = composeText(graph, choice, page, payload.autoWrap ? plan.selection : null);
   return {
     params: composed.params,
     renderedText: composed.renderedText,
